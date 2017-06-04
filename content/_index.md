@@ -1,0 +1,1 @@
+This site is a compendium of R code meant to highlight the various uses of simulation to aid in the understanding of probability, statistics, and study design. I will frequently draw on examples using my R package `simstudy`. Occasionally, I will opine on other topics related to causal inference, evidence, and research more generally.
