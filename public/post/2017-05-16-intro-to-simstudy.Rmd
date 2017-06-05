@@ -1,0 +1,253 @@
+---
+title: It can be easy to explore data generating mechanisms with the simstudy package
+author: []
+date: '2017-05-16'
+slug: intro-to-simstudy
+categories: []
+tags: []
+subtitle: ''
+---
+
+<STYLE TYPE="text/css">
+<!--
+  td{
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 2px;
+    padding:0px;
+    cellpadding="0";
+    cellspacing="0";
+    text-align: center;
+  }
+  th {
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+  table { 
+    border-spacing: 0px;
+    border-collapse: collapse;
+  }
+--->
+</STYLE>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(simstudy)
+library(ggplot2)
+library(scales)
+library(grid)
+library(gridExtra)
+library(survival)
+library(geepack)
+
+```
+I learned statistics and probability by simulating data. Sure, I did the occasional proof, but I never believed the results until I saw it in a simulation. I guess I have it backwards, but I that's just the way I am. And now that I am a so-called professional, I continue to use simulation to understand models, to do sample size estimates and power calculations, and of course to teach. Sure - I'll use the occasional formula when one exists, but I always feel the need to check it with simulation. It's just the way I am.
+
+Since I found myself constantly setting up simulations, over time I developed ways to make the process a bit easier. Those processes turned into a package, which I called <a href = https://cran.r-project.org/web/packages/simstudy/index.html>simstudy</a>, which obviously means *simulating study data*. The purpose here in this blog entyr is to introduce the basic idea behind simstudy, and provide a relatively brief example that actually comes from a question a user posed about generating correlated longitudinal data.
+
+## The basic idea
+
+Simulation using simstudy has two primary steps. First, the user defines the data elements of a data set either in an external csv file or internally through a set of repeated definition statements. Second, the user generates the data, using these definitions. Data generation can be as simple as a cross-sectional design or prospective cohort design, or it can be more involved, extending to allow simulators to generate observed or randomized *treatment assignment/exposures*, *survival* data, *longitudinal/panel* data, *multi-level/hierarchical* data, datasets with *correlated variables* based on a specified covariance structure, and to data sets with *missing* data based on a variety of missingness patterns.
+
+The key to simulating data in simstudy is the creation of series of data defintion tables that look like this:
+```{r,  echo=FALSE}
+def <- defData(varname = "nr", dist = "nonrandom", formula=7, id = "idnum")
+def <- defData(def,varname="x1", dist="uniform", formula="10;20")
+def <- defData(def,varname="y1", formula="nr + x1 * 2", variance=8)
+def <- defData(def,varname="y2", dist="poisson", formula="nr - 0.2 * x1",link="log")
+def <- defData(def,varname="xCat",formula = "0.3;0.2;0.5", dist="categorical")
+def <- defData(def,varname="g1", dist="gamma", formula = "5+xCat", variance = 1, link = "log")
+def <- defData(def, varname = "a1", dist = "binary" , formula="-3 + xCat", link="logit")
+
+knitr::kable(def)
+```
+
+Here's the code that is used to generate this definition, which is stored as a <a href = https://github.com/Rdatatable/data.table/wiki>data.table </a>:
+```{r, tidy = TRUE}
+def <- defData(varname = "nr", dist = "nonrandom", formula=7, id = "idnum")
+def <- defData(def,varname="x1",dist="uniform",formula="10;20")
+def <- defData(def,varname="y1",formula="nr + x1 * 2",variance=8)
+def <- defData(def,varname="y2",dist="poisson",formula="nr - 0.2 * x1",link="log")
+def <- defData(def,varname="xCat",formula = "0.3;0.2;0.5",dist="categorical")
+def <- defData(def,varname="g1", dist="gamma", formula = "5+xCat", variance = 1, link = "log")
+def <- defData(def, varname = "a1", dist = "binary" , formula="-3 + xCat", link="logit")
+```
+
+To create a simple data set based on these definitions, all one needs to do is execute a single `genData` command. In this example, we generate 500 records that are based on the definition in the `def`table:
+```{r, tidy = TRUE}
+dt <- genData(500, def)
+
+dt
+```
+
+There's a lot more functionality in the package, and I'll be writing about that in the future. But here, I just want give a little more introduction by way of an example that came in from around the world a couple of days ago. (I'd say the best thing about building a package is hearing from folks literally all over the world and getting to talk to them about statistics and R. It is really incredible to be able to do that.)
+
+## Going a bit further: simulating a prosepctive cohort study with repeated measures
+
+The question was, can we simulate a study with two arms, say a control and treatment, with repeated measures at three time points: baseline, after 1 month, and after 2 months? Of course. 
+
+This was what I sent back to my correspondent:
+```{r, tidy = TRUE}
+
+# Define the outcome
+
+ydef <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T", variance = 3)
+
+# Generate a "blank" data.table with 24 observations and assign them to groups
+
+set.seed(1234)
+
+indData <- genData(24)
+indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
+
+# Create a longitudinal data set of 3 records for each id
+
+longData <- addPeriods(indData, nPeriods = 3, idvars = "id")
+longData <- addColumns(dtDefs = ydef, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+
+# Let's look at the data
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + 
+  geom_line(aes(color = T, group = id)) +
+  scale_color_manual(values = c("#e38e17", "#8e17e3")) +
+  xlab("Time")
+```
+```{r, tidy = TRUE, include=FALSE}
+
+# Define the outcome
+
+
+# Generate a "blank" data.table with 24 observations and assign them to groups
+
+indData <- genData(1000)
+indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
+
+# Create a longitudinal data set of 3 records for each id
+
+longData <- addPeriods(indData, nPeriods = 3, idvars = "id")
+longData <- addColumns(dtDefs = ydef, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+```
+If we generate a data set based on 1,000 indviduals and estimate a linear regression model we see that the parameter estimates are quite good. However, my correspondent wrote back saying she wanted correlated data, which makes sense. We can see from the alpha estimate of approximately 0.02 (at the bottom of the output), we don't have much correlation:
+```{r, tidy = TRUE, include=TRUE}
+# Fit a GEE model to the data
+
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family= gaussian(link= "identity"),
+               data=longData, id=id, corstr = "exchangeable") 
+summary(fit)
+```
+## One way to generate correlated data
+
+The first way to approach this is to use the simstudy function `genCorData` to generate correlated errors that are normally distributed with mean 0, variance of 3, and and common correlation coeffcient of 0.7. This approach is a bit mysterious, because we are acknowledging that we don't know what is driving the relationship between the three outcomes, just that they have a common cause.
+
+```{r, tidy = TRUE, include=TRUE}
+
+# define the outcome
+ydef <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + e")
+
+# define the correlated errors
+
+mu <- c(0, 0, 0)
+sigma <- rep(sqrt(3), 3)
+
+# generate correlated data for each id and assign treatment
+
+dtCor <- genCorData(24, mu = mu, sigma = sigma, rho = .7, corstr = "cs")
+dtCor <- trtAssign(dtCor, nTrt = 2, balanced = TRUE, grpName = "T")
+
+# create longitudinal data set and generate outcome based on definition
+
+longData <- addPeriods(dtCor, nPeriods = 3, idvars = "id", timevars = c("V1","V2", "V3"), timevarName = "e")
+longData <- addColumns(ydef, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+
+# look at the data, outcomes should appear more correlated, lines a bit straighter
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + 
+  geom_line(aes(color = T, group = id)) +
+  scale_color_manual(values = c("#e38e17", "#8e17e3")) +
+  xlab("Time")
+```
+
+
+```{r, tidy = TRUE, include=FALSE}
+
+# generate correlated data for each id and assign treatment
+
+dtCor <- genCorData(1000, mu = mu, sigma = sigma, rho = .7, corstr = "cs")
+dtCor <- trtAssign(dtCor, nTrt = 2, balanced = TRUE, grpName = "T")
+
+# Create longitudinal data set and generate outcome based on definition
+
+longData <- addPeriods(dtCor, nPeriods = 3, idvars = "id", timevars = c("V1","V2", "V3"), timevarName = "e")
+longData <- addColumns(ydef, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+
+```
+
+
+Again, we recover the true parameters. And this time, if we look at the estimated correlation, we see that indeed the outcomes are correlated within each indivdual. The estimate is 0.77, close to the our specified value of 0.7.
+```{r, tidy = TRUE, include=TRUE}
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family = gaussian(link= "identity"),
+               data = longData, id = id, corstr = "exchangeable")
+
+summary(fit)
+```
+
+## Another way to generate correlated data
+
+A second way to generate correlatd data is through an individual level random-effect or random intercept. This could be considered some unmeasured characteristic of the individuals (which happens to have a convenient normal distribution with mean zero). This random effect contributes equally to all instances of an individuals outcomes, but the outcomes for a particular individual deviate slightly from the hypothetical straight line as a result of unmeasured noise.
+
+```{r, tidy = TRUE, include=TRUE}
+ydef1 <- defData(varname = "randomEffect", dist = "normal", formula = 0, variance = sqrt(3))
+ydef2 <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", variance = 1)
+
+indData <- genData(24, ydef1)
+indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
+
+indData[1:6]
+
+longData <- addPeriods(indData, nPeriods = 3, idvars = "id")
+longData <- addColumns(dtDefs = ydef2, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + 
+  geom_line(aes(color = T, group = id)) +
+  scale_color_manual(values = c("#e38e17", "#8e17e3")) +
+  xlab("Time")
+```
+
+```{r, tidy = TRUE, include=FALSE}
+ydef1 <- defData(varname = "randomEffect", dist = "normal", formula = 0, variance = sqrt(3))
+ydef2 <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", variance = 1)
+
+indData <- genData(1000, ydef1)
+indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
+
+indData[1:6]
+
+longData <- addPeriods(indData, nPeriods = 3, idvars = "id")
+longData <- addColumns(dtDefs = ydef2, longData)
+
+longData[, T := factor(T, labels = c("No", "Yes"))]
+```
+
+```{r, tidy = TRUE, include=TRUE}
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family= gaussian(link= "identity"),
+               data = longData, id = id, corstr = "exchangeable")
+summary(fit)
+```
+
+
+I sent all this back to my correspondent, but I haven't heard yet if it is what she wanted. I certainly hope so. If there are specific topics you'd like me to discuss related to simstudy, definitely get in touch, and I will try to write something up.
+
