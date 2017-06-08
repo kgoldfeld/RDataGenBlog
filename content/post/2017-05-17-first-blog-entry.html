@@ -9,7 +9,7 @@ tags: []
 
 
 
-<p>It goes without saying that there are always many ways to solve a problem in R, but clearly some ways are better (for example, faster) than others. Recently, I found myself in a situation where I could not find a way to avoid using a loop, and I was immediately concerned, knowding that I would want this code to be flexible enough to run with a very large number of observations, possibly over many observations. Two tools immediately came to mind: <a href = https://github.com/Rdatatable/data.table/wiki>data.table </a> and <a href = http://adv-r.had.co.nz/Rcpp.html>Rcpp </a>. This brief description explains the background of the simulation problem I was working on and walks through the evolution of ideas to address the problems I ran into when I tried to simulate a large number of inviduals. In particular, when I tried to simulate a very large number of individuals, say over 1 million, running the simulation over night wasn’t enough.</p>
+<p>It goes without saying that there are always many ways to solve a problem in R, but clearly some ways are better (for example, faster) than others. Recently, I found myself in a situation where I could not find a way to avoid using a loop, and I was immediately concerned, knowing that I would want this code to be flexible enough to run with a very large number of observations, possibly over many observations. Two tools immediately came to mind: <a href = https://github.com/Rdatatable/data.table/wiki>data.table </a> and <a href = http://adv-r.had.co.nz/Rcpp.html>Rcpp </a>. This brief description explains the background of the simulation problem I was working on and walks through the evolution of ideas to address the problems I ran into when I tried to simulate a large number of inviduals. In particular, when I tried to simulate a very large number of individuals, say over 1 million, running the simulation over night wasn’t enough.</p>
 <div id="setting-up-the-problem" class="section level2">
 <h2>Setting up the problem</h2>
 <p>The task in question here is not the focus, but needs a little explanation to understand what is motivating the programming issue. I am conducting a series of simulations that involve generating an individual-level stochastic (Markov) process for any number of individuals. For the data generation, I am using the <a href = https://cran.r-project.org/web/packages/simstudy/index.html>simstudy</a> package developed to help facilitate simulated data.</p>
@@ -133,7 +133,7 @@ dt</code></pre>
 <pre class="r"><code>system.time(dt[, cohort1 := rAssignCohortID(id, month, status, event, 
                     nInds = N, startMonth = 13, thresholdNum = 2)])</code></pre>
 <pre><code>##    user  system elapsed 
-##  12.058   0.172  12.658</code></pre>
+##  12.555   0.180  13.256</code></pre>
 <p>The naïve approach works, but can we do better? I thought <strong>Rcpp</strong> might be a solution, because we know that loops in C++ are much more efficient. However, things did not turn out so well after I translated the function into C++; in fact, they got a little worse.</p>
 <pre class="cpp"><code>#include &lt;Rcpp.h&gt;
 
@@ -190,7 +190,7 @@ IntegerVector cAssignCohortID( IntegerVector id,
 <pre class="r"><code>system.time(dt[, cohort2 := cAssignCohortID(id, month, status, event, 
                     nInds = N, startMonth = 13, thresholdNum = 2)])</code></pre>
 <pre><code>##    user  system elapsed 
-##  12.489   0.232  13.366</code></pre>
+##  12.405   0.140  12.886</code></pre>
 <p>I know that the function <code>cAssignCohortID</code> bogs down not in the loop, but in each phase where I need to subset the data set to work on a single <code>id</code>. For example, I need to execute the statement <code>idMonth = month[id == j+1]</code> for each <code>id</code>, and this apparently uses a lot of resources. I tried variations on this theme, alternatives to subset the data set within the Rcpp function, but could get no improvements.</p>
 <p>But a light bulb went off in my head (dim as it might be), telling me that this is one of the many things <code>data.table</code> is particularly good at. In fact, I used this trick earlier in generating the stochastic process data. So, rather than subsetting the data within the function, I created a regular R function that handles only a single individual <code>id</code> at a time, and let <code>data.table</code> do the hard work of splitting up the data set to process by individual.</p>
 <p>As you can see, things got markedly faster.</p>
@@ -228,7 +228,7 @@ IntegerVector cAssignCohortID( IntegerVector id,
                     nInds = N, startMonth = 13, thresholdNum = 2), 
                keyby=id])</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.133   0.005   0.142</code></pre>
+##   0.150   0.009   0.171</code></pre>
 <p>Finally, it occurred to me that an <code>Rcpp</code> function that is not required to subset the data might offer more yet improvements in speed. So, for the last iteration, I combined the strengths of looping in <code>Rcpp</code> with the strengths of subsetting in <code>data.table</code> to create a formidable combination. (Even when sample sizes exceed 1 million, the data are generated in a flash.)</p>
 <pre class="cpp"><code>#include &lt;Rcpp.h&gt;
 
@@ -271,7 +271,7 @@ int cAssignCohort( IntegerVector month,
 <pre class="r"><code>system.time(dt[, cohort4 := cAssignCohort(month, status, event, 
                                startMonth=13,  thresholdNum = 2), keyby=id])</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.028   0.004   0.035</code></pre>
+##   0.029   0.004   0.035</code></pre>
 <p>For a more robust comparison, let’s use the <code>benchmark</code> function in package <code>rbenchmark</code>, and you can see how well <code>data.table</code> performs and how much <code>Rcpp</code> can add when used efficiently.</p>
 <pre class="r"><code>library(rbenchmark)
 
@@ -287,10 +287,10 @@ benchmark(
     replications = 5,
     columns = c(&quot;replications&quot;, &quot;elapsed&quot;, &quot;relative&quot;))</code></pre>
 <pre><code>##   replications elapsed relative
-## 1            5  57.147  519.518
-## 2            5  94.513  859.209
-## 3            5   0.696    6.327
-## 4            5   0.110    1.000</code></pre>
+## 1            5  52.578  395.323
+## 2            5  66.528  500.211
+## 3            5   0.752    5.654
+## 4            5   0.133    1.000</code></pre>
 </div>
 <div id="postscript" class="section level2">
 <h2>Postscript</h2>
@@ -310,7 +310,7 @@ benchmark(
 
 system.time(dtfunc(dt))</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.174   0.010   0.193</code></pre>
+##   0.195   0.011   0.210</code></pre>
 <p>And here is a more complete comparison of the fastest version with this additional approach:</p>
 <pre class="r"><code>benchmark(
   dt[, cohort6 := cAssignCohort(month, status, event,   # combined data.table/Rcpp
@@ -319,6 +319,6 @@ system.time(dtfunc(dt))</code></pre>
   replications = 5,
   columns = c(&quot;replications&quot;, &quot;elapsed&quot;, &quot;relative&quot;))</code></pre>
 <pre><code>##   replications elapsed relative
-## 1            5   0.121    1.000
-## 2            5   0.959    7.926</code></pre>
+## 1            5   0.112    1.000
+## 2            5   0.899    8.027</code></pre>
 </div>
