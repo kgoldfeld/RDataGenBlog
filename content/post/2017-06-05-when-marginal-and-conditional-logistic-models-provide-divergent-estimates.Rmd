@@ -1,0 +1,376 @@
+---
+title: When marginal and conditional logistic model estimates diverge
+author: Keith Goldfeld
+date: '2017-06-08'
+slug: marginal-v-conditional
+categories: []
+tags: [R]
+subtitle: ''
+header-includes:
+  - \usepackage{amsmath}
+---
+
+<STYLE TYPE="text/css">
+<!--
+  td{
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 2px;
+    padding:0px;
+    cellpadding="0";
+    cellspacing="0";
+    text-align: center;
+  }
+  th {
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+  table { 
+    border-spacing: 0px;
+    border-collapse: collapse;
+  }
+--->
+</STYLE>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, fig.align = 'center', warning = FALSE)
+options(width=40)
+library(MASS,warn.conflicts = FALSE)
+library(tiff,warn.conflicts = FALSE)
+library(gridExtra,warn.conflicts = FALSE)
+library(lme4,quietly=TRUE,warn.conflicts = FALSE)
+library(Hmisc,quietly=TRUE)
+library(data.table)
+library(ksgMisc)
+library(simstudy)
+
+my_theme <- function() {
+  theme(
+    panel.background = element_rect(colour = "black", fill = "grey95"),
+    axis.ticks =  element_line(colour = "black"),
+    panel.spacing = unit(0.25, "lines"),  # requires package grid
+    plot.title = element_text(size = 12,vjust=.5,hjust=0),
+    panel.border = element_rect(fill = NA, colour="gray90"),
+    panel.grid.major=element_blank(),
+    panel.grid.minor=element_blank()
+  )
+}
+
+makeplot <- function(corr,r,n) {
+  mu <- rep(0,r)
+  Sigma <- matrix(corr, nrow=r, ncol=r) + diag(r)*(1-corr)  # must add to 1
+  rawvars <- mvrnorm(n=n, mu=mu, Sigma=Sigma)
+
+  pvars <- pnorm(rawvars)             
+  dt.pvars <- data.table(id=1:n,pvars)
+
+  dt=melt(dt.pvars,
+        id.vars=c("id"),
+        variable.factor=TRUE,
+        variable.name="t",
+        value.name="q")
+
+  dt=dt[,time:=as.integer(t)]  # create time variable
+  setkey(dt,id)
+
+  dt=dt[,mu:=exp(2.7+time*0.2)]  # generate mean
+  dt=dt[,y:=qpois(q,mu)]  # generate outcome
+  
+  corrtext = paste0("rho","~=~",corr)
+  
+  rho = function(Corr) {
+      eq <- substitute(rho~"="~corr, 
+         list(corr = format(Corr, digits = 3, nsmall=2)))
+      as.character(as.expression(eq))              
+  }
+
+  p <- ggplot(aes(x=time,y=y,group=id),data=dt) + 
+    geom_line() +
+    ylab("Outcome (Poisson distribution)") +
+    xlab("Time") +
+    ylim(0,50)+
+    geom_text(data = NULL, x = 1.5, y = 45, 
+              label = rho(corr), 
+              size=5,
+              parse=TRUE) +
+    my_theme()
+  
+  return(p)
+}
+```
+Say we have an intervention that is assigned at a group or cluster level but the outcome is measured at an individual level (e.g. students in different schools, eyes on different individuals). And, say this outcome is binary; that is, something happens, or it doesn't. (This is important, because none of this is true if the outcome is continuous and at close to normally distributed.) If we want to measure the *effect* of the intervention - perhaps the risk difference, risk ratio, or odds ratio - it can really matter if we are interested in the *marginal* effect or the *conditional* effect, because there is a good chance they won't be the same. My aim here is simply to show this difference visually, as well do an exercise in data simulation.
+
+Below we have a series of plots with three distinct elements. The grey lines represent patient-level probabilities within a cluster that are a function of some patient-level characteristic (say age) and a cluster-specific tendency. We can see that in all cases the probabilities increase with age. However, we can see that for a particular age there can be quite a range of probabilities - this is the across-cluster variability. This can be read by going up vertically from the age (x) axis. So in the top plot, at age 0 (say age is normalized by the mean age), the probablities of the outcome across the clusters range from almost 0% to almost 100%.
+
+The black lines represent the probability curve for the average cluster, for which the cluster-level effect is essentially 0. (For other clusters, the cluster-level effects are typically assume to be scattered around 0, or more specifically normally distributed around 0, with some level of unknown variance.) This black line is the *conditional* probability (conditional on the cluster).
+
+The red line shows the average of the outcome probability across all the clusters at each age. This is the *marginal* average line. (The is really more conceptual than real, because these drawings assume that the number of individuals per cluster is the same, and that distribution across ages is uniform; the point is not to be real but to show graphically sort of what is going on.)
+
+In the two sets of plots, the top plot represents the probabilities for clusters under the intervention, the middle plot represents the probabilities for clusters under control (you can think of these as potential probabilities if you are familiar with the *causal inference* framework, but that is a whole other thing), and the bottom plot is the difference between the top two figures, which represents the treatment effects as risk differences.
+
+Now, take a look at the plots. The key thing to notice is that in the first scenario the red (marginal) and black (conditional) lines diverge, whereas in the second scenario, they pretty much overlap. The difference between the two scenarios? Between cluster variation.
+
+### Substantial heterogeneity
+
+```{r plot1gee, echo=FALSE , fig.width = 4.5, fig.height = 6.5}
+set.seed(333)
+n=100
+b0 = -2
+b1 = .5
+b2 = 2
+b3 = .5
+T = seq(-4,4,by=.1)
+nT = length(T)
+alpha = rnorm(n,0,2)
+
+dt.ind <- data.table(id=1:n,b0,b1,b2,b3,alpha)
+dt <- data.table(id=rep((1:n),each=nT),T=rep(T,n), key="id")
+
+dt = dt[dt.ind]
+
+dt <- dt[,logit.t:=alpha+b0+b1+T*b2+b3]
+dt <- dt[,logit.c:=alpha+b0+T*b2]
+dt <- dt[,expit.t:=1/(1+exp(-logit.t))]
+dt <- dt[,expit.c:=1/(1+exp(-logit.c))]
+
+dt.mean = dt[,list(logit.t=mean(logit.t),logit.c=mean(logit.c)),by=T]
+dt.mean <- dt.mean[,expit.t:=1/(1+exp(-logit.t))]
+dt.mean <- dt.mean[,expit.c:=1/(1+exp(-logit.c))]
+
+dt.mean$alt.t = dt[,list(expit=mean(expit.t)),by=T]$expit
+dt.mean$alt.c = dt[,list(expit=mean(expit.c)),by=T]$expit
+dt.mean$id = 999
+
+dt.mean <- dt.mean[,effect:=expit.t-expit.c]
+dt.mean <- dt.mean[,effect.alt:=alt.t-alt.c]
+
+p1 <- ggplot(aes(x=T,y=expit.t,group=id),data=dt) + 
+  geom_line(color="grey")+
+  geom_line(aes(x=T,y=expit.t),data=dt.mean,size=1.5) +
+  geom_line(aes(x=T,y=alt.t),data=dt.mean,size=1.5,color="red") +
+  ggtitle("Intervention group") +
+  xlab("Age") +
+  ylab("Probability") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+p2 <- ggplot(aes(x=T,y=expit.c,group=id),data=dt) + 
+  geom_line(color="grey")+
+  geom_line(aes(x=T,y=expit.c),data=dt.mean,size=1.5) +
+  geom_line(aes(x=T,y=alt.c),data=dt.mean,size=1.5,color="red") +
+  ggtitle("Control group") +
+  xlab("Age") +
+  ylab("Probability") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+p3 <- ggplot(aes(x=T,y=effect),data=dt.mean) + 
+  geom_line(size=1.5)+
+  geom_line(aes(x=T,y=effect.alt),data=dt.mean,color="red", size=1.5) +
+  ggtitle("Effect size (difference)") +
+  ylab("Effect") +
+  xlab("Age") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+grid.arrange(p1,p2,p3,nrow=3)
+```
+
+
+## Not so much heterogeneity
+
+```{r plot2gee, echo=FALSE, fig.width = 4.5,fig.height = 6.5}
+set.seed(333)
+n=100
+b0 = -2
+b1 = .5
+b2 = 2
+b3 = .5
+T = seq(-4,4,by=.1)
+nT = length(T)
+alpha = rnorm(n,0,.4)
+
+dt.ind <- data.table(id=1:n,b0,b1,b2,b3,alpha)
+dt <- data.table(id=rep((1:n),each=nT),T=rep(T,n), key="id")
+
+dt = dt[dt.ind]
+
+dt <- dt[,logit.t:=alpha+b0+b1+T*b2+b3]
+dt <- dt[,logit.c:=alpha+b0+T*b2]
+dt <- dt[,expit.t:=1/(1+exp(-logit.t))]
+dt <- dt[,expit.c:=1/(1+exp(-logit.c))]
+
+dt.mean = dt[,list(logit.t=mean(logit.t),logit.c=mean(logit.c)),by=T]
+dt.mean <- dt.mean[,expit.t:=1/(1+exp(-logit.t))]
+dt.mean <- dt.mean[,expit.c:=1/(1+exp(-logit.c))]
+
+dt.mean$alt.t = dt[,list(expit=mean(expit.t)),by=T]$expit
+dt.mean$alt.c = dt[,list(expit=mean(expit.c)),by=T]$expit
+dt.mean$id = 999
+
+dt.mean <- dt.mean[,effect:=expit.t-expit.c]
+dt.mean <- dt.mean[,effect.alt:=alt.t-alt.c]
+
+p1 <- ggplot(aes(x=T,y=expit.t,group=id),data=dt) + 
+  geom_line(color="grey")+
+  geom_line(aes(x=T,y=expit.t),data=dt.mean,size=1.5) +
+  geom_line(aes(x=T,y=alt.t),data=dt.mean,size=1.5,color="red") +
+  ggtitle("Intervention group") +
+  xlab("Age") +
+  ylab("Probability") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+p2 <- ggplot(aes(x=T,y=expit.c,group=id),data=dt) + 
+  geom_line(color="grey")+
+  geom_line(aes(x=T,y=expit.c),data=dt.mean,size=1.5) +
+  geom_line(aes(x=T,y=alt.c),data=dt.mean,size=1.5,color="red") +
+  ggtitle("Control group") +
+  xlab("Age") +
+  ylab("Probability") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+p3 <- ggplot(aes(x=T,y=effect),data=dt.mean) + 
+  geom_line(size=1.5)+
+  geom_line(aes(x=T,y=effect.alt),data=dt.mean,color="red", size=1.5) +
+  ggtitle("Effect size (difference)") +
+  ylab("Effect") +
+  xlab("Age") +
+  geom_vline(lty=3, xintercept = .8) +
+  my_theme()
+
+grid.arrange(p1,p2,p3,nrow=3)
+```
+
+### Simulating data and comparing model fits
+
+We can use a simpler set of scenarios (by ignoring any individual-level factors) to see how this variation in variation plays out in estimation. Using `simstudy` functions to define and generate the data from a random intercept model, we see what happens under two different scenarios. In the first scenario, we introduce large amounts variance across the cluster specific averages - so that $var(\alpha_i)$ is relatively high. In the second, we set $var(\alpha_i)$ close to 0.
+
+This is the simple underlying data generating model:
+
+$$ log\left[\frac{P(Y_i)}{1-P(Y_i)}\right] = \alpha_i + \beta_1*Trt_i$$
+
+In the code below, clusters are generated along with cluster-level effects (with either high or low variance) and group assignments (treatment group = 1 for the intervention, 0 otherwise). Individuals are generated within clusters with outcome probabilities that are a function of the cluster specific effect and the cluster's group assignment. In the last step, individual-level outcomes are generated based on each individual's outcome probability. All of this was implemented in a single function. After generating the data, I fit a generalized linear mixed effects model (from package `lme4`) and a generalized estimating equation model (from package `gee`) to compare the marginal and conditional models.
+
+```{r, echo = TRUE}
+library(lme4)
+library(gee)
+library(gridExtra)
+library(simstudy)
+
+genFunc <- function(nClusters, effVar) {
+  
+  # Define the data definitions for cluster and individual level data
+  
+  def1 <- defData(varname = "clustEff", formula = 0, variance = effVar, id = "cID")
+  def1 <- defData(def1, varname = "nInd", formula = 40, dist = "noZeroPoisson")
+  
+  def2 <- defDataAdd(varname = "Y", formula = "-2 + 2*grp + clustEff", 
+                       dist = "binary", link = "logit")
+  
+  # Generate cluster level data
+  
+  dtC <- genData(nClusters, def1)
+  dtC <- trtAssign(dtC, grpName = "grp")
+  
+  # Generate individual level data
+  
+  dt <- genCluster(dtClust = dtC, cLevelVar = "cID", numIndsVar = "nInd", 
+                      level1ID = "id")
+  dt <- addColumns(def2, dt)
+  
+  return(dt)
+  
+}
+```
+
+### Lots of variability
+```{r, echo=TRUE, results = FALSE, message = FALSE}
+set.seed(123)
+dt1 <- genFunc(100, 1)
+
+glmerFit1 <- glmer(Y ~ grp + (1 | cID), data = dt1, family="binomial")
+  
+geeFit1 <- gee(Y ~ grp, family = binomial, data = dt1, 
+                   corstr = "exchangeable", id = dt1$cID)
+
+```
+
+```{r, echo=FALSE, message = FALSE}
+# library(stargazer) # results="asis"
+# 
+# stargazer(glmerFit, geeFit, glmerFit2, geeFit2, 
+#           type = "html", 
+#           style = "ajps",
+#           title = "Comparison of models",
+#           dep.var.labels=c("Lots of variability","Not so much variability"),
+#           object.names = FALSE,
+#           omit.table.layout = c("sn"),
+#           digits = 2,
+#           ci = TRUE,
+#           font.size = "small",
+#           star.char = "",
+#           model.numbers = FALSE
+# )
+
+d1 <- round(rbind(
+  unname(fixef(glmerFit1)),
+  unname(coef(geeFit1))
+),2)
+
+d1 <- data.frame(d1)
+names(d1) <- c("Intercept", "Grp")
+row.names(d1) <- c("GLMM", "GEE")
+
+d1
+```
+
+In this scenario, the marginal model estimate of the average treatment effect (on the log-odds scale) is considerably lower than the true conditional model, 1.63 vs 1.89.
+
+### Very little variability
+```{r, echo = TRUE, message = FALSE, results = FALSE}
+
+set.seed(123)
+dt2 <- genFunc(100, .05)
+
+glmerFit2 <- glmer(Y ~ grp + (1 | cID), data = dt2, family="binomial")
+
+geeFit2 <- gee(Y ~ grp, family = binomial, data = dt2, 
+                   corstr = "exchangeable", id = dt2$cID)
+```
+
+```{r, echo=FALSE, message = FALSE}
+# library(stargazer) # results="asis"
+# 
+# stargazer(glmerFit, geeFit, glmerFit2, geeFit2, 
+#           type = "html", 
+#           style = "ajps",
+#           title = "Comparison of models",
+#           dep.var.labels=c("Lots of variability","Not so much variability"),
+#           object.names = FALSE,
+#           omit.table.layout = c("sn"),
+#           digits = 2,
+#           ci = TRUE,
+#           font.size = "small",
+#           star.char = "",
+#           model.numbers = FALSE
+# )
+
+d2 <- round(rbind(
+  unname(fixef(glmerFit2)),
+  unname(coef(geeFit2))
+),2)
+
+d2 <- data.frame(d2)
+names(d2) <- c("Intercept", "Grp")
+row.names(d2) <- c("GLMM", "GEE")
+
+d2
+
+```
+
+When the variability across clusters is dramatically reduced, the marginal model estimates are much more in line with the conditional model estiamtes.
