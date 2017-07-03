@@ -1,0 +1,255 @@
+---
+title: 'simstudy update: two new functions that generate correlated observations from non-normal distributions'
+author: ''
+date: '2017-07-05'
+slug: simstudy-update-two-functions-for-correlation
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In an earlier <a href="https://www.rdatagen.net/post/correlated-data-copula/">post</a>, I described in a fair amount of detail an algorithm to generate correlated binary or Poisson data. I mentioned that I would be updating <code>simstudy</code> with functions that would make generating these kind of data relatively painless. Well, I have managed to do that, and the updated package (version 0.1.3) is available for download from <a href="https://cran.r-project.org/web/packages/simstudy/index.html">CRAN</a>. There are now two additional functions to facilitate the generation of correlated data from <em>binomial</em>, <em>poisson</em>, <em>gamma</em>, and <em>uniform</em> distributions: <code>genCorGen</code> and <code>addCorGen</code>. Here’s a brief intro to these functions.</p>
+<div id="generate-generally-correlated-data" class="section level3">
+<h3>Generate generally correlated data</h3>
+<p><code>genCorGen</code> is an extension of <code>genCorData</code>, which was provided in earlier versions of <code>simstudy</code> to generate multivariate normal data. In the first example below, we are generating data from a multivariate Poisson distribution. To do this, we need to specify the mean of the Poisson distribution for each new variable, and then we specify the correlation structure, just as we did with the normal distribution.</p>
+<pre class="r"><code>l &lt;- c(8, 10, 12) # lambda for each new variable
+
+dp &lt;- genCorGen(1000, nvars = 3, params1 = l, dist = &quot;poisson&quot;, 
+                rho = 0.3, corstr = &quot;cs&quot;, wide = TRUE)
+dp</code></pre>
+<pre><code>##         id V1 V2 V3
+##    1:    1  7 13 12
+##    2:    2  7 11 13
+##    3:    3  7  8 14
+##    4:    4  7 12  9
+##    5:    5  8 13 18
+##   ---              
+##  996:  996  8 14 15
+##  997:  997 10  5 11
+##  998:  998  4  9  9
+##  999:  999  5 10  9
+## 1000: 1000  6 12 17</code></pre>
+<p>Here is the the estimated correlation (we would expect an estimate close to 0.3):</p>
+<pre class="r"><code>round(cor(as.matrix(dp[, .(V1, V2, V3)])), 2)</code></pre>
+<pre><code>##      V1   V2   V3
+## V1 1.00 0.29 0.26
+## V2 0.29 1.00 0.31
+## V3 0.26 0.31 1.00</code></pre>
+<p>Similarly, we can generate correlated binary data by specifying the probabilities:</p>
+<pre class="r"><code>db&lt;- genCorGen(1000, nvars = 3, params1 = c(.3, .5, .7), dist = &quot;binary&quot;, 
+          rho = 0.8, corstr = &quot;cs&quot;, wide = TRUE)
+db</code></pre>
+<pre><code>##         id V1 V2 V3
+##    1:    1  1  1  1
+##    2:    2  0  0  1
+##    3:    3  1  1  1
+##    4:    4  0  0  0
+##    5:    5  1  1  1
+##   ---              
+##  996:  996  0  1  1
+##  997:  997  0  0  0
+##  998:  998  0  1  1
+##  999:  999  1  1  1
+## 1000: 1000  0  0  0</code></pre>
+<p>In the case of the binary outcome, the observed correlation will be lower that what is specified, which in this case was 0.8. I tried to provide some intuition about this in the earlier <a href="https://www.rdatagen.net/post/correlated-data-copula/">post</a>:</p>
+<pre class="r"><code>round(cor(as.matrix(db[, .(V1, V2, V3)])), 2)</code></pre>
+<pre><code>##     V1   V2   V3
+## V1 1.0 0.50 0.40
+## V2 0.5 1.00 0.56
+## V3 0.4 0.56 1.00</code></pre>
+<p>The gamma distribution requires two parameters - the mean and dispersion. (These are converted into shape and rate parameters more commonly used.)</p>
+<pre class="r"><code>dg &lt;- genCorGen(1000, nvars = 3, params1 = c(3,5,7), params2 = c(1,1,1),
+                dist = &quot;gamma&quot;, rho = .7, corstr = &quot;cs&quot;, 
+                wide = TRUE, cnames=&quot;a, b, c&quot;)
+dg</code></pre>
+<pre><code>##         id         a          b         c
+##    1:    1 0.1957971  0.9902398  2.299307
+##    2:    2 0.2566630  2.4271728  1.217599
+##    3:    3 1.9550985 13.9248696  5.178042
+##    4:    4 3.5525418  2.5711661  7.848605
+##    5:    5 6.6981281  8.7494117 12.478329
+##   ---                                    
+##  996:  996 2.2059693  6.3474811  3.054551
+##  997:  997 2.3571427  7.7841085  7.887417
+##  998:  998 5.5326638  7.3273337 15.965228
+##  999:  999 5.6284681 13.3574118 17.215722
+## 1000: 1000 0.3749373  1.1480452  0.696243</code></pre>
+<pre class="r"><code>round(cor(as.matrix(dg[, .(a, b, c)])), 2)</code></pre>
+<pre><code>##      a    b    c
+## a 1.00 0.65 0.67
+## b 0.65 1.00 0.62
+## c 0.67 0.62 1.00</code></pre>
+<p>These data sets can be generated in either <em>wide</em> or <em>long</em> form. So far, we have generated <em>wide</em> form data, where there is one row per unique id. The <em>long</em> form, where the correlated data are on different rows, is useful for plotting or fitting models, because there are repeated measurements for each id:</p>
+<pre class="r"><code>dgl &lt;- genCorGen(1000, nvars = 3, params1 = l, params2 = c(1,1,1), 
+                 dist = &quot;gamma&quot;, rho = .7, corstr = &quot;cs&quot;, wide = FALSE, 
+                 cnames=&quot;NewCol&quot;)
+dgl</code></pre>
+<pre><code>##         id period    NewCol
+##    1:    1      0  1.066558
+##    2:    1      1  5.666802
+##    3:    1      2  5.366408
+##    4:    2      0  1.419593
+##    5:    2      1  9.318227
+##   ---                      
+## 2996:  999      1 21.821011
+## 2997:  999      2 21.800972
+## 2998: 1000      0 12.082063
+## 2999: 1000      1 18.541231
+## 3000: 1000      2 12.063846</code></pre>
+<p>Here is a plot of a subset of the data:</p>
+<pre class="r"><code>ids &lt;- sample(1000,50, replace = FALSE)
+ggplot(data=dgl[id %in% ids,], aes(x=factor(period), y=NewCol, group=id)) +
+  geom_line(aes(color=factor(id)))+
+  theme(legend.position = &quot;none&quot;) +
+  scale_x_discrete(expand = c(0,0.1))</code></pre>
+<p><img src="/post/2017-07-05-simstudy-update-two-functions-to-generate-correlated-observations-from-non-normal-distributions_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+</div>
+<div id="generate-data-based-on-values-from-existing-data-set" class="section level3">
+<h3>Generate data based on values from existing data set</h3>
+<p><code>addCorGen</code> allows us to create correlated data from an existing data set, as one can already do using <code>addCorData</code>, but with non-normal data. In the case of <code>addCorGen</code>, the parameter(s) used to define the distribution is a field (or fields) in the data set. The correlated data are added to the existing data set. In the example below, we are going to generate three sets (Poisson, binary, and gamma) of correlated data with means that are a function of the variable <code>xbase</code>, which varies by id.</p>
+<p>First we define the data and generate a data set:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;xbase&quot;, formula = 5, variance = 0.2, 
+               dist = &quot;gamma&quot;, id = &quot;cid&quot;)
+def &lt;- defData(def, varname = &quot;lambda&quot;, formula = &quot;0.5 + 0.1 * xbase&quot;, 
+               dist=&quot;nonrandom&quot;, link = &quot;log&quot;)
+def &lt;- defData(def, varname = &quot;p&quot;, formula = &quot;-2.0 + 0.3 * xbase&quot;, 
+               dist=&quot;nonrandom&quot;, link = &quot;logit&quot;)
+def &lt;- defData(def, varname = &quot;gammaMu&quot;, formula = &quot;0.5 + 0.2 * xbase&quot;, 
+               dist=&quot;nonrandom&quot;, link = &quot;log&quot;)
+def &lt;- defData(def, varname = &quot;gammaDis&quot;, formula = 1, 
+               dist=&quot;nonrandom&quot;)
+
+dt &lt;- genData(10000, def)
+dt</code></pre>
+<pre><code>##          cid      xbase   lambda         p   gammaMu gammaDis
+##     1:     1 12.1128232 5.536056 0.8366960 18.588900        1
+##     2:     2  4.9148342 2.695230 0.3715554  4.405998        1
+##     3:     3 11.5550282 5.235712 0.8125261 16.626630        1
+##     4:     4  3.0802596 2.243475 0.2542785  3.052778        1
+##     5:     5  0.9767811 1.817893 0.1535577  2.004423        1
+##    ---                                                       
+##  9996:  9996  6.0564517 3.021173 0.4543613  5.536100        1
+##  9997:  9997  3.1298866 2.254636 0.2571119  3.083229        1
+##  9998:  9998 12.4642670 5.734076 0.8505956 19.942505        1
+##  9999:  9999  4.6559318 2.626345 0.3536072  4.183660        1
+## 10000: 10000  3.4314285 2.323658 0.2747666  3.274895        1</code></pre>
+<p>The Poisson distribution has a single parameter, lambda:</p>
+<pre class="r"><code>dtX1 &lt;- addCorGen(dtOld = dt, idvar = &quot;cid&quot;, nvars = 3, rho = 0.1, 
+                  corstr = &quot;cs&quot;, dist = &quot;poisson&quot;, param1 = &quot;lambda&quot;, 
+                  cnames = &quot;a, b, c&quot;)
+
+dtX1[, .(cid, xbase, lambda, a, b, c)]</code></pre>
+<pre><code>##          cid      xbase   lambda a b c
+##     1:     1 12.1128232 5.536056 4 6 7
+##     2:     2  4.9148342 2.695230 2 4 1
+##     3:     3 11.5550282 5.235712 5 6 4
+##     4:     4  3.0802596 2.243475 1 3 1
+##     5:     5  0.9767811 1.817893 2 1 0
+##    ---                                
+##  9996:  9996  6.0564517 3.021173 1 3 3
+##  9997:  9997  3.1298866 2.254636 2 3 1
+##  9998:  9998 12.4642670 5.734076 4 6 8
+##  9999:  9999  4.6559318 2.626345 2 3 5
+## 10000: 10000  3.4314285 2.323658 0 0 3</code></pre>
+<p>The Bernoulli (binary) distribution has a single parameter, p:</p>
+<pre class="r"><code>dtX2 &lt;- addCorGen(dtOld = dt, idvar = &quot;cid&quot;, nvars = 4, rho = .4, 
+                  corstr = &quot;ar1&quot;, dist = &quot;binary&quot;, param1 = &quot;p&quot;)
+
+dtX2[, .(cid, xbase, p, V1, V2, V3, V4)]</code></pre>
+<pre><code>##          cid      xbase         p V1 V2 V3 V4
+##     1:     1 12.1128232 0.8366960  1  1  1  1
+##     2:     2  4.9148342 0.3715554  0  0  0  0
+##     3:     3 11.5550282 0.8125261  1  1  1  1
+##     4:     4  3.0802596 0.2542785  0  1  0  0
+##     5:     5  0.9767811 0.1535577  0  0  0  1
+##    ---                                       
+##  9996:  9996  6.0564517 0.4543613  0  0  0  0
+##  9997:  9997  3.1298866 0.2571119  1  0  0  0
+##  9998:  9998 12.4642670 0.8505956  0  1  1  1
+##  9999:  9999  4.6559318 0.3536072  1  1  0  0
+## 10000: 10000  3.4314285 0.2747666  1  0  1  1</code></pre>
+<p>And here is the the Gamma distribution, with its two parameters (mean and dispersion):</p>
+<pre class="r"><code>dtX3 &lt;- addCorGen(dtOld = dt, idvar = &quot;cid&quot;, nvars = 3, rho = .4, 
+                  corstr = &quot;cs&quot;, dist = &quot;gamma&quot;, 
+                  param1 = &quot;gammaMu&quot;, param2 = &quot;gammaDis&quot;)
+
+dtX3[, .(cid, xbase, gammaMu, gammaDis, 
+         V1 = round(V1,2), V2 = round(V2,2), V3 = round(V3,2))]</code></pre>
+<pre><code>##          cid      xbase   gammaMu gammaDis    V1    V2   V3
+##     1:     1 12.1128232 18.588900        1 11.24  3.44 9.11
+##     2:     2  4.9148342  4.405998        1  0.91  3.77 0.76
+##     3:     3 11.5550282 16.626630        1 68.47 12.91 1.72
+##     4:     4  3.0802596  3.052778        1  2.54  3.63 2.98
+##     5:     5  0.9767811  2.004423        1  0.39  0.14 0.42
+##    ---                                                     
+##  9996:  9996  6.0564517  5.536100        1  0.29  4.84 1.80
+##  9997:  9997  3.1298866  3.083229        1  4.81  0.38 0.81
+##  9998:  9998 12.4642670 19.942505        1 17.10  3.56 4.04
+##  9999:  9999  4.6559318  4.183660        1  1.17  0.21 1.47
+## 10000: 10000  3.4314285  3.274895        1  1.02  1.61 2.24</code></pre>
+</div>
+<div id="long-form-data" class="section level3">
+<h3>Long form data</h3>
+<p>If we have data in <em>long</em> form (e.g. longitudinal data), the function will recognize the structure:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;xbase&quot;, formula = 5, variance = .4, 
+               dist = &quot;gamma&quot;, id = &quot;cid&quot;)
+def &lt;- defData(def, &quot;nperiods&quot;, formula = 3, 
+               dist = &quot;noZeroPoisson&quot;)
+
+def2 &lt;- defDataAdd(varname = &quot;lambda&quot;, 
+                   formula = &quot;0.5 + 0.5 * period + 0.1 * xbase&quot;, 
+                   dist=&quot;nonrandom&quot;, link = &quot;log&quot;)
+
+dt &lt;- genData(1000, def)
+
+dtLong &lt;- addPeriods(dt, idvars = &quot;cid&quot;, nPeriods = 3)
+dtLong &lt;- addColumns(def2, dtLong)
+
+dtLong</code></pre>
+<pre><code>##        cid period     xbase nperiods timeID   lambda
+##    1:    1      0  6.693980        1      1 3.220053
+##    2:    1      1  6.693980        1      2 5.308971
+##    3:    1      2  6.693980        1      3 8.753013
+##    4:    2      0 10.008645        2      4 4.485565
+##    5:    2      1 10.008645        2      5 7.395447
+##   ---                                               
+## 2996:  999      1  6.753605        2   2996 5.340720
+## 2997:  999      2  6.753605        2   2997 8.805359
+## 2998: 1000      0  2.006781        4   2998 2.015119
+## 2999: 1000      1  2.006781        4   2999 3.322369
+## 3000: 1000      2  2.006781        4   3000 5.477661</code></pre>
+<pre class="r"><code>### Generate the data 
+
+dtX3 &lt;- addCorGen(dtOld = dtLong, idvar = &quot;cid&quot;, nvars = 3, 
+                  rho = .6, corstr = &quot;cs&quot;, dist = &quot;poisson&quot;, 
+                  param1 = &quot;lambda&quot;, cnames = &quot;NewPois&quot;)
+dtX3</code></pre>
+<pre><code>##        cid period     xbase nperiods timeID   lambda NewPois
+##    1:    1      0  6.693980        1      1 3.220053       3
+##    2:    1      1  6.693980        1      2 5.308971       5
+##    3:    1      2  6.693980        1      3 8.753013       9
+##    4:    2      0 10.008645        2      4 4.485565       2
+##    5:    2      1 10.008645        2      5 7.395447       4
+##   ---                                                       
+## 2996:  999      1  6.753605        2   2996 5.340720       6
+## 2997:  999      2  6.753605        2   2997 8.805359      11
+## 2998: 1000      0  2.006781        4   2998 2.015119       2
+## 2999: 1000      1  2.006781        4   2999 3.322369       4
+## 3000: 1000      2  2.006781        4   3000 5.477661       7</code></pre>
+<p>We can fit a generalized estimating equation (GEE) model and examine the coefficients and the working correlation matrix. As we would expect, they match closely to the data generating parameters:</p>
+<pre class="r"><code>geefit &lt;- gee(NewPois ~ period + xbase, data = dtX3, id = cid, 
+              family = poisson, corstr = &quot;exchangeable&quot;)</code></pre>
+<pre><code>## Beginning Cgee S-function, @(#) geeformula.q 4.13 98/01/27</code></pre>
+<pre><code>## running glm to get initial regression estimate</code></pre>
+<pre><code>## (Intercept)      period       xbase 
+##  0.52045259  0.50354885  0.09746544</code></pre>
+<pre class="r"><code>round(summary(geefit)$working.correlation, 2)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,] 1.00 0.58 0.58
+## [2,] 0.58 1.00 0.58
+## [3,] 0.58 0.58 1.00</code></pre>
+<p>In the future, I plan on adding other distributions. Some folks have suggested the negative binomial distribution, which I will do. If you have other suggestions/requests, <a href="mailto:keith.goldfeld@nyumc.org">let me know</a>.</p>
+</div>
