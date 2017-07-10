@@ -1,0 +1,317 @@
+---
+title: 'Using simulation for power analysis: an example based on a stepped wedge study design'
+author: ''
+date: '2017-07-10'
+slug: using-simulation-for-power-analysis-an-example
+categories: []
+tags: [R]
+subtitle: ''
+---
+
+
+
+<p>Simulation can be super helpful for estimating power or sample size requirements when the study design is complex. This approach has some advantages over an analytic one (i.e. one based on a formula), particularly the flexibility it affords in setting up the specific assumptions in the planned study, such as time trends, patterns of missingness, or effects of different levels of clustering. A downside is certainly the complexity of writing the code as well as the computation time, which <em>can</em> be a bit painful. My goal here is to show that at least writing the code need not be overwhelming.</p>
+<p>Recently, I was helping an investigator plan a stepped wedge cluster randomized trial to study the effects of modifying a physician support system on patient-level diabetes management. While analytic approaches for power calculations do exist in the context of this complex study design, it seemed worth the effort to be explicit about all of the assumptions. So in this case I opted to use simulation. The basic approach is outlined below.</p>
+<div id="the-stepped-wedge-design" class="section level2">
+<h2>The stepped wedge design</h2>
+<p>In cluster randomized trials, the unit of randomization is the group rather than the individual. While outcomes might be collected at the individual (e.g. student or patient) level, the intervention effect is assessed at the group (e.g. school or clinic). In a stepped wedge cluster design, the randomization unit is still the group, but all groups are eventually exposed to the intervention at some point in the study. Randomization determines <em>when</em> the intervention starts.</p>
+<p>Below is schematic view of how a stepped wedge study is implemented. In this example, a block of clusters receives the intervention starting in the second period, another block starts the intervention in the third period, and so on. The intervention effect is essentially assessed by making within group comparisons. By staggering the starting points, the study is able to distinguish between time effects and treatment effects. If all groups started intervention at the same point, we would need to make an assumption that any improvements were due only to the intervention rather than changes that were occurring over time. This is not an assumption any one can easily justify.</p>
+<p><img src="/post/2017-07-10-using-simulation-for-power-analysis-an-example-based-on-a-stepped-wedge-study-design_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+</div>
+<div id="power-and-simulation" class="section level2">
+<h2>Power and simulation</h2>
+<p>The statistical power of a study is the conditional probability (conditional on a given effect size), that a hypothesis test will incorrectly reject the null hypothesis (i.e. conclude there is no effect when there actually is one). Power is underscored by the notion that a particular study can be replicated exactly over and over again. So, if the power of a study is 80%, that means in 80% of the replications of that study we will (inappropriately) reject the null hypothesis.</p>
+<p>So, to estimate power, we can simulate replications of the study many times and conduct repeated hypothesis tests. The proportion of tests where we reject the null hypothesis is the estimated power. Each of these replications is based on the same set of data generating assumptions: effect sizes, sample sizes, individual level variation, group level variation, etc.</p>
+</div>
+<div id="simulating-from-a-stepped-wedge-design" class="section level2">
+<h2>Simulating from a stepped wedge design</h2>
+<p>In this example, we are assuming a 3-year study with four groups of clusters randomized to start an intervention at either 12 months, 18 months, 24 months, or 30 months (i.e. every 6 months following the 1st baseline year). The study would enroll patients at baseline in each of the clusters, and a measurement of a binary outcome (say diabetes under control, or not) would be collected at that time. Those patients would be followed over time and the same measurement would be collected every 6 months, concluding with the 7th measurement in the 36th month of the study. (It is totally possible to enroll new patients as the study progresses and have a different follow-up scheme, but this approximates the actual study I was working on.)</p>
+<p>The data are generated based on a mixed effects model where there are group level effects (<span class="math inline">\(b_j\)</span> in the model) as well as individual level effects (<span class="math inline">\(b_i\)</span>). The model also assumes a very slight time trend before the intervention (e.g. diabetes control is improving slightly over time for an individual), an intervention effect, and an almost non-existent change in the time trend after the intervention. The outcome in each period is generated based on this formula:</p>
+<p><span class="math inline">\(logit(Y_{ijt}) = 0.8 + .01 * period + 0.8 * I_{jt} + 0.001 * I_{jt} * (period-s_j) + b_i + b_j,\)</span></p>
+<p>where <span class="math inline">\(period\)</span> goes from 0 to 6 (period 0 is the baseline, period 1 is the 6 month follow, etc.), <span class="math inline">\(I_{jt}\)</span> is 1 if cluster <span class="math inline">\(j\)</span> is in the intervention in period <span class="math inline">\(t\)</span>, <span class="math inline">\(s_j\)</span> is the period where the intervention starts for cluster <span class="math inline">\(j\)</span>, and <span class="math inline">\(logit(Y_{ijt})\)</span> is the log odds of the outcome <span class="math inline">\(Y\)</span> for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>.</p>
+<p>We start by defining the data structure using <code>simstudy</code> “data def”&quot; commands. We are assuming that there will be 100 individuals followed at each site for the full study. (We are not assuming any dropout, though we could easily do that.) In this particular case, we are assuming an effect size of 0.8 (which is a log odds ratio):</p>
+<pre class="r"><code>library(simstudy)
+
+starts &lt;- &quot;rep(c(2 : 5), each = 10)&quot;
+
+siteDef &lt;- defData(varname = &quot;bj&quot;, dist = &quot;normal&quot;, formula = 0, 
+                   variance = .01, id=&quot;site&quot;)
+siteDef &lt;- defData(siteDef, varname = &quot;sj&quot;, dist = &quot;nonrandom&quot;, 
+                   formula = starts)
+siteDef &lt;- defData(siteDef, varname = &quot;ips&quot;, dist = &quot;nonrandom&quot;, 
+                   formula = 100)
+
+indDef &lt;- defDataAdd(varname = &quot;bi&quot;, dist = &quot;normal&quot;, formula = 0,
+                     variance = 0.01)
+
+trtDef &lt;- defDataAdd(varname = &quot;Ijt&quot; , 
+                     formula = &quot;as.numeric(period &gt;= sj)&quot;, 
+                     dist = &quot;nonrandom&quot;)
+
+f = &quot;0.8 + .01 * period + 0.8 * Ijt + 0.001 * Ijt * (period-sj) + bi + bj&quot;
+trtDef &lt;- defDataAdd(trtDef, varname = &quot;Yijt&quot;, formula = f, 
+                     dist = &quot;binary&quot;, link = &quot;logit&quot;)</code></pre>
+<p>To generate 40 clusters of data, we use the following code:</p>
+<pre class="r"><code>set.seed(6789)
+
+dtSite &lt;- genData(40, siteDef)
+dtSite &lt;- genCluster(dtSite, cLevelVar = &quot;site&quot;, numIndsVar = &quot;ips&quot;,
+                     level1ID = &quot;id&quot;)
+dtSite &lt;- addColumns(indDef, dtSite)
+
+dtSiteTm &lt;- addPeriods(dtSite, nPeriods = 7, idvars = &quot;id&quot;)
+dtSiteTm &lt;- addColumns(trtDef, dtSiteTm)
+
+dtSiteTm</code></pre>
+<pre><code>##          id period site         bj sj ips         bi timeID Ijt Yijt
+##     1:    1      0    1 -0.1029785  2 100 0.08926153      1   0    1
+##     2:    1      1    1 -0.1029785  2 100 0.08926153      2   0    1
+##     3:    1      2    1 -0.1029785  2 100 0.08926153      3   1    1
+##     4:    1      3    1 -0.1029785  2 100 0.08926153      4   1    1
+##     5:    1      4    1 -0.1029785  2 100 0.08926153      5   1    1
+##    ---                                                              
+## 27996: 4000      2   40  0.1000898  5 100 0.18869371  27996   0    1
+## 27997: 4000      3   40  0.1000898  5 100 0.18869371  27997   0    0
+## 27998: 4000      4   40  0.1000898  5 100 0.18869371  27998   0    1
+## 27999: 4000      5   40  0.1000898  5 100 0.18869371  27999   1    1
+## 28000: 4000      6   40  0.1000898  5 100 0.18869371  28000   1    1</code></pre>
+<p>And to visualize what the study data might looks like under these assumptions:</p>
+<pre class="r"><code># summary by site
+dt &lt;- dtSiteTm[, .(Y = mean(Yijt)), keyby = .(site, period, Ijt, sj)] 
+
+ggplot(data = dt, aes(x=period, y=Y, group=site)) +
+  geom_hline(yintercept = c(.7, .83),  color = &quot;grey99&quot;) +
+  geom_line(aes(color=factor(site))) +
+  geom_point(data = dt[sj == period], color=&quot;grey50&quot;) +
+  theme(panel.background = element_rect(fill = &quot;grey90&quot;), 
+        panel.grid = element_blank(), 
+        plot.title = element_text(size = 10, hjust = 0), 
+        panel.border = element_rect(fill = NA, colour = &quot;gray90&quot;),
+        legend.position = &quot;none&quot;,
+        axis.title.x = element_blank()
+  ) +
+  ylab(&quot;Proportion controlled&quot;) +
+  scale_x_continuous(breaks = seq(0, 10, by = 2), 
+                     labels = c(&quot;Baseline&quot;, paste(&quot;Year&quot;, c(1:5)))) +
+  scale_y_continuous(limits = c(.5, 1), 
+                     breaks = c(.5, .6, .7, .8, .9, 1)) +
+  ggtitle(&quot;Stepped-wedge design with immediate effect&quot;) +
+  facet_grid(sj~.)</code></pre>
+<p><img src="/post/2017-07-10-using-simulation-for-power-analysis-an-example-based-on-a-stepped-wedge-study-design_files/figure-html/unnamed-chunk-4-1.png" width="480" /></p>
+</div>
+<div id="estimating-power" class="section level2">
+<h2>Estimating power</h2>
+<p>We are going to estimate power using only 20 clusters and effect size of 0.25. (Assuming 40 clusters and a large effect size was useful for visualizing the data, but not so interesting for illustrating power, since under those assumptions we are virtually guaranteed to find an effect.)</p>
+<p>After generating the data (code not shown) for one iteration, we fit a generalized mixed effects model to show the effect estimate. In this case, the effect estimate is 1.46 (95% CI 1.21-1.77) on the odds ratio scale or 0.37 (95% CI 0.19-0.57) on the log odds ratio scale.</p>
+<pre class="r"><code>library(lme4)
+library(sjPlot)
+
+glmfit &lt;- glmer(data = dtSiteTm, 
+      Yijt ~ period + Ijt + I(Ijt*(period - sj)) + (1|id) + (1|site), 
+      family=&quot;binomial&quot; )
+
+sjt.glmer(glmfit, show.icc = FALSE, show.dev = FALSE)</code></pre>
+<table style="border-collapse:collapse; border:none;border-bottom:double;">
+<tr>
+<td style="padding:0.2cm; border-top:double;">
+ 
+</td>
+<td style="border-bottom:1px solid; padding-left:0.5em; padding-right:0.5em; border-top:double;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; border-bottom:1px solid; border-top:double;" colspan="3">
+Yijt
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; font-style:italic;">
+ 
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em; font-style:italic;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; font-style:italic; ">
+Odds Ratio
+</td>
+<td style="padding:0.2cm; text-align:center; font-style:italic; ">
+CI
+</td>
+<td style="padding:0.2cm; text-align:center; font-style:italic; ">
+p
+</td>
+</tr>
+<tr>
+<td colspan="5" style="padding:0.2cm; text-align:left; border-top:1px solid; font-weight:bold; text-align:left;">
+Fixed Parts
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; text-align:left;">
+(Intercept)
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em; ">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+2.15
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+1.90 – 2.44
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+&lt;.001
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; text-align:left;">
+period
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+1.00
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+0.95 – 1.06
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+.959
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; text-align:left;">
+Ijt
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+1.46
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+1.21 – 1.77
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+&lt;.001
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; text-align:left;">
+I(Ijt * (period - sj))
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+0.99
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+0.91 – 1.07
+</td>
+<td style="padding:0.2cm; text-align:center; ">
+.759
+</td>
+</tr>
+<tr>
+<td colspan="5" style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; font-weight:bold; text-align:left; padding-top:0.5em;">
+Random Parts
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;">
+τ<sub>00, id</sub>
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;" colspan="3">
+0.011
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;">
+τ<sub>00, site</sub>
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;" colspan="3">
+0.029
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;">
+N<sub>id</sub>
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;" colspan="3">
+1000
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;">
+N<sub>site</sub>
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em;">
+ 
+</td>
+<td style="padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;" colspan="3">
+20
+</td>
+</tr>
+<tr>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; border-top:1px solid;">
+Observations
+</td>
+<td style="padding-left:0.5em; padding-right:0.5em; border-top:1px solid;">
+ 
+</td>
+<td style="padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:center; border-top:1px solid;" colspan="3">
+7000
+</td>
+</tr>
+</table>
+<p>In order to estimate power, we need to generate a large number of replications. I created a simple function that generates a new data set every iteration based on the definitions. If we want to vary the model assumptions across different replications, we can write code to modify the data definition part of the process. In this way we could look at power across different sample size, effect size, or variance assumptions. Here, I am only considering a single set of assumptions.</p>
+<pre class="r"><code>gData &lt;- function() {
+  
+  dtSite &lt;- genData(nsites, siteDef)
+  dtSite &lt;- genCluster(dtSite, cLevelVar = &quot;site&quot;, 
+                       numIndsVar = &quot;ips&quot;, level1ID = &quot;id&quot;)
+  dtSite &lt;- addColumns(indDef, dtSite)
+  
+  dtSiteTm &lt;- addPeriods(dtSite, nPeriods = 7, idvars = &quot;id&quot;)
+  dtSiteTm &lt;- addColumns(trtDef, dtSiteTm)
+  
+  return(dtSiteTm)
+}</code></pre>
+<p>And finally, we iterate through a series of replications, keeping track of each hypothesis test in the variable <em>result</em>. Typically, it would be nice to replicate a large number of times (say 1000), but this can sometimes take a long time. In this case, each call to <code>glmer</code> is very resource intensive - unfortunately, I know of know way to speed this up (please get in touch if you have thoughts on this) - so for the purposes of illustration, I’ve only used 99 iterations. Note also that I check to see if the model converges in each iteration, and only include results from valid estimates. This can be an issue with mixed effects models, particularly when sample sizes are small. To estimate the power (which in this case is 78%), calculate the proportion of successful iterations with a p-value smaller than 0.05, the alpha-level threshold we have used in our hypothesis test:</p>
+<pre class="r"><code>result &lt;- NULL
+
+i=1
+
+while (i &lt; 100) {
+  
+  dtSite &lt;- gData()
+  
+  glmfit &lt;- tryCatch(glmer(data = dtSite, 
+      Yijt ~ period + Ijt + I(Ijt*(period - sj)) + (1|id) + (1|site), 
+      family=&quot;binomial&quot; ),
+    warning = function(w) { &quot;warning&quot; }
+  )
+  
+  if (! is.character(glmfit)) {
+    
+    pvalue &lt;- coef(summary(glmfit))[&quot;Ijt&quot;, &quot;Pr(&gt;|z|)&quot;]
+    result &lt;- c(result, pvalue)
+    i &lt;- i + 1
+  }
+  
+}
+
+mean(result &lt; .05)</code></pre>
+<pre><code>## [1] 0.7812</code></pre>
+<p>To explore the sensitivity of the power estimates to changing underlying assumptions of effect size, sample size, variation, and time trends, we could vary those parameters and run a sequence of iterations. The code gets a little more complicated (essentially we need to change the “data defs” for each set of iterations), but it is still quite manageable. Of course, you might want to plan for fairly long execution times, particularly if you use 500 or 1000 iterations for each scenario, rather than the 100 I used here.</p>
+</div>
