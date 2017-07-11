@@ -3,7 +3,7 @@ title: shinyapps
 comments: false
 ---
 
-I have developed a number of `R shiny` apps that can be explored. Be warned that the apps have limited (i.e. no) documentation or guidance. They were designed to be intuitive, but maybe only in the eyes of the creator. 
+I have developed a number of `R shiny` apps that are available for exploration. Be warned that the apps have limited (i.e. no) documentation or guidance. They were designed to be intuitive, but maybe only in the eyes of the creator. 
 
 ### Causal inference
 
