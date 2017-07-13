@@ -1,0 +1,56 @@
+---
+comments: false
+---
+
+
+
+<div id="generating-the-treatmentexposure" class="section level2">
+<h2>Generating the treatment/exposure</h2>
+<p>Treatment assignment can be accomplished through the original data generation process, using <code>defData</code> and <code>genData</code>. However, the functions <code>trtAssign</code> and <code>trtObserve</code> provide more options to generate treatment assignment.</p>
+<div id="assigned-treatment" class="section level3">
+<h3>Assigned treatment</h3>
+<p>Treatment assignment can simulate how treatment is made in a randomized study. Assignment to treatment groups can be (close to) balanced (as would occur in a block randomized trial); this balancing can be done without or without strata. Alternatively, the assignment can be left to chance without blocking; in this case, balance across treatment groups is not guaranteed, particularly with small sample sizes.</p>
+<p>First, create the data definition:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;male&quot;, dist = &quot;binary&quot;, formula = 0.5, id = &quot;cid&quot;)
+def &lt;- defData(def, varname = &quot;over65&quot;, dist = &quot;binary&quot;, formula = &quot;-1.7 + .8*male&quot;, 
+    link = &quot;logit&quot;)
+def &lt;- defData(def, varname = &quot;baseDBP&quot;, dist = &quot;normal&quot;, formula = 70, variance = 40)
+
+dtstudy &lt;- genData(330, def)</code></pre>
+<p><em>Balanced treatment assignment, stratified by gender and age category (not blood pressure)</em></p>
+<pre class="r"><code>study1 &lt;- trtAssign(dtstudy, n = 3, balanced = TRUE, strata = c(&quot;male&quot;, &quot;over65&quot;), 
+    grpName = &quot;rxGrp&quot;)
+
+study1</code></pre>
+<pre><code>##      cid rxGrp male over65  baseDBP
+##   1:   1     3    1      0 74.13346
+##   2:   2     3    1      0 69.00474
+##   3:   3     3    1      0 68.80936
+##   4:   4     3    0      0 70.39062
+##   5:   5     2    1      1 74.61687
+##  ---                               
+## 326: 326     2    1      0 73.66370
+## 327: 327     1    0      0 77.29773
+## 328: 328     3    0      0 68.82404
+## 329: 329     3    1      0 71.10140
+## 330: 330     1    0      0 65.74311</code></pre>
+<p><em>Balanced treatment assignment (without stratification)</em></p>
+<pre class="r"><code>study2 &lt;- trtAssign(dtstudy, n = 3, balanced = TRUE, grpName = &quot;rxGrp&quot;)</code></pre>
+<p><em>Random (unbalanced) treatment assignment</em></p>
+<pre class="r"><code>study3 &lt;- trtAssign(dtstudy, n = 3, balanced = FALSE, grpName = &quot;rxGrp&quot;)</code></pre>
+<p><em>Comparison of three treatment assignment mechanisms</em> <img src="/page/treat_and_exposure_files/figure-html/unnamed-chunk-6-1.png" width="384" /></p>
+</div>
+<div id="observed-treatment" class="section level3">
+<h3>Observed treatment</h3>
+<p>If exposure or treatment is observed (rather than randomly assigned), use <code>trtObserved</code> to generate groups. There may be any number of possible exposure or treatment groups, and the probability of exposure to a specific level can depend on covariates already in the data set. In this case, there are three exposure groups that vary by gender and age:</p>
+<pre class="r"><code>formula1 &lt;- c(&quot;-2 + 2*male - .5*over65&quot;, &quot;-1 + 2*male + .5*over65&quot;)
+dtExp &lt;- trtObserve(dtstudy, formulas = formula1, logit.link = TRUE, grpName = &quot;exposure&quot;)</code></pre>
+<p>Here are the exposure distributions by gender and age:</p>
+<p><img src="/page/treat_and_exposure_files/figure-html/unnamed-chunk-8-1.png" width="624" /></p>
+<p>Here is a second case of three exposures where the exposure is independent of any covariates. Note that specifying the formula as <code>c(.35, .45)</code> is the same as specifying it is <code>c(.35, .45, .20)</code>. Also, when referring to probabilities, the identity link is used:</p>
+<pre class="r"><code>formula2 &lt;- c(0.35, 0.45)
+
+dtExp2 &lt;- trtObserve(dtstudy, formulas = formula2, logit.link = FALSE, grpName = &quot;exposure&quot;)</code></pre>
+<p><img src="/page/treat_and_exposure_files/figure-html/unnamed-chunk-10-1.png" width="624" /></p>
+</div>
+</div>

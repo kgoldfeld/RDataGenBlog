@@ -1,0 +1,70 @@
+---
+comments: false
+---
+
+
+
+<div id="longitudinal-data" class="section level2">
+<h2>Longitudinal data</h2>
+<p>To simulate longitudinal data, we start with a ‘cross-sectional’ data set and convert it to a time-dependent data set. The original cross-sectional data set may or may not include time-dependent data in the columns. In the next example, we measure outcome <code>Y</code> once before and twice after intervention <code>T</code> in a randomized trial:</p>
+<pre class="r"><code>tdef &lt;- defData(varname = &quot;T&quot;, dist = &quot;binary&quot;, formula = 0.5)
+tdef &lt;- defData(tdef, varname = &quot;Y0&quot;, dist = &quot;normal&quot;, formula = 10, variance = 1)
+tdef &lt;- defData(tdef, varname = &quot;Y1&quot;, dist = &quot;normal&quot;, formula = &quot;Y0 + 5 + 5 * T&quot;, 
+    variance = 1)
+tdef &lt;- defData(tdef, varname = &quot;Y2&quot;, dist = &quot;normal&quot;, formula = &quot;Y0 + 10 + 5 * T&quot;, 
+    variance = 1)
+
+dtTrial &lt;- genData(500, tdef)
+dtTrial</code></pre>
+<pre><code>##       id T        Y0       Y1       Y2
+##   1:   1 1 10.004784 20.44291 24.46811
+##   2:   2 1 10.885911 21.35260 26.52452
+##   3:   3 0 11.332592 15.36175 22.15773
+##   4:   4 0  9.789860 15.14968 19.69542
+##   5:   5 1  9.932299 19.52627 24.49218
+##  ---                                  
+## 496: 496 1  7.997153 18.51845 22.92470
+## 497: 497 1  9.797943 21.83211 24.67286
+## 498: 498 1 11.021032 20.38890 27.02334
+## 499: 499 0 13.251984 19.06908 24.30683
+## 500: 500 0 10.075394 16.35099 18.61843</code></pre>
+<p>The data in longitudinal form is created with a call to <strong><code>addPeriods</code></strong>. If the cross-sectional data includes time dependent data, then the number of periods <code>nPeriods</code> must be the same as the number of time dependent columns. If a variable is not declared as one of the <code>timevars</code>, it will be repeated each time period. In this example, the treatment indicator <code>T</code> is not specified as a time dependent variable. (Note: if there are two time-dependent variables, it is best to create two data sets and merge them. This will be shown later in the vignette).</p>
+<pre class="r"><code>dtTime &lt;- addPeriods(dtTrial, nPeriods = 3, idvars = &quot;id&quot;, timevars = c(&quot;Y0&quot;, 
+    &quot;Y1&quot;, &quot;Y2&quot;), timevarName = &quot;Y&quot;)
+dtTime</code></pre>
+<p>This is what the longitudinal data look like:</p>
+<p><img src="/page/longitudinal_files/figure-html/unnamed-chunk-4-1.png" width="576" /></p>
+<div id="longitudinal-data-with-varying-observation-and-interval-times" class="section level3">
+<h3>Longitudinal data with varying observation and interval times</h3>
+<p>It is also possible to generate longitudinal data with varying numbers of measurement periods as well as varying time intervals between each measurement period. This is done by defining specific variables in the data set that define the number of observations per subject and the average interval time between each observation. <code>nCount</code> defines the number of measurements for an individual; <code>mInterval</code> specifies the average time between intervals for an subject; and <code>vInterval</code> specifies the variance of those interval times. If <code>vInterval</code> is set to 0 or is not defined, the interval for a subject is deterimined entirely by the mean interval. If <code>vInterval</code> is greater than 0, time intervals are generated using a gamma distribution with mean and dispersion specified.</p>
+<p>In this simple example, the cross-sectional data generates individuals with a different number of measurement observations and different times between each observation. Data for two of these individuals is printed:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;xbase&quot;, dist = &quot;normal&quot;, formula = 20, variance = 3)
+def &lt;- defData(def, varname = &quot;nCount&quot;, dist = &quot;noZeroPoisson&quot;, formula = 6)
+def &lt;- defData(def, varname = &quot;mInterval&quot;, dist = &quot;gamma&quot;, formula = 30, variance = 0.01)
+def &lt;- defData(def, varname = &quot;vInterval&quot;, dist = &quot;nonrandom&quot;, formula = 0.07)
+
+dt &lt;- genData(200, def)
+dt[id %in% c(8, 121)]  # View individuals 8 and 121</code></pre>
+<pre><code>##     id    xbase nCount mInterval vInterval
+## 1:   8 20.87852      2  27.50805      0.07
+## 2: 121 18.33859      6  30.08382      0.07</code></pre>
+<p>The resulting longitudinal data for these two subjects can be inspected after a call to <code>addPeriods</code>. Notice that no parameters need to be set since all information resides in the data set itself:</p>
+<pre class="r"><code>dtPeriod &lt;- addPeriods(dt)
+dtPeriod[id %in% c(8, 121)]  # View individuals 8 and 121 only</code></pre>
+<pre><code>##     id period    xbase time timeID
+## 1:   8      0 20.87852    0     34
+## 2:   8      1 20.87852   23     35
+## 3: 121      0 18.33859    0    685
+## 4: 121      1 18.33859   33    686
+## 5: 121      2 18.33859   60    687
+## 6: 121      3 18.33859   88    688
+## 7: 121      4 18.33859  110    689
+## 8: 121      5 18.33859  131    690</code></pre>
+<p>If a time sensitive measurement is added to the data set …</p>
+<pre class="r"><code>def2 &lt;- defDataAdd(varname = &quot;Y&quot;, dist = &quot;normal&quot;, formula = &quot;15 + .1 * time&quot;, 
+    variance = 5)
+dtPeriod &lt;- addColumns(def2, dtPeriod)</code></pre>
+<p>… a plot of a five randomly selected individuals looks like this:</p>
+<p><img src="/page/longitudinal_files/figure-html/unnamed-chunk-8-1.png" width="576" /></p>
+</div>
+</div>

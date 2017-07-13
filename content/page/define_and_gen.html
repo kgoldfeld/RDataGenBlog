@@ -1,0 +1,127 @@
+---
+comments: false
+---
+
+
+
+<div id="defining-the-data" class="section level2">
+<h2>Defining the data</h2>
+<p>The key to simulating data in <code>simstudy</code> is the creation of series of data defintion tables that look like this:</p>
+<table>
+<thead>
+<tr class="header">
+<th align="left">varname</th>
+<th align="left">formula</th>
+<th align="right">variance</th>
+<th align="left">dist</th>
+<th align="left">link</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">nr</td>
+<td align="left">7</td>
+<td align="right">0</td>
+<td align="left">nonrandom</td>
+<td align="left">identity</td>
+</tr>
+<tr class="even">
+<td align="left">x1</td>
+<td align="left">10;20</td>
+<td align="right">0</td>
+<td align="left">uniform</td>
+<td align="left">identity</td>
+</tr>
+<tr class="odd">
+<td align="left">y1</td>
+<td align="left">nr + x1 * 2</td>
+<td align="right">8</td>
+<td align="left">normal</td>
+<td align="left">identity</td>
+</tr>
+<tr class="even">
+<td align="left">y2</td>
+<td align="left">nr - 0.2 * x1</td>
+<td align="right">0</td>
+<td align="left">poisson</td>
+<td align="left">log</td>
+</tr>
+<tr class="odd">
+<td align="left">xCat</td>
+<td align="left">0.3;0.2;0.5</td>
+<td align="right">0</td>
+<td align="left">categorical</td>
+<td align="left">identity</td>
+</tr>
+<tr class="even">
+<td align="left">g1</td>
+<td align="left">5+xCat</td>
+<td align="right">1</td>
+<td align="left">gamma</td>
+<td align="left">log</td>
+</tr>
+<tr class="odd">
+<td align="left">a1</td>
+<td align="left">-3 + xCat</td>
+<td align="right">0</td>
+<td align="left">binary</td>
+<td align="left">logit</td>
+</tr>
+</tbody>
+</table>
+<p>These <em>definition</em> tables can be generated two ways. One option is to to use any external editor that allows the creation of <code>csv</code> files, which can be read in with a call to <code>defRead</code>. An alternative is to make repeated calls to the function <code>defData</code>. Here, we illustrate the R code that builds this definition table internally:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;nr&quot;, dist = &quot;nonrandom&quot;, formula = 7, id = &quot;idnum&quot;)
+def &lt;- defData(def, varname = &quot;x1&quot;, dist = &quot;uniform&quot;, formula = &quot;10;20&quot;)
+def &lt;- defData(def, varname = &quot;y1&quot;, formula = &quot;nr + x1 * 2&quot;, variance = 8)
+def &lt;- defData(def, varname = &quot;y2&quot;, dist = &quot;poisson&quot;, formula = &quot;nr - 0.2 * x1&quot;, 
+    link = &quot;log&quot;)
+def &lt;- defData(def, varname = &quot;xCat&quot;, formula = &quot;0.3;0.2;0.5&quot;, dist = &quot;categorical&quot;)
+def &lt;- defData(def, varname = &quot;g1&quot;, dist = &quot;gamma&quot;, formula = &quot;5+xCat&quot;, variance = 1, 
+    link = &quot;log&quot;)
+def &lt;- defData(def, varname = &quot;a1&quot;, dist = &quot;binary&quot;, formula = &quot;-3 + xCat&quot;, 
+    link = &quot;logit&quot;)</code></pre>
+<p>The first call to <code>defData</code> without specifying a definition name (in this example the definition name is <em>def</em>) creates a <strong>new</strong> data.table with a single row. An additional row is added to the table <code>def</code> each time the function <code>defData</code> is called. Each of these calls is the definition of a new field in the data set that will be generated. In this example, the first data field is named ‘nr’, defined as a constant with a value to be 7. In each call to <code>defData</code> the user defines a variable name, a distribution (the default is ‘normal’), a mean formula (if applicable), a variance parameter (if applicable), and a link function for the mean (defaults to ‘identity’).</p>
+<p>The possible distributions include <strong>normal</strong>, <strong>gamma</strong>, <strong>poisson</strong>, <strong>zero-truncated poisson</strong>, <strong>binary</strong>, <strong>uniform</strong>, <strong>categorical</strong>, and <strong>deterministic/non-random</strong>. For all of these distributions, key parameters defining the distribution are entered in the <code>formula</code>, <code>variance</code>, and <code>link</code> fields.</p>
+<p>In the case of the <strong>normal</strong> and <strong>gamma</strong> distributions, the formula specifies the mean. The formula can be a scalar value (number) or a string that represents a function of previously defined variables in the data set definition (or, as we will see later, in a previously generated data set). In the example, the mean of <code>y1</code>, a normally distributed value, is declared as a linear function of <code>nr</code> and <code>x1</code>, and the mean of <code>g1</code> is a function of the category defined by <code>xCat</code>. The <code>variance</code> field is defined only for normal and gamma random variables, and can only be defined as a scalar value. In the case of gamma random variables, the value entered in variance field is really a dispersion value <span class="math inline">\(d\)</span>, where the actual variance will be <span class="math inline">\(d \times mean^2\)</span>.</p>
+<p>In the case of the <strong>poisson</strong>, <strong>zero-truncated poisson</strong>, and <strong>binary</strong> distributions, the formula also specifies the mean. The variance is not a valid parameter in these cases, but the <code>link</code> field is. The default link is ‘identity’ but a ‘log’ link is available for the poisson distributions and a “logit” link is available for the binary outcomes. In this example, <code>y2</code> is defined as poisson random variable with a mean that is function of <code>nr</code> and <code>x1</code> on the log scale. For binary variables, which take a value of 0 or 1, the formula represents probability (with the ‘identity’ link) or log odds (with the ‘logit’ link) of the variable having a value of 1. In the example, <code>a1</code> has been defined as a binary random variable with a log odds that is a function of <code>xCat</code>.</p>
+<p>Variables defined with a <strong>uniform</strong>, <strong>categorical</strong>, or <strong>deterministic/non-random</strong> distribution are specified using the formula only. The <code>variance</code> and <code>link</code> fields are not used in these cases.</p>
+<p>For a uniformly distributed variable, The formula is a string with the format “a;b”, where <em>a</em> and <em>b</em> are scalars or functions of previously defined variables. The uniform distribution has two parameters - the minimum and the maximum. In this case, <em>a</em> represents the minimum and <em>b</em> represents the maximum.</p>
+<p>For a categorical variable with <span class="math inline">\(k\)</span> categories, the formula is a string of probabilities that sum to 1: “<span class="math inline">\(p_1 ; p_2 ; ... ; p_k\)</span>”. <span class="math inline">\(p_1\)</span> is the probability of the random variable falling category 1, <span class="math inline">\(p_2\)</span> is the probablity of category 2, etc. The probabilities can be specified as functions of other variables previously defined. In the example, <code>xCat</code> has three possibilities with probabilites 0.3, 0.2, and 0.5, respectively.</p>
+<p>Non-random variables are defined by the formula. Since these variables are deterministic, variance is not relevant. They can be functions of previously defined variables or a scalar, as we see in the sample for variable defined as <code>nr</code>.</p>
+</div>
+<div id="generating-the-data" class="section level2">
+<h2>Generating the data</h2>
+<p>After the data set definitions have been created, a new data set with <span class="math inline">\(n\)</span> observations can be created with a call to function <strong><code>genData</code></strong>. In this example, 1,000 observations are generated using the data set defitions in <strong><code>def</code></strong>, and then stored in the object <strong><code>dt</code></strong>:</p>
+<pre class="r"><code>dt &lt;- genData(1000, def)
+dt</code></pre>
+<pre><code>##       idnum nr       x1       y1  y2 xCat        g1 a1
+##    1:     1  7 11.99697 28.55117 101    1  101.1023  0
+##    2:     2  7 12.96382 34.76662  72    3  428.5254  1
+##    3:     3  7 13.95119 34.02509  71    1  175.6348  0
+##    4:     4  7 13.30593 34.82846  68    1  176.1717  0
+##    5:     5  7 15.17264 33.60334  58    3 2448.0051  0
+##   ---                                                 
+##  996:   996  7 17.21805 42.60993  34    1  362.9347  0
+##  997:   997  7 15.88601 35.01379  38    3 1612.8170  0
+##  998:   998  7 13.68159 37.46016  84    2  381.2329  0
+##  999:   999  7 15.77030 37.41791  39    3 9352.7688  1
+## 1000:  1000  7 12.10417 32.89047  98    3 4225.0237  1</code></pre>
+<p>New data can be added to an existing data set with a call to function <strong><code>addColumns</code></strong>. The new data definitions are created with a call to <strong><code>defData</code></strong> and then included as an argument in the call to <strong><code>addColumns</code></strong>:</p>
+<pre class="r"><code>addef &lt;- defDataAdd(varname = &quot;zExtra&quot;, dist = &quot;normal&quot;, formula = &quot;3 + y1&quot;, 
+    variance = 2)
+
+dt &lt;- addColumns(addef, dt)
+dt</code></pre>
+<pre><code>##       idnum nr       x1       y1  y2 xCat        g1 a1   zExtra
+##    1:     1  7 11.99697 28.55117 101    1  101.1023  0 31.40036
+##    2:     2  7 12.96382 34.76662  72    3  428.5254  1 36.81322
+##    3:     3  7 13.95119 34.02509  71    1  175.6348  0 37.03434
+##    4:     4  7 13.30593 34.82846  68    1  176.1717  0 41.02426
+##    5:     5  7 15.17264 33.60334  58    3 2448.0051  0 37.65909
+##   ---                                                          
+##  996:   996  7 17.21805 42.60993  34    1  362.9347  0 46.31735
+##  997:   997  7 15.88601 35.01379  38    3 1612.8170  0 37.58961
+##  998:   998  7 13.68159 37.46016  84    2  381.2329  0 42.03974
+##  999:   999  7 15.77030 37.41791  39    3 9352.7688  1 39.37936
+## 1000:  1000  7 12.10417 32.89047  98    3 4225.0237  1 36.80148</code></pre>
+</div>

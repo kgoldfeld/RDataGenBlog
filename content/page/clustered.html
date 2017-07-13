@@ -1,0 +1,54 @@
+---
+comments: false
+---
+
+
+
+<div id="clustered-data" class="section level2">
+<h2>Clustered data</h2>
+<p>The function <code>genCluster</code> generates multilevel or clustered data based on a previously generated data set that is one “level” up from the clustered data. For example, if there is a data set that contains school level (considered here to be level 2), classrooms (level 1) can be generated. And then, students (now level 1) can be generated within classrooms (now level 2)</p>
+<p>In the example here, we do in fact generate school, class, and student level data. There are eight schools, four of which are randomized to receive an intervention. The number of classes per school varies, as does the number of students per class. (It is straightforward to generate fully balanced data by using constant values.) The outcome of interest is a test score, which is influenced by gender and the intervention. In addition, test scores vary by schools, and by classrooms, so the simulation provides <em>random effects</em> at each of these levels.</p>
+<p>We start by definining the school level data:</p>
+<pre class="r"><code>gen.school &lt;- defData(varname = &quot;s0&quot;, dist = &quot;normal&quot;, formula = 0, variance = 3, 
+    id = &quot;idSchool&quot;)
+gen.school &lt;- defData(gen.school, varname = &quot;nClasses&quot;, dist = &quot;noZeroPoisson&quot;, 
+    formula = 3)
+
+dtSchool &lt;- genData(8, gen.school)
+dtSchool &lt;- trtAssign(dtSchool, n = 2)
+
+dtSchool</code></pre>
+<p>The classroom level data are generated with a call to <code>genCluster</code>, and then school level data is added by a call to <code>addColumns</code>:</p>
+<pre class="r"><code>gen.class &lt;- defDataAdd(varname = &quot;c0&quot;, dist = &quot;normal&quot;, formula = 0, variance = 2)
+gen.class &lt;- defDataAdd(gen.class, varname = &quot;nStudents&quot;, dist = &quot;noZeroPoisson&quot;, 
+    formula = 20)
+
+dtClass &lt;- genCluster(dtSchool, &quot;idSchool&quot;, numIndsVar = &quot;nClasses&quot;, level1ID = &quot;idClass&quot;)
+dtClass &lt;- addColumns(gen.class, dtClass)
+
+head(dtClass, 10)</code></pre>
+<pre><code>##     idSchool trtGrp         s0 nClasses idClass         c0 nStudents
+##  1:        1      1 -0.3861403        4       1 -0.1972213         9
+##  2:        1      1 -0.3861403        4       2 -1.6906673        10
+##  3:        1      1 -0.3861403        4       3  0.1846304        17
+##  4:        1      1 -0.3861403        4       4 -1.9179266        21
+##  5:        2      0  1.1976850        2       5 -2.8121663        16
+##  6:        2      0  1.1976850        2       6 -3.0343930        20
+##  7:        3      1  2.8029637        4       7 -1.6924796        21
+##  8:        3      1  2.8029637        4       8  1.4838386        23
+##  9:        3      1  2.8029637        4       9 -0.7503496        23
+## 10:        3      1  2.8029637        4      10 -1.9116607        19</code></pre>
+<p>Finally, the student level data are added using the same process:</p>
+<pre class="r"><code>gen.student &lt;- defDataAdd(varname = &quot;Male&quot;, dist = &quot;binary&quot;, 
+    formula = 0.5)
+gen.student &lt;- defDataAdd(gen.student, varname = &quot;age&quot;, dist = &quot;uniform&quot;, 
+    formula = &quot;9.5; 10.5&quot;)
+gen.student &lt;- defDataAdd(gen.student, varname = &quot;test&quot;, dist = &quot;normal&quot;, 
+    formula = &quot;50 - 5*Male + s0 + c0 + 8 * trtGrp&quot;, variance = 2)
+dtStudent &lt;- genCluster(dtClass, cLevelVar = &quot;idClass&quot;, numIndsVar = &quot;nStudents&quot;, 
+    level1ID = &quot;idChild&quot;)
+
+dtStudent &lt;- addColumns(gen.student, dtStudent)</code></pre>
+<p>This is what the clustered data look like. Each classroom is represented by a box, and each school is represented by a color. The intervention group is highlighted by dark outlines:</p>
+<p><img src="/page/clustered_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+</div>
