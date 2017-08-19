@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+
+  <title>Be careful not to control for a post-exposure covariate</title>
+  <meta property="og:title" content="Be careful not to control for a post-exposure covariate" />
+  <meta name="twitter:title" content="Be careful not to control for a post-exposure covariate" />
+  <meta name="description" content="A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research question. The statistical model included adjustments for several factors that are plausible confounders of the relationship between trauma and substance use, such as childhood poverty. However, the model also include a measurement for poverty in adulthood - believing it was somehow confounding the relationship of trauma and substance use.">
+  <meta property="og:description" content="A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research question. The statistical model included adjustments for several factors that are plausible confounders of the relationship between trauma and substance use, such as childhood poverty. However, the model also include a measurement for poverty in adulthood - believing it was somehow confounding the relationship of trauma and substance use.">
+  <meta name="twitter:description" content="A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research …">
+  <meta name="author" content="Keith Goldfeld"/>
+  <meta name="twitter:card" content="summary" />
+  <meta property="og:url" content="/post/be-careful/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:site_name" content="ouR data generation" />
+
+  <meta name="generator" content="Hugo 0.26" />
+  <link rel="canonical" href="/post/be-careful/" />
+  <link rel="alternate" href="/index.xml" type="application/rss+xml" title="ouR data generation">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.7.1/katex.min.css" integrity="sha384-wITovz90syo1dJWVh32uuETPVEtGigN07tkttEqPv+uR2SE/mbQcG7ATL28aI9H0" crossorigin="anonymous">
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/font-awesome/4.7.0/css/font-awesome.min.css" />
+  <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css" integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u" crossorigin="anonymous">
+  <link rel="stylesheet" href="/css/main.css" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Lora:400,700,400italic,700italic" />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:300italic,400italic,600italic,700italic,800italic,400,300,600,700,800" />
+  <link rel="stylesheet" href="/css/pygment_highlights.css" />
+  <link rel="stylesheet" href="/css/highlight.min.css" />
+
+<script>
+window.ga=window.ga||function(){(ga.q=ga.q||[]).push(arguments)};ga.l=+new Date;
+ga('create', 'UA-101083152-1', 'auto');
+ga('send', 'pageview');
+</script>
+<script async src='//www.google-analytics.com/analytics.js'></script>
+
+</head>
+
+  <body>
+    <nav class="navbar navbar-default navbar-fixed-top navbar-custom">
+  <div class="container-fluid">
+    <div class="navbar-header">
+      <button type="button" class="navbar-toggle" data-toggle="collapse" data-target="#main-navbar">
+        <span class="sr-only">Toggle navigation</span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+        <span class="icon-bar"></span>
+      </button>
+      <a class="navbar-brand" href="/">ouR data generation</a>
+    </div>
+
+    <div class="collapse navbar-collapse" id="main-navbar">
+      <ul class="nav navbar-nav navbar-right">
+        
+          
+            <li>
+              <a title="About" href="/page/about/">About</a>
+            </li>
+          
+        
+          
+            <li>
+              <a title="simstudy" href="/page/simstudy">simstudy</a>
+            </li>
+          
+        
+          
+            <li>
+              <a title="shiny" href="/page/shiny">shiny</a>
+            </li>
+          
+        
+          
+            <li>
+              <a title="NYUSOM" href="https://med.nyu.edu/pophealth/department-population-health">NYUSOM</a>
+            </li>
+          
+        
+
+        
+
+        
+      </ul>
+    </div>
+
+    <div class="avatar-container">
+      <div class="avatar-img-border">
+        
+      </div>
+    </div>
+
+  </div>
+</nav>
+
+
+
+
+    
+  
+  
+  
+
+
+
+
+  
+
+  <header class="header-section ">
+    
+    <div class="intro-header no-img">
+      
+      <div class="container">
+        <div class="row">
+          <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1">
+            <div class="post-heading">
+              <h1>Be careful not to control for a post-exposure covariate</h1>
+                
+                
+                  <span class="post-meta">
+  Posted on August 15, 2017
+  
+</span>
+
+
+                
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+
+    
+<div class="container">
+  <div class="row">
+    <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1">
+      <article role="main" class="blog-post">
+        <p>A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research question. The statistical model included adjustments for several factors that are plausible confounders of the relationship between trauma and substance use, such as childhood poverty. However, the model also include a measurement for poverty in adulthood - believing it was somehow confounding the relationship of trauma and substance use. A confounder is a common cause of an exposure/treatment and an outcome; it is hard to conceive of adult poverty as a cause of childhood events, even though it might be related to adult substance use (or maybe not). At best, controlling for adult poverty has no impact on the conclusions of the research; less good, though, is the possibility that it will lead to the conclusion that the effect of trauma is less than it actually is.</p>
+<p>Using a highly contrived simulation of data and the abstract concept of <em>potential outcomes</em>, I am hoping to illuminate some of the issues raised by this type of analysis.</p>
+<div id="potential-outcomes-and-causal-effects" class="section level2">
+<h2>Potential outcomes and causal effects</h2>
+<p>The field of causal inference is a rich one, and I won’t even scratch the surface here. My goal is to present the concepts of potential outcomes so that we can articulate at least one clear way to think about what a causal effect can be defined. Under this framework, we generate data where we can find out the “true” measure of causal effect. And then we can use simple regression models to see how well (or not) they recapture these “known” causal effects.</p>
+<p>If an individual <span class="math inline">\(i\)</span> experiences a traumatic effect as a child, we say that the exposure <span class="math inline">\(X_i = 1\)</span>. Otherwise <span class="math inline">\(X_i = 0\)</span>, there was no traumatic event. (I am going to assume binary exposures just to keep things simple - exposed vs. not exposed.) In the potential outcomes world we say that every individual has possible outcomes <span class="math inline">\(Y_{1i}\)</span> (the outcome we would observe <em>if</em> the individual had experienced trauma) and <span class="math inline">\(Y_{0i}\)</span> (the outcome we would observe <em>if</em> the individual had not. Quite simply, we define the causal effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span> as the difference in potential outcomes, <span class="math inline">\(CE_i = Y_{1i} - Y_{0i}\)</span>. If <span class="math inline">\(Y_{1i} = Y_{0i}\)</span> (i.e. the potential outcomes are the same), we would say that <span class="math inline">\(X\)</span> does not cause <span class="math inline">\(Y\)</span>, at least for individual <span class="math inline">\(i\)</span>.</p>
+<p>In the real world, we only observe one potential outcome - the one associated with the actual exposure. The field of causal inference has lots to say about the assumptions and conditions that are required for us to use observed data to estimate average causal effects; many would say that unless we use a randomized controlled study, those assumptions will never be reasonable. But in the world of simulation, we can generate potential outcomes and observed outcomes, so we know the causal effect both at the individual level and the average population level. And we can see how well our models do.</p>
+</div>
+<div id="simple-confounding" class="section level2">
+<h2>Simple confounding</h2>
+<p>Here’s a relatively straightforward example. Let’s say we are interested in understanding if some measure <span class="math inline">\(X\)</span> causes an outcome <span class="math inline">\(Y\)</span>, where there is a common cause <span class="math inline">\(C\)</span> (the diagram is called a DAG - a directed acyclic graph - and is useful for many things, including laying out data generating process):</p>
+<p><img src="/img/post-careful/SimpleCausal.png" width="300px" /></p>
+<pre class="r"><code>library(broom)
+library(data.table)
+library(simstudy)
+
+def &lt;- defData(varname = &quot;C&quot;, formula = 0.4, dist = &quot;binary&quot;)
+def &lt;- defData(def, &quot;X&quot;, formula = &quot;0.3 + 0.4 * C&quot;, dist = &quot;binary&quot;)
+def &lt;- defData(def, &quot;e&quot;, formula = 0, variance = 2, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;Y0&quot;, formula = &quot;2 * C + e&quot;, dist=&quot;nonrandom&quot;)
+def &lt;- defData(def, &quot;Y1&quot;, formula = &quot;0.5 + 2 * C + e&quot;, dist=&quot;nonrandom&quot;)
+def &lt;- defData(def, &quot;Y_obs&quot;, formula = &quot;Y0 + (Y1 - Y0) * X&quot;, dist = &quot;nonrandom&quot;)
+
+def</code></pre>
+<pre><code>##    varname            formula variance      dist     link
+## 1:       C                0.4        0    binary identity
+## 2:       X      0.3 + 0.4 * C        0    binary identity
+## 3:       e                  0        2    normal identity
+## 4:      Y0          2 * C + e        0 nonrandom identity
+## 5:      Y1    0.5 + 2 * C + e        0 nonrandom identity
+## 6:   Y_obs Y0 + (Y1 - Y0) * X        0 nonrandom identity</code></pre>
+<p>In this example, <span class="math inline">\(X\)</span> does have an effect on <span class="math inline">\(Y\)</span>, but so does <span class="math inline">\(C\)</span>. If we ignore <span class="math inline">\(C\)</span> in assessing the size of the effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span>, we will overestimate that effect, which is 0.5. We can generate data and see that this is the case:</p>
+<pre class="r"><code>set.seed(5)
+dt &lt;- genData(1000, def)</code></pre>
+<p>We see that the true causal effect is easily recovered if we have access to the potential outcomes <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_0\)</span>, but of course we don’t:</p>
+<pre class="r"><code>dt[, mean(Y1 - Y0)] # True causal effect</code></pre>
+<pre><code>## [1] 0.5</code></pre>
+<p>If we compare the average <em>observed</em> outcomes for each exposure group ignoring the confounder, we overestimate the effect of the exposure:</p>
+<pre class="r"><code>dt[X == 1, mean(Y_obs)] - dt[X == 0, mean(Y_obs)]</code></pre>
+<pre><code>## [1] 1.285009</code></pre>
+<p>We can estimate the same effect using simple linear regression:</p>
+<pre class="r"><code>lm1 &lt;- lm(Y_obs ~ X, data = dt)
+tidy(lm1)</code></pre>
+<pre><code>##          term  estimate  std.error statistic      p.value
+## 1 (Intercept) 0.5515963 0.07325865  7.529436 1.137854e-13
+## 2           X 1.2850091 0.10674523 12.038094 2.916261e-31</code></pre>
+<p>And finally, if we adjust for the confounder <span class="math inline">\(C\)</span>, we recover the true causal effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span>, or at least get very close to it:</p>
+<pre class="r"><code>lm2 &lt;- lm(Y_obs ~ X + C, data = dt)
+tidy(lm2)</code></pre>
+<pre><code>##          term   estimate  std.error statistic      p.value
+## 1 (Intercept) 0.08491216 0.06502545  1.305830 1.919117e-01
+## 2           X 0.48935880 0.09678110  5.056347 5.083959e-07
+## 3           C 2.05729945 0.09825925 20.937464 5.767575e-81</code></pre>
+</div>
+<div id="adjusting-for-a-post-exposure-covariate" class="section level2">
+<h2>Adjusting for a post-exposure covariate</h2>
+<p>Now, we are ready to see what happens in a slightly more complicated setting that is defined by this DAG:</p>
+<p><img src="/img/post-careful/ComplexCausal.png" width="400px" /></p>
+<p>In this example <span class="math inline">\(C\)</span> is measured in two time periods, and exposure in period 1 relates to exposure in period 2. (For example, if a child is poor, he is more likely to be poor as an adult.) We are primarily interested in whether or not <span class="math inline">\(X\)</span> (trauma) causes <span class="math inline">\(Y\)</span> (substance use). The difficulty is that <span class="math inline">\(X\)</span> and <span class="math inline">\(C_2\)</span> are related, as are <span class="math inline">\(C_2\)</span> and <span class="math inline">\(Y\)</span>.</p>
+<p>I suggest that in order to fully understand the effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span>, we cannot control for <span class="math inline">\(C_2\)</span>, as tempting as it might be. The intuition is that part of the effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span> is due to the fact that <span class="math inline">\(X\)</span> has an effect on <span class="math inline">\(C_2\)</span>, at least for some individuals. <em>If we control for <span class="math inline">\(C_2\)</span>, we are actually removing a key component of the causal mechanism.</em> Below in is the data generating process - a few things to note: (1) <span class="math inline">\(C_2\)</span> has potential outcomes based on the exposure <span class="math inline">\(X\)</span>. (2) We have restricted the potential outcome <span class="math inline">\(C_{21}\)</span> to be set to 1 if <span class="math inline">\(C_{20}\)</span> is 1. For example, if someone would have been poor in adulthood <em>without</em> exposure to trauma, we assume that they also would have been poor in adulthood had they been exposed to trauma. (3) The potential outcome for <span class="math inline">\(Y\)</span> is dependent on the relevant potential outcome for <span class="math inline">\(C_2\)</span>. That is <span class="math inline">\(Y_0\)</span> depends on <span class="math inline">\(C_{20}\)</span> and <span class="math inline">\(Y_1\)</span> depends on <span class="math inline">\(C_{21}\)</span>.</p>
+<pre><code>##     varname                  formula variance      dist     link
+##  1:      C1                     0.25        0    binary identity
+##  2:       X            -2 + 0.8 * C1        0    binary    logit
+##  3:    C2.0            -2.0 + 1 * C1        0    binary    logit
+##  4:   C2.1x            -1.5 + 1 * C1        0    binary    logit
+##  5:    C2.1        pmax(C2.0, C2.1x)        0 nonrandom identity
+##  6:       e                        0        4    normal identity
+##  7:      Y0          -3 + 5*C2.0 + e        0 nonrandom identity
+##  8:      Y1           0 + 5*C2.1 + e        0 nonrandom identity
+##  9:  C2_obs C2.0 + (C2.1 - C2.0) * X        0 nonrandom identity
+## 10:   Y_obs       Y0 + (Y1 - Y0) * X        0 nonrandom identity</code></pre>
+<pre class="r"><code>set.seed(25)
+dt &lt;- genData(5000, def2)</code></pre>
+<p>Here is the true average causal effect, based on information we will never know:</p>
+<pre class="r"><code>dt[, mean(Y1 - Y0)]</code></pre>
+<pre><code>## [1] 3.903</code></pre>
+<p>When we control for <span class="math inline">\(C_2\)</span>, we are essentially estimating the effect of <span class="math inline">\(X\)</span> at each level <span class="math inline">\(C_2\)</span> (and <span class="math inline">\(C_1\)</span>, since we are controlling for that as well), and then averaging across the sub-samples to arrive at an estimate for the entire sample. We can see that, based on the specification of the potential outcomes in the data generation process, the effect at each level of <span class="math inline">\(C_2\)</span> will be centered around 3.0, which is different from the true causal effect of 3.9. The discrepancy is due to the fact each approach is effectively collecting different sub-samples (one defines groups based on set levels of <span class="math inline">\(X\)</span> and <span class="math inline">\(C_2\)</span>, and the other defines groups based on set levels of <span class="math inline">\(X\)</span> alone) and estimating average effects based on weights determined by the sizes of those two sets of sub-samples.</p>
+<p>Here is the inappropriate model that adjusts for <span class="math inline">\(C_2\)</span>:</p>
+<pre class="r"><code>lm2a &lt;- lm( Y_obs ~ C1 + C2_obs + X , data = dt)
+tidy(lm2a)</code></pre>
+<pre><code>##          term    estimate  std.error   statistic       p.value
+## 1 (Intercept) -3.01360235 0.03481082 -86.5708464  0.000000e+00
+## 2          C1 -0.02078171 0.06765129  -0.3071887  7.587126e-01
+## 3      C2_obs  4.92972384 0.07625838  64.6450138  0.000000e+00
+## 4           X  3.04600204 0.08114223  37.5390478 6.677416e-272</code></pre>
+<p>The estimate for the coefficient of <span class="math inline">\(X\)</span> is 3.0, just as anticipated. Here now is the correct model, and you will see that we recover the true causal effect in the coefficient estimate of <span class="math inline">\(X\)</span> (or at least, we get much, much closer):</p>
+<pre class="r"><code>lm2b &lt;- lm( Y_obs ~ C1 + X , data = dt)
+tidy(lm2b)</code></pre>
+<pre><code>##          term   estimate  std.error statistic       p.value
+## 1 (Intercept) -2.4886726 0.04586832 -54.25689  0.000000e+00
+## 2          C1  0.9665413 0.08930265  10.82321  5.315059e-27
+## 3           X  3.9377832 0.10834926  36.34343 7.868650e-257</code></pre>
+<p>Of course, in the real world, we don’t know the underlying data generating process or the true DAG. And what I have described here is a gross oversimplification of the underlying relationships, and have indeed left out many other factors that likely affect the relationship between childhood trauma and adult substance use. Other measures, such as parental substance use, may be related to both childhood trauma and adult substance use, and may affect poverty in the two time periods in different, complicated ways.</p>
+<p>But the point is that one should give careful thought to what gets included in a model. We may not want to throw everything we measure into the model. Be careful.</p>
+</div>
+
+      </article>
+
+      <ul class="pager blog-pager">
+        
+        
+          <li class="previous">
+            <a href="/post/simulating-incidence-prevalence-bias/" data-toggle="tooltip" data-placement="top" title="Should we be concerned about incidence - prevalence bias?">&larr; Previous Post</a>
+          </li>
+        
+        
+     
+      </ul>
+
+      
+        
+          <div class="disqus-comments">
+            <div id="disqus_thread"></div>
+<script>
+    var disqus_config = function () {
+    
+    
+    
+    };
+    (function() {
+        if (["localhost", "127.0.0.1"].indexOf(window.location.hostname) != -1) {
+            document.getElementById('disqus_thread').innerHTML = 'Disqus comments not available by default when the website is previewed locally.';
+            return;
+        }
+        var d = document, s = d.createElement('script'); s.async = true;
+        s.src = '//' + "rdatagen-net" + '.disqus.com/embed.js';
+        s.setAttribute('data-timestamp', +new Date());
+        (d.head || d.body).appendChild(s);
+    })();
+</script>
+<noscript>Please enable JavaScript to view the <a href="http://disqus.com/?ref_noscript">comments powered by Disqus.</a></noscript>
+<a href="http://disqus.com" class="dsq-brlink">comments powered by <span class="logo-disqus">Disqus</span></a>
+          </div>
+        
+      
+
+    </div>
+  </div>
+</div>
+
+    <footer>
+  <div class="container">
+    <div class="row">
+      <div class="col-lg-8 col-lg-offset-2 col-md-10 col-md-offset-1">
+        <ul class="list-inline text-center footer-links">
+          
+              <li>
+                <a href="mailto:keith.goldfeld@nyumc.org" title="Email me">
+                  <span class="fa-stack fa-lg">
+                    <i class="fa fa-circle fa-stack-2x"></i>
+                    <i class="fa fa-envelope fa-stack-1x fa-inverse"></i>
+                  </span>
+                </a>
+              </li>
+          
+          <li>
+            <a href="/index.xml" title="RSS">
+              <span class="fa-stack fa-lg">
+                <i class="fa fa-circle fa-stack-2x"></i>
+                <i class="fa fa-rss fa-stack-1x fa-inverse"></i>
+              </span>
+            </a>
+          </li>
+          
+        </ul>
+        <p class="credits copyright text-muted">
+          Keith Goldfeld
+          &nbsp;&bull;&nbsp;
+          2017
+
+          
+            &nbsp;&bull;&nbsp;
+            <a href="/">ouR data generation</a>
+          
+        </p>
+        
+        <p class="credits theme-by text-muted">
+          <a href="http://gohugo.io">Hugo v0.26</a> powered &nbsp;&bull;&nbsp; Theme by <a href="http://deanattali.com/beautiful-jekyll/">Beautiful Jekyll</a> adapted to <a href="https://github.com/halogenica/beautifulhugo">Beautiful Hugo</a>
+          
+        </p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.7.1/katex.min.js" integrity="sha384-/y1Nn9+QQAipbNQWU65krzJralCnuOasHncUFXGkdwntGeSvQicrYkiUBwsgUqc1" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.7.1/contrib/auto-render.min.js" integrity="sha384-dq1/gEHSxPZQ7DdrM82ID4YVol9BYyU7GbWlIwnwyPzotpoc57wDw/guX8EaYGPx" crossorigin="anonymous"></script>
+<script src="https://code.jquery.com/jquery-1.12.4.min.js" integrity="sha256-ZosEbRLbNQzLpnKIkEdrPv7lOy9C27hHQ+Xp8a4MxAQ=" crossorigin="anonymous"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js" integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa" crossorigin="anonymous"></script>
+<script src="/js/main.js"></script>
+<script src="/js/highlight.min.js"></script>
+<script> hljs.initHighlightingOnLoad(); </script>
+<script> renderMathInElement(document.body); </script>
+
+
+
+
+
+  </body>
+</html>
+

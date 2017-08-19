@@ -1,0 +1,361 @@
+---
+title: 'Balancing on multiple factors when the sample is too small to stratify '
+author: ''
+date: '2017-06-26'
+slug: balancing-when-sample-is-too-small-to-stratify
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+```{r, echo = FALSE}
+options(width = 71)
+```
+
+Ideally, a study that uses randomization provides a balance of characteristics that might be associated with the outcome being studied. This way, we can be more confident that any differences in outcomes between the groups are due to the group assignments and not to differences in characteristics. Unfortunately, randomization does not *guarantee* balance, especially with smaller sample sizes. If we want to be certain that groups are balanced with respect to a particular characteristic, we need to do something like stratified randomization.
+
+When the sample size is small and we want to guarantee balance across *multiple* characteristics, the task is a bit more challenging. Say we have 20 schools that we are randomizing to two groups, 10 in each, and want to make sure the groups are balanced with respect to 4 characteristics: language, poverty, location, and size. Simple stratification may not work so well. If we assume that these four characteristics are binary (e.g. either "yes" or "no"), there are 16 possible combinations. One or more of these combinations could easily be represented by a single school - so it would be impossible to randomize within each of the 16 combinations. What to do?
+
+One possible approach is to generate all possible randomization schemes of the 20 schools, and keep only those schemes that are balanced with respect to the four characteristics. Once we have a list of acceptable randomization schemes, we can just pick one of *those* at random. (Of course, it is preferable if each school has close to a 50% chance of being assigned to either intervention group.)
+
+## Simulate school-level data
+
+To start, we generate data for our 20 hypothetical schools using `simstudy` functions:
+
+```{r genschools}
+library(simstudy)
+set.seed(125)
+
+# define data characteristics for schools
+ddef <- defData(varname = "language", formula = .3, dist = "binary")
+ddef <- defData(ddef, "poverty", formula = .2, dist = "binary")
+ddef <- defData(ddef, "location", formula = .5, dist = "binary")
+ddef <- defData(ddef, "size", formula = .5, dist = "binary")
+ddef
+
+# generate schools
+dt <- genData(20, ddef)
+
+# number of schools in each combination
+dt[, .N, keyby = .(language,poverty,location,size)]
+
+```
+
+In this case, we have nine different combinations of the four characteristics, four of which include only a single school (rows 2, 4, 7, and 8). Stratification wouldn't work necessarily work here if our goal was balance across all four characteristics.
+
+## Create randomization scenarios to assess for balance
+
+Ideally, we would generate all possible randomization combinations and check them all for balance. If the number of total units (e.g. schools) is small, this does not pose a challenge (e.g. if N=4, then we only have six possible randomization schemes: TTCC, TCTC, TCCT, CTTC, CTCT, CCTT). However, with N=20, then there are 184,756 possible randomization schemes. Depending on the efficiency of the algorithm, it may be impractical to evaluate all the schemes. So, an alternative is to sample a subset of the schemes and evaluate those. For illustration purposes (so that you can understand what I am doing), I am using some very inefficient `R` code (using a loops). As a result, I cannot evaluate all possible schemes in a reasonable period of time to get this post out; I decided to sample instead to evaluate 1000 possible randomizations. (At the end of this post, I show results using much more efficient code that uses data.table and Rcpp code much more effectively - so that we can quickly evaluate millions of randomization schemes.)
+
+To start, I create all combinations of randomization schemes:
+
+```{r}
+totalSchools = 20
+rxSchools = 10
+
+xRx <- t(combn(totalSchools, rxSchools)) 
+
+# show 5 randomly sampled combinations
+
+sampleRows <- sample(nrow(xRx), 5, replace = FALSE)
+xRx[sampleRows,]
+```
+
+Below is a function (which I chose to do in Rcpp) that converts the `xRx` matrix of school ids to a 20-column matrix of 1's and 0's indicating whether or not a school is randomized to the intervention in a particular scenario:
+
+```{r engine = "Rcpp"}
+#include <RcppArmadillo.h>
+
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+using namespace arma;
+
+// [[Rcpp::export]]
+
+NumericMatrix convert01(NumericMatrix xmat, int tcols) {
+  
+  int xrows = xmat.nrow();
+  int xcols = xmat.ncol();
+  
+  NumericMatrix pmat(xrows, tcols);
+  
+  for (int i=0; i < xrows; i++) {
+    for (int j=0; j < xcols; j++)  {
+      pmat(i, xmat(i,j) - 1) = 1; 
+    }
+  } 
+  return(pmat);
+}
+```
+
+```{r, }
+x01 <- convert01(xRx, totalSchools)
+
+# show some rows
+
+x01[sampleRows,]
+```
+
+Because the evaluation code is so inefficient, I draw 1,000 rows at random from this "intervention" matrix `x01` (after converting it to a data.table).
+
+```{r}
+# convert matrix to data.table
+d01 <- data.table(x01)
+d01[, id := .I]
+
+ids <- sample(nrow(d01), 1000, replace = FALSE)
+sampleD01 <- d01[id %in% ids]
+```
+
+Now we are ready to evaluate each of the 1,000 schemes. As I mentioned before, this approach is highly inefficient as the algorithm requires us to literally loop through each each combination to find the balanced ones. I have sacrificed efficiency and speed for clarity of code (I hope).
+
+```{r}
+for (i in 1:1000) {
+  
+  dt[, grp:= t(sampleD01[i,1:20])]
+  
+  dx <- dt[ , .N, keyby = .(language, grp)]
+  dc <- dcast(dx, language ~ grp, fill = 0, value.var = "N" )
+  dc[, diff := abs(`1` - `0`)]
+  
+  # we declare a scheme balanced if counts differ by
+  # no more than 1 school
+  
+  sampleD01[i, language := (sum(dc[, diff > 1]) == 0)]
+  
+  dx <- dt[ , .N, keyby = .(poverty, grp)]
+  dc <- dcast(dx, poverty ~ grp, fill = 0, value.var = "N" )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, poverty := (sum(dc[, diff > 1]) == 0)]
+  
+  dx <- dt[ , .N, keyby = .(location, grp)]
+  dc <- dcast(dx, location ~ grp, fill = 0, value.var = "N" )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, location := (sum(dc[, diff > 1]) == 0)]
+  
+  dx <- dt[ , .N, keyby = .(size, grp)]
+  dc <- dcast(dx, size ~ grp, fill = 0, value.var = "N" )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, size := (sum(dc[, diff > 1]) == 0)]
+  
+}
+```
+
+The final determination of balance is made if a scheme is balanced across all four characteristics. In this case, 136 of the 1,000 schemes were balanced based on this criterion:
+
+```{r}
+sampleD01[, balanced := all(language, poverty, location, size), keyby = id]
+
+# proportion of sampled combinations that are balanced ...
+
+sampleD01[,mean(balanced)]
+```
+
+And let's inspect the actual balance of two randomly selected schemes - one which is balanced, and one which is not:
+
+```{r}
+sTrue <- sampleD01[balanced == TRUE]
+sFalse <- sampleD01[balanced == FALSE]
+```
+    
+### A balanced scheme
+
+```{r}
+dtAssigned <- copy(dt)
+dtAssigned[, group := as.vector(t(sTrue[sample(.N, 1), 1:20]))]
+
+dtAssigned[, .N, keyby=.(language, group)]
+dtAssigned[, .N, keyby=.(poverty, group)]
+dtAssigned[, .N, keyby=.(location, group)]
+dtAssigned[, .N, keyby=.(size, group)]
+```
+
+### An unbalanced scheme
+
+In this case, language and location are imbalanced, though size and poverty are fine.
+    
+```{r}
+dtAssigned <- copy(dt)
+dtAssigned[, group := as.vector(t(sFalse[sample(.N, 1), 1:20]))]
+
+dtAssigned[, .N, keyby=.(language, group)]
+dtAssigned[, .N, keyby=.(poverty, group)]
+dtAssigned[, .N, keyby=.(location, group)]
+dtAssigned[, .N, keyby=.(size, group)]
+
+```
+
+```{r, engine = "Rcpp", echo = FALSE}
+#include <RcppArmadilloExtensions/sample.h>
+
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+
+// [[Rcpp::export]]
+
+NumericVector stl_sort(NumericVector x) {
+  
+  NumericVector y = clone(x);
+  std::sort(y.begin(), y.end());
+  return y;
+  
+}
+
+// [[Rcpp::export]]
+
+NumericMatrix cppPerm(int ncol, int nchoose, int N) {
+  
+  NumericVector X(ncol);
+  NumericVector Xtemp(ncol);
+  NumericMatrix Y(N, nchoose);
+  
+  for (int j = 0; j < ncol; j++) {
+    X(j) = j + 1;
+  }
+  
+  for (int i = 0; i < N; i++) {
+    Xtemp = RcppArmadillo::sample(X, nchoose, FALSE);
+    Y(i, _) = stl_sort(Xtemp);
+  }
+  
+  return(Y);
+}
+
+```
+
+```{r, engine="Rcpp", echo = FALSE}
+#include <RcppArmadillo.h>
+
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+using namespace arma;
+
+// [[Rcpp::export]]
+
+NumericMatrix groupX(IntegerVector Group1, IntegerVector Group2) {
+  
+  int n = Group1.size();
+  
+  ivec Group(Group1.begin(), n, false);
+  ivec Group_unique = unique(Group);
+  
+  ivec GroupX(Group2.begin(), n, false);
+  ivec Group_uniqueX = unique(GroupX);
+  
+  int k1 = Group_unique.size();
+  int k2 = Group_uniqueX.size();
+  
+  NumericMatrix result(k1, k2);
+  
+  for(int i = 0; i < k1; i++) {
+    for(int j = 0; j < k2; j++) {
+    
+    uvec test = find(Group == Group_unique(i) && GroupX == Group_uniqueX(j));
+    result(i, j) = test.size(); 
+    
+    }
+  }
+  
+  return result;
+    
+}
+
+// [[Rcpp::export]]
+
+bool cppChk( IntegerVector dtrow, 
+             IntegerMatrix dorig) {
+
+  int balanced = TRUE;
+  int varnum = 0;
+  
+  while (balanced==TRUE && varnum <= dorig.ncol()-1 ) {
+    
+    IntegerVector colX = dorig(_, varnum);
+    NumericMatrix X = groupX(colX, dtrow );
+    LogicalVector Y = ( abs(X(_, 1) - (X(_, 0))) > 1);
+    if (sum(Y) != 0) balanced = FALSE;
+    varnum += 1;
+    
+  }
+  
+  return(balanced);
+}
+```
+
+```{r, echo = FALSE}
+xPerms <- function(nsites, nRx, N = NULL) {
+  
+  if (is.null(N)) {
+    x <- t(combn(nsites, nRx))  
+  } else {
+    x <- cppPerm(nsites, nRx, N)
+    x <- unique(x)
+  }
+  
+  xmat <- convert01(x, nsites)
+  
+  dmat <- data.table(xmat)
+  
+  cc <- "c(varlist)"
+  y <- names(dmat)
+  varlist = paste( y, collapse=",")
+  cc <- gsub("varlist", varlist, cc)
+  
+  setattr(dmat, "varlist" , cc)
+  dmat[, id := .I]
+  
+  return(dmat)
+  
+}
+```
+
+## Fast implementation with data.table and Rcpp
+
+As I alluded to before, if we want to implement this in the real world, it would be preferable to use code that does not bog down when we want to search 100,000+ possible randomization schemes. I have written a set of `R` and `Rcpp` functions the facilitate this. (Code is available [here](https://github.com/kgoldfeld/RDataGenBlog/tree/master/static/img/post-balance).)
+
+```{r}
+
+# generate all possible schemes
+
+xperm <- xPerms(totalSchools, rxSchools, N=NULL) 
+
+nrow(xperm)
+xperm[sample(nrow(xperm), 5, replace = FALSE)]
+
+# prepare data for evaluation
+
+dtMat <- as.matrix(dt[,-1])
+cc <- parse(text=attr(xperm, "varlist"))
+cc
+
+# evaluate each combination
+
+sF <-  xperm[, cppChk(eval(cc), dtMat), keyby = id]
+sF[sample(nrow(sF), 5, replace = FALSE)]
+
+# keep only the balanced schemes
+
+sFinal <- xperm[sF$V1]
+nrow(sFinal)
+
+# randomize from the balanced schemes
+
+selectRow <- sample(nrow(sFinal), 1)
+
+# check balance of randomized scheme
+
+dtAssigned <- copy(dt)
+dtAssigned[, group := as.vector(t(sFinal[selectRow, -"id"]))]
+
+dtAssigned[, .N, keyby=.(language, group)]
+dtAssigned[, .N, keyby=.(poverty, group)]
+dtAssigned[, .N, keyby=.(location, group)]
+dtAssigned[, .N, keyby=.(size, group)]
+
+```

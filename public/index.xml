@@ -7,18 +7,1687 @@
     <generator>Hugo -- gohugo.io</generator>
     <managingEditor>keith.goldfeld@nyumc.org (Keith Goldfeld)</managingEditor>
     <webMaster>keith.goldfeld@nyumc.org (Keith Goldfeld)</webMaster>
-    <lastBuildDate>Thu, 08 Jun 2017 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Tue, 15 Aug 2017 00:00:00 +0000</lastBuildDate>
+    <atom:link href="/" rel="self" type="application/rss+xml" />
     
-	<atom:link href="/index.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>Be careful not to control for a post-exposure covariate</title>
+      <link>/post/be-careful/</link>
+      <pubDate>Tue, 15 Aug 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/be-careful/</guid>
+      <description>&lt;p&gt;A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research question. The statistical model included adjustments for several factors that are plausible confounders of the relationship between trauma and substance use, such as childhood poverty. However, the model also include a measurement for poverty in adulthood - believing it was somehow confounding the relationship of trauma and substance use. A confounder is a common cause of an exposure/treatment and an outcome; it is hard to conceive of adult poverty as a cause of childhood events, even though it might be related to adult substance use (or maybe not). At best, controlling for adult poverty has no impact on the conclusions of the research; less good, though, is the possibility that it will lead to the conclusion that the effect of trauma is less than it actually is.&lt;/p&gt;
+&lt;p&gt;Using a highly contrived simulation of data and the abstract concept of &lt;em&gt;potential outcomes&lt;/em&gt;, I am hoping to illuminate some of the issues raised by this type of analysis.&lt;/p&gt;
+&lt;div id=&#34;potential-outcomes-and-causal-effects&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Potential outcomes and causal effects&lt;/h2&gt;
+&lt;p&gt;The field of causal inference is a rich one, and I won’t even scratch the surface here. My goal is to present the concepts of potential outcomes so that we can articulate at least one clear way to think about what a causal effect can be defined. Under this framework, we generate data where we can find out the “true” measure of causal effect. And then we can use simple regression models to see how well (or not) they recapture these “known” causal effects.&lt;/p&gt;
+&lt;p&gt;If an individual &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt; experiences a traumatic effect as a child, we say that the exposure &lt;span class=&#34;math inline&#34;&gt;\(X_i = 1\)&lt;/span&gt;. Otherwise &lt;span class=&#34;math inline&#34;&gt;\(X_i = 0\)&lt;/span&gt;, there was no traumatic event. (I am going to assume binary exposures just to keep things simple - exposed vs. not exposed.) In the potential outcomes world we say that every individual has possible outcomes &lt;span class=&#34;math inline&#34;&gt;\(Y_{1i}\)&lt;/span&gt; (the outcome we would observe &lt;em&gt;if&lt;/em&gt; the individual had experienced trauma) and &lt;span class=&#34;math inline&#34;&gt;\(Y_{0i}\)&lt;/span&gt; (the outcome we would observe &lt;em&gt;if&lt;/em&gt; the individual had not. Quite simply, we define the causal effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; as the difference in potential outcomes, &lt;span class=&#34;math inline&#34;&gt;\(CE_i = Y_{1i} - Y_{0i}\)&lt;/span&gt;. If &lt;span class=&#34;math inline&#34;&gt;\(Y_{1i} = Y_{0i}\)&lt;/span&gt; (i.e. the potential outcomes are the same), we would say that &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; does not cause &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, at least for individual &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;In the real world, we only observe one potential outcome - the one associated with the actual exposure. The field of causal inference has lots to say about the assumptions and conditions that are required for us to use observed data to estimate average causal effects; many would say that unless we use a randomized controlled study, those assumptions will never be reasonable. But in the world of simulation, we can generate potential outcomes and observed outcomes, so we know the causal effect both at the individual level and the average population level. And we can see how well our models do.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;simple-confounding&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Simple confounding&lt;/h2&gt;
+&lt;p&gt;Here’s a relatively straightforward example. Let’s say we are interested in understanding if some measure &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; causes an outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, where there is a common cause &lt;span class=&#34;math inline&#34;&gt;\(C\)&lt;/span&gt; (the diagram is called a DAG - a directed acyclic graph - and is useful for many things, including laying out data generating process):&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/img/post-careful/SimpleCausal.png&#34; width=&#34;300px&#34; /&gt;&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(broom)
+library(data.table)
+library(simstudy)
+
+def &amp;lt;- defData(varname = &amp;quot;C&amp;quot;, formula = 0.4, dist = &amp;quot;binary&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;X&amp;quot;, formula = &amp;quot;0.3 + 0.4 * C&amp;quot;, dist = &amp;quot;binary&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;e&amp;quot;, formula = 0, variance = 2, dist = &amp;quot;normal&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;Y0&amp;quot;, formula = &amp;quot;2 * C + e&amp;quot;, dist=&amp;quot;nonrandom&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;Y1&amp;quot;, formula = &amp;quot;0.5 + 2 * C + e&amp;quot;, dist=&amp;quot;nonrandom&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;Y_obs&amp;quot;, formula = &amp;quot;Y0 + (Y1 - Y0) * X&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+
+def&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    varname            formula variance      dist     link
+## 1:       C                0.4        0    binary identity
+## 2:       X      0.3 + 0.4 * C        0    binary identity
+## 3:       e                  0        2    normal identity
+## 4:      Y0          2 * C + e        0 nonrandom identity
+## 5:      Y1    0.5 + 2 * C + e        0 nonrandom identity
+## 6:   Y_obs Y0 + (Y1 - Y0) * X        0 nonrandom identity&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In this example, &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; does have an effect on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, but so does &lt;span class=&#34;math inline&#34;&gt;\(C\)&lt;/span&gt;. If we ignore &lt;span class=&#34;math inline&#34;&gt;\(C\)&lt;/span&gt; in assessing the size of the effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, we will overestimate that effect, which is 0.5. We can generate data and see that this is the case:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;set.seed(5)
+dt &amp;lt;- genData(1000, def)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We see that the true causal effect is easily recovered if we have access to the potential outcomes &lt;span class=&#34;math inline&#34;&gt;\(Y_1\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y_0\)&lt;/span&gt;, but of course we don’t:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt[, mean(Y1 - Y0)] # True causal effect&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.5&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;If we compare the average &lt;em&gt;observed&lt;/em&gt; outcomes for each exposure group ignoring the confounder, we overestimate the effect of the exposure:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt[X == 1, mean(Y_obs)] - dt[X == 0, mean(Y_obs)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 1.285009&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We can estimate the same effect using simple linear regression:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;lm1 &amp;lt;- lm(Y_obs ~ X, data = dt)
+tidy(lm1)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term  estimate  std.error statistic      p.value
+## 1 (Intercept) 0.5515963 0.07325865  7.529436 1.137854e-13
+## 2           X 1.2850091 0.10674523 12.038094 2.916261e-31&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And finally, if we adjust for the confounder &lt;span class=&#34;math inline&#34;&gt;\(C\)&lt;/span&gt;, we recover the true causal effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, or at least get very close to it:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;lm2 &amp;lt;- lm(Y_obs ~ X + C, data = dt)
+tidy(lm2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term   estimate  std.error statistic      p.value
+## 1 (Intercept) 0.08491216 0.06502545  1.305830 1.919117e-01
+## 2           X 0.48935880 0.09678110  5.056347 5.083959e-07
+## 3           C 2.05729945 0.09825925 20.937464 5.767575e-81&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;adjusting-for-a-post-exposure-covariate&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Adjusting for a post-exposure covariate&lt;/h2&gt;
+&lt;p&gt;Now, we are ready to see what happens in a slightly more complicated setting that is defined by this DAG:&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/img/post-careful/ComplexCausal.png&#34; width=&#34;400px&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;In this example &lt;span class=&#34;math inline&#34;&gt;\(C\)&lt;/span&gt; is measured in two time periods, and exposure in period 1 relates to exposure in period 2. (For example, if a child is poor, he is more likely to be poor as an adult.) We are primarily interested in whether or not &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; (trauma) causes &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; (substance use). The difficulty is that &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt; are related, as are &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;I suggest that in order to fully understand the effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;, we cannot control for &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;, as tempting as it might be. The intuition is that part of the effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; on &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; is due to the fact that &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; has an effect on &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;, at least for some individuals. &lt;em&gt;If we control for &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;, we are actually removing a key component of the causal mechanism.&lt;/em&gt; Below in is the data generating process - a few things to note: (1) &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt; has potential outcomes based on the exposure &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt;. (2) We have restricted the potential outcome &lt;span class=&#34;math inline&#34;&gt;\(C_{21}\)&lt;/span&gt; to be set to 1 if &lt;span class=&#34;math inline&#34;&gt;\(C_{20}\)&lt;/span&gt; is 1. For example, if someone would have been poor in adulthood &lt;em&gt;without&lt;/em&gt; exposure to trauma, we assume that they also would have been poor in adulthood had they been exposed to trauma. (3) The potential outcome for &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; is dependent on the relevant potential outcome for &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;. That is &lt;span class=&#34;math inline&#34;&gt;\(Y_0\)&lt;/span&gt; depends on &lt;span class=&#34;math inline&#34;&gt;\(C_{20}\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y_1\)&lt;/span&gt; depends on &lt;span class=&#34;math inline&#34;&gt;\(C_{21}\)&lt;/span&gt;.&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;##     varname                  formula variance      dist     link
+##  1:      C1                     0.25        0    binary identity
+##  2:       X            -2 + 0.8 * C1        0    binary    logit
+##  3:    C2.0            -2.0 + 1 * C1        0    binary    logit
+##  4:   C2.1x            -1.5 + 1 * C1        0    binary    logit
+##  5:    C2.1        pmax(C2.0, C2.1x)        0 nonrandom identity
+##  6:       e                        0        4    normal identity
+##  7:      Y0          -3 + 5*C2.0 + e        0 nonrandom identity
+##  8:      Y1           0 + 5*C2.1 + e        0 nonrandom identity
+##  9:  C2_obs C2.0 + (C2.1 - C2.0) * X        0 nonrandom identity
+## 10:   Y_obs       Y0 + (Y1 - Y0) * X        0 nonrandom identity&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;set.seed(25)
+dt &amp;lt;- genData(5000, def2)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Here is the true average causal effect, based on information we will never know:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt[, mean(Y1 - Y0)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 3.903&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;When we control for &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;, we are essentially estimating the effect of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; at each level &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt; (and &lt;span class=&#34;math inline&#34;&gt;\(C_1\)&lt;/span&gt;, since we are controlling for that as well), and then averaging across the sub-samples to arrive at an estimate for the entire sample. We can see that, based on the specification of the potential outcomes in the data generation process, the effect at each level of &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt; will be centered around 3.0, which is different from the true causal effect of 3.9. The discrepancy is due to the fact each approach is effectively collecting different sub-samples (one defines groups based on set levels of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;, and the other defines groups based on set levels of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; alone) and estimating average effects based on weights determined by the sizes of those two sets of sub-samples.&lt;/p&gt;
+&lt;p&gt;Here is the inappropriate model that adjusts for &lt;span class=&#34;math inline&#34;&gt;\(C_2\)&lt;/span&gt;:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;lm2a &amp;lt;- lm( Y_obs ~ C1 + C2_obs + X , data = dt)
+tidy(lm2a)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term    estimate  std.error   statistic       p.value
+## 1 (Intercept) -3.01360235 0.03481082 -86.5708464  0.000000e+00
+## 2          C1 -0.02078171 0.06765129  -0.3071887  7.587126e-01
+## 3      C2_obs  4.92972384 0.07625838  64.6450138  0.000000e+00
+## 4           X  3.04600204 0.08114223  37.5390478 6.677416e-272&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The estimate for the coefficient of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; is 3.0, just as anticipated. Here now is the correct model, and you will see that we recover the true causal effect in the coefficient estimate of &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt; (or at least, we get much, much closer):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;lm2b &amp;lt;- lm( Y_obs ~ C1 + X , data = dt)
+tidy(lm2b)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term   estimate  std.error statistic       p.value
+## 1 (Intercept) -2.4886726 0.04586832 -54.25689  0.000000e+00
+## 2          C1  0.9665413 0.08930265  10.82321  5.315059e-27
+## 3           X  3.9377832 0.10834926  36.34343 7.868650e-257&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Of course, in the real world, we don’t know the underlying data generating process or the true DAG. And what I have described here is a gross oversimplification of the underlying relationships, and have indeed left out many other factors that likely affect the relationship between childhood trauma and adult substance use. Other measures, such as parental substance use, may be related to both childhood trauma and adult substance use, and may affect poverty in the two time periods in different, complicated ways.&lt;/p&gt;
+&lt;p&gt;But the point is that one should give careful thought to what gets included in a model. We may not want to throw everything we measure into the model. Be careful.&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
     
+    <item>
+      <title>Should we be concerned about incidence - prevalence bias?</title>
+      <link>/post/simulating-incidence-prevalence-bias/</link>
+      <pubDate>Wed, 09 Aug 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/simulating-incidence-prevalence-bias/</guid>
+      <description>&lt;p&gt;Recently, we were planning a study to evaluate the effect of an intervention on outcomes for very sick patients who show up in the emergency department. My collaborator had concerns about a phenomenon that she had observed in other studies that might affect the results - patients measured earlier in the study tend to be sicker than those measured later in the study. This might not be a problem, but in the context of a stepped-wedge study design (see &lt;a href=&#34;https://www.rdatagen.net/post/using-simulation-for-power-analysis-an-example/&#34;&gt;this&lt;/a&gt; for a discussion that touches this type of study design), this could definitely generate biased estimates: when the intervention occurs later in the study (as it does in a stepped-wedge design), the “exposed” and “unexposed” populations could differ, and in turn so could the outcomes. We might confuse an artificial effect as an intervention effect.&lt;/p&gt;
+&lt;p&gt;What could explain this phenomenon? The title of this post provides a hint: cases earlier in a study are more likely to be prevalent ones (i.e. they have been sick for a while), whereas later in the study cases tend to be incident (i.e. they only recently become sick). Even though both prevalent and incident cases are sick, the former may be sicker on average than the latter, simply because their condition has had more time develop.&lt;/p&gt;
+&lt;p&gt;We didn’t have any data to test out this hypothesis (if our grant proposal is funded, we will be able to do that), so I decided to see if I could simulate this phenomenon. In my continuing series exploring simulation using &lt;code&gt;Rcpp&lt;/code&gt;, &lt;code&gt;simstudy&lt;/code&gt;, and &lt;code&gt;data.table&lt;/code&gt;, I am presenting some code that I used to do this.&lt;/p&gt;
+&lt;div id=&#34;generating-a-population-of-patients&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Generating a population of patients&lt;/h2&gt;
+&lt;p&gt;The first task is to generate a population of individuals, each of whom starts out healthy and potentially becomes sicker over time. Time starts in month 1 and ends at some fixed point - in the first example, I end at 400 months. Each individual has a starting health status and a start month. In the examples that follow, health status is 1 through 4, with 1 being healthy, 3 is quite sick, and 4 is death. And, you can think of the start month as the point where the individual ages into the study. (For example, if the study includes only people 65 and over, the start month is the month the individual turns 65.) If an individual starts in month 300, she will have no measurements in periods 1 through 299 (i.e. health status will be 0).&lt;/p&gt;
+&lt;p&gt;The first part of the simulation generates a start month and starting health status for each individual, and then generates a health status for each individual until the end of time. Some individuals may die, while others may go all the way to the end of the simulation in a healthy state.&lt;/p&gt;
+&lt;div id=&#34;rcpp-function-to-generate-health-status-for-each-period&#34; class=&#34;section level4&#34;&gt;
+&lt;h4&gt;Rcpp function to generate health status for each period&lt;/h4&gt;
+&lt;p&gt;While it is generally preferable to avoid loops in R, sometimes it cannot be &lt;a href=&#34;https://www.rdatagen.net/post/first-blog-entry/&#34;&gt;avoided&lt;/a&gt;. I believe generating a health status that depends on the previous health status (a Markov process) is one of those situations. So, I have written an Rcpp function to do this - it is orders of magnitude faster than doing this in R:&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;RcppArmadilloExtensions/sample.h&amp;gt;
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp; 
+
+// [[Rcpp::export]]
+IntegerVector MCsim( unsigned int nMonths, NumericMatrix P, 
+                     int startStatus, unsigned int startMonth ) {
+  
+  IntegerVector sim( nMonths );
+  IntegerVector healthStats( P.ncol() );
+  NumericVector currentP;
+  IntegerVector newstate;
+  
+  unsigned int q = P.ncol();
+  healthStats = Rcpp::seq(1, q);
+  
+  sim[startMonth - 1] = startStatus;
+  
+  /* Loop through each month for each individual */
+  
+  for (unsigned int i = startMonth; i &amp;lt; nMonths; i++) {
+    
+    /* new state based on health status of last period and
+       probability of transitioning to different state     */ 
+    
+    newstate = RcppArmadillo::sample( healthStats, 
+                                      1, 
+                                      TRUE, 
+                                      P.row(sim(i-1) - 1) ); 
+    sim(i) = newstate(0);
+    
+  }
+  
+  return sim;
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;br&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;generating-the-data&#34; class=&#34;section level4&#34;&gt;
+&lt;h4&gt;Generating the data&lt;/h4&gt;
+&lt;p&gt;The data generation process is shown below. The general outline of the process is (1) define transition probabilities, (2) define starting health status distribution, (3) generate starting health statuses and start months, and (4) generate health statuses for each follow-up month.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Transition matrix for moving through health statuses
+
+P &amp;lt;- matrix(c(0.985, 0.015, 0.000, 0.000, 
+              0.000, 0.950, 0.050, 0.000,
+              0.000, 0.000, 0.850, 0.150,
+              0.000, 0.000, 0.000, 1.000), nrow = 4, byrow = TRUE)
+
+maxFU = 400
+nPerMonth = 350
+N = maxFU * nPerMonth
+
+ddef &amp;lt;- defData(varname = &amp;quot;sHealth&amp;quot;, 
+                formula = &amp;quot;0.80; 0.15; 0.05&amp;quot;, 
+                dist = &amp;quot;categorical&amp;quot;)
+
+# generate starting health values (1, 2, or 3) for all individuals
+set.seed(123)
+did &amp;lt;- genData(n = N, dtDefs = ddef)
+
+# each month, 350 age in to the sample
+did[, sMonth := rep(1:maxFU, each = nPerMonth)]
+
+# show table for 10 randomly selected individuals
+did[id %in% sample(x = did$id, size = 10, replace = FALSE)] &lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id sHealth sMonth
+##  1:  15343       2     44
+##  2:  19422       2     56
+##  3:  41426       1    119
+##  4:  50050       1    143
+##  5:  63042       1    181
+##  6:  83584       1    239
+##  7:  93295       1    267
+##  8: 110034       1    315
+##  9: 112164       3    321
+## 10: 123223       1    353&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# generate the health status history based on the transition matrix
+dhealth &amp;lt;- did[, .(sHealth, sMonth, health = MCsim(maxFU, P, sHealth, sMonth)), 
+                 keyby = id]
+dhealth[, month := c(1:.N), by = id]
+
+dhealth&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##               id sHealth sMonth health month
+##        1:      1       1      1      1     1
+##        2:      1       1      1      1     2
+##        3:      1       1      1      1     3
+##        4:      1       1      1      1     4
+##        5:      1       1      1      1     5
+##       ---                                   
+## 55999996: 140000       1    400      0   396
+## 55999997: 140000       1    400      0   397
+## 55999998: 140000       1    400      0   398
+## 55999999: 140000       1    400      0   399
+## 56000000: 140000       1    400      1   400&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;br&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;simulation-needs-burn-in-period&#34; class=&#34;section level4&#34;&gt;
+&lt;h4&gt;Simulation needs burn-in period&lt;/h4&gt;
+&lt;p&gt;The simulation process itself is biased in its early phases as there are too many individuals in the sample who have just aged in compared to those who are “older”. (This is sort of the the reverse of the incidence - prevalence bias.) Since individuals tend to have better health status when they are “younger”, the average health status of the simulation in its early phases is biased downwards by the preponderance of young individuals in the population. This suggests that any evaluation of simulated data needs to account for a “burn-in” period that ensures there is a mix of “younger” and “older” individuals. To show this, I have calculated an average health score for each period of the simulation and plotted the results. You can see that the sample stabilizes after about 200 months in this simulation.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# count number of individuals with a particular heath statust each month
+
+cmonth &amp;lt;- dhealth[month &amp;gt; 0, .N, keyby = .(month, health)]
+cmonth&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##       month health      N
+##    1:     1      0 139650
+##    2:     1      1    286
+##    3:     1      2     47
+##    4:     1      3     17
+##    5:     2      0 139300
+##   ---                    
+## 1994:   399      4 112203
+## 1995:   400      1  18610
+## 1996:   400      2   6515
+## 1997:   400      3   2309
+## 1998:   400      4 112566&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# transform data from &amp;quot;long&amp;quot; form to &amp;quot;wide&amp;quot; form and calculate average
+
+mtotal &amp;lt;- dcast(data = cmonth, 
+                formula = month ~ health, 
+                fill = 0, 
+                value.var = &amp;quot;N&amp;quot;)
+
+mtotal[, total := `1` + `2` + `3`]
+mtotal[, wavg := (`1` + 2*`2` + 3*`3`)/total]
+mtotal&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      month      0     1    2    3      4 total     wavg
+##   1:     1 139650   286   47   17      0   350 1.231429
+##   2:     2 139300   558  106   32      4   696 1.244253
+##   3:     3 138950   829  168   45      8  1042 1.247601
+##   4:     4 138600  1104  215   66     15  1385 1.250542
+##   5:     5 138250  1362  278   87     23  1727 1.261726
+##  ---                                                   
+## 396:   396   1400 18616 6499 2351 111134 27466 1.407813
+## 397:   397   1050 18613 6537 2321 111479 27471 1.406938
+## 398:   398    700 18587 6561 2323 111829 27471 1.407957
+## 399:   399    350 18602 6541 2304 112203 27447 1.406201
+## 400:   400      0 18610 6515 2309 112566 27434 1.405810&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ggplot(data = mtotal, aes(x=month, y=wavg)) +
+  geom_line() +
+  ylim(1.2, 1.5) +
+  geom_hline(yintercept = 1.411, lty = 3) +
+  geom_vline(xintercept = 200, lty = 3) +
+  xlab(&amp;quot;Month&amp;quot;) +
+  ylab(&amp;quot;Average health status&amp;quot;) +
+  theme(panel.background = element_rect(fill = &amp;quot;grey90&amp;quot;),
+        panel.grid = element_blank(), 
+        plot.title = element_text(size = 12, vjust = 0.5, hjust = 0) ) + 
+  ggtitle(&amp;quot;Average health status of simulated population&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-08-09-simulating-incidence-prevalence-bias_files/figure-html/unnamed-chunk-3-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&#34;generating-monthly-study-cohorts&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Generating monthly study cohorts&lt;/h2&gt;
+&lt;p&gt;Now we are ready to see if we can simulate the incidence - prevalence bias. The idea here is to find the first month during which an individual (1) is “active” (i.e. the period being considered is on or after the individual’s start period), (2) has an emergency department visit, and (3) whose health status has reached a specified threshold.&lt;/p&gt;
+&lt;p&gt;We can set a final parameter that looks back some number of months (say 6 or 12) to see if there have been any previous qualifying emergency room visits before the study start period (which in our case will be month 290 to mitigate an burn-in bias identified above). This “look-back” will be used to mitigate some of the bias by creating a washout period that makes the prevalent cases look more like incident cases. This look-back parameter is calculated each month for each individual using an Rcpp function that loops through each period:&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;Rcpp.h&amp;gt;
+
+using namespace Rcpp;
+
+// [[Rcpp::export]]
+IntegerVector cAddPrior(IntegerVector idx, 
+                        IntegerVector event,
+                        int lookback) {
+  
+  int nRow = idx.length();
+  IntegerVector sumPrior(nRow, NA_INTEGER);
+
+  for (unsigned int i = lookback; i &amp;lt; nRow; i++) {
+    
+    IntegerVector seqx = Rcpp::seq(i-lookback, i-1);
+    IntegerVector x = event[seqx];
+    sumPrior[i] = sum(x);
+    
+  }
+  
+  return(sumPrior);
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;br&gt;&lt;/p&gt;
+&lt;div id=&#34;generating-a-single-cohort&#34; class=&#34;section level4&#34;&gt;
+&lt;h4&gt;Generating a single cohort&lt;/h4&gt;
+&lt;p&gt;The following code (1) generates a population (as we did above), (2) generates emergency department visits that are dependent on the health status (the sicker an individual is, the more likely they are to go to the ED), (3) calculates the number of eligible ED visits during the look-back period, and (4) creates the monthly cohorts based on the selection criteria. At the end, we calculate average health status for the cohort by month of cohort - this will be used to illustrate the bias.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;maxFU = 325 
+nPerMonth = 100
+N = maxFU * nPerMonth
+
+START = 289 # to allow for adequate burn-in 
+HEALTH = 2
+LOOKBACK = 6 # how far to lookback
+
+set.seed(123)
+did &amp;lt;- genData(n = N, dtDefs = ddef)
+did[, sMonth := rep(1:maxFU, each = nPerMonth)]
+
+healthStats &amp;lt;- did[, .(sHealth, 
+                       sMonth, 
+                       health = MCsim(maxFU, P, sHealth, sMonth)),
+                   keyby = id]
+    
+healthStats[, month := c(1:.N), by = id]
+      
+# eliminate period without status measurement (0) &amp;amp; death (4)
+healthStats &amp;lt;- healthStats[!(health %in% c(0,4))]
+  
+# ensure burn-in by starting with observations far
+# into simulation
+healthStats &amp;lt;- healthStats[month &amp;gt; (START - LOOKBACK)]
+  
+# set probability of emergency department visit  
+healthStats[, pED := (health == 1) * 0.02 + 
+                     (health == 2) * 0.10 + 
+                     (health == 3) * 0.20]
+
+# generate emergency department visit
+healthStats[, ed := rbinom(.N, 1, pED)]
+
+healthStats[, edAdj := ed * as.integer(health &amp;gt;= HEALTH)] # if you want to restrict
+healthStats[, pSum := cAddPrior(month, edAdj, lookback = LOOKBACK), keyby=id]
+
+# look at one individual
+healthStats[id == 28069]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##        id sHealth sMonth health month  pED ed edAdj pSum
+##  1: 28069       1    281      1   284 0.02  0     0   NA
+##  2: 28069       1    281      1   285 0.02  0     0   NA
+##  3: 28069       1    281      1   286 0.02  0     0   NA
+##  4: 28069       1    281      1   287 0.02  0     0   NA
+##  5: 28069       1    281      2   288 0.10  0     0   NA
+##  6: 28069       1    281      2   289 0.10  0     0   NA
+##  7: 28069       1    281      2   290 0.10  1     1    0
+##  8: 28069       1    281      2   291 0.10  0     0    1
+##  9: 28069       1    281      2   292 0.10  0     0    1
+## 10: 28069       1    281      2   293 0.10  0     0    1
+## 11: 28069       1    281      2   294 0.10  0     0    1
+## 12: 28069       1    281      3   295 0.20  1     1    1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# cohort includes individuals with 1 prior ed visit in
+# previous 6 months
+
+cohort &amp;lt;- healthStats[edAdj == 1 &amp;amp; pSum == 0]
+cohort &amp;lt;- cohort[, .(month = min(month)), keyby = id]
+cohort&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          id month
+##    1:    53   306
+##    2:    82   313
+##    3:   140   324
+##    4:   585   291
+##    5:   790   299
+##   ---            
+## 3933: 31718   324
+## 3934: 31744   325
+## 3935: 31810   325
+## 3936: 31860   325
+## 3937: 31887   325&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# estimate average health status of monthly cohorts
+
+cohortStats &amp;lt;- healthStats[cohort, on = c(&amp;quot;id&amp;quot;,&amp;quot;month&amp;quot;)]
+sumStats &amp;lt;- cohortStats[ , .(avghealth = mean(health), n = .N), keyby = month]
+
+head(sumStats)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    month avghealth   n
+## 1:   290  2.248175 137
+## 2:   291  2.311765 170
+## 3:   292  2.367347 147
+## 4:   293  2.291925 161
+## 5:   294  2.366906 139
+## 6:   295  2.283871 155&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&#34;exploring-bias&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Exploring bias&lt;/h2&gt;
+&lt;p&gt;Finally, we are at the point where we can see what, if any, bias results in selecting our cohorts under the scenario I’ve outlined above. We start by generating multiple iterations of populations and cohorts and estimating average health status by month under the assumption that we will have a look-back period of 0. That is, we will accept an individual into the first possible cohort regardless of her previous emergency department visit history. The plot below shows average across 1000 iterations. What we see is that the average health status of the cohorts in the first 20 months or so exceed the long run average. The incidence - prevalence bias is extremely strong if we ignore prior ED history!&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/img/post-incidence/plot00.png&#34; /&gt; &lt;br&gt;&lt;/p&gt;
+&lt;div id=&#34;taking-history-into-account&#34; class=&#34;section level4&#34;&gt;
+&lt;h4&gt;Taking history into account&lt;/h4&gt;
+&lt;p&gt;Once we start to incorporate ED history by using look-back periods greater than 0, we see that we can reduce bias considerably. The two plots below show the results of using look-back periods of 6 and 12 months. Both have reduced bias, but only at 12 months are we approaching something that actually looks desirable. In fact, under this scenario, we’d probably like to go back 24 months to eliminate the bias entirely. Of course, these particular results are dependent on the simulation assumptions, so determining an appropriate look-back period will certainly depend on the actual data. (When we do finally get the actual data, I will follow-up to let you know what kind of adjustment we needed to make in the real, non-simulated world.)&lt;/p&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-incidence/plot06.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-incidence/plot12.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Using simulation for power analysis: an example based on a stepped wedge study design</title>
+      <link>/post/using-simulation-for-power-analysis-an-example/</link>
+      <pubDate>Mon, 10 Jul 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/using-simulation-for-power-analysis-an-example/</guid>
+      <description>&lt;p&gt;Simulation can be super helpful for estimating power or sample size requirements when the study design is complex. This approach has some advantages over an analytic one (i.e. one based on a formula), particularly the flexibility it affords in setting up the specific assumptions in the planned study, such as time trends, patterns of missingness, or effects of different levels of clustering. A downside is certainly the complexity of writing the code as well as the computation time, which &lt;em&gt;can&lt;/em&gt; be a bit painful. My goal here is to show that at least writing the code need not be overwhelming.&lt;/p&gt;
+&lt;p&gt;Recently, I was helping an investigator plan a stepped wedge cluster randomized trial to study the effects of modifying a physician support system on patient-level diabetes management. While analytic approaches for power calculations do exist in the context of this complex study design, it seemed worth the effort to be explicit about all of the assumptions. So in this case I opted to use simulation. The basic approach is outlined below.&lt;/p&gt;
+&lt;div id=&#34;the-stepped-wedge-design&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;The stepped wedge design&lt;/h2&gt;
+&lt;p&gt;In cluster randomized trials, the unit of randomization is the group rather than the individual. While outcomes might be collected at the individual (e.g. student or patient) level, the intervention effect is assessed at the group (e.g. school or clinic). In a stepped wedge cluster design, the randomization unit is still the group, but all groups are eventually exposed to the intervention at some point in the study. Randomization determines &lt;em&gt;when&lt;/em&gt; the intervention starts.&lt;/p&gt;
+&lt;p&gt;Below is schematic view of how a stepped wedge study is implemented. In this example, a block of clusters receives the intervention starting in the second period, another block starts the intervention in the third period, and so on. The intervention effect is essentially assessed by making within group comparisons. By staggering the starting points, the study is able to distinguish between time effects and treatment effects. If all groups started intervention at the same point, we would need to make an assumption that any improvements were due only to the intervention rather than changes that were occurring over time. This is not an assumption any one can easily justify.&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-07-10-using-simulation-for-power-analysis-an-example-based-on-a-stepped-wedge-study-design_files/figure-html/unnamed-chunk-1-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;power-and-simulation&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Power and simulation&lt;/h2&gt;
+&lt;p&gt;The statistical power of a study is the conditional probability (conditional on a given effect size), that a hypothesis test will correctly reject the null hypothesis (i.e. conclude there is an effect when there actually is one). Power is underscored by the notion that a particular study can be replicated exactly over and over again. So, if the power of a study is 80%, that means in 80% of the replications of that study we will (appropriately) reject the null hypothesis.&lt;/p&gt;
+&lt;p&gt;So, to estimate power, we can simulate replications of the study many times and conduct repeated hypothesis tests. The proportion of tests where we reject the null hypothesis is the estimated power. Each of these replications is based on the same set of data generating assumptions: effect sizes, sample sizes, individual level variation, group level variation, etc.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;simulating-from-a-stepped-wedge-design&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Simulating from a stepped wedge design&lt;/h2&gt;
+&lt;p&gt;In this example, we are assuming a 3-year study with four groups of clusters randomized to start an intervention at either 12 months, 18 months, 24 months, or 30 months (i.e. every 6 months following the 1st baseline year). The study would enroll patients at baseline in each of the clusters, and a measurement of a binary outcome (say diabetes under control, or not) would be collected at that time. Those patients would be followed over time and the same measurement would be collected every 6 months, concluding with the 7th measurement in the 36th month of the study. (It is totally possible to enroll new patients as the study progresses and have a different follow-up scheme, but this approximates the actual study I was working on.)&lt;/p&gt;
+&lt;p&gt;The data are generated based on a mixed effects model where there are group level effects (&lt;span class=&#34;math inline&#34;&gt;\(b_j\)&lt;/span&gt; in the model) as well as individual level effects (&lt;span class=&#34;math inline&#34;&gt;\(b_i\)&lt;/span&gt;). The model also assumes a very slight time trend before the intervention (e.g. diabetes control is improving slightly over time for an individual), an intervention effect, and an almost non-existent change in the time trend after the intervention. The outcome in each period is generated based on this formula:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math inline&#34;&gt;\(logit(Y_{ijt}) = 0.8 + .01 * period + 0.8 * I_{jt} + 0.001 * I_{jt} * (period-s_j) + b_i + b_j,\)&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;where &lt;span class=&#34;math inline&#34;&gt;\(period\)&lt;/span&gt; goes from 0 to 6 (period 0 is the baseline, period 1 is the 6 month follow, etc.), &lt;span class=&#34;math inline&#34;&gt;\(I_{jt}\)&lt;/span&gt; is 1 if cluster &lt;span class=&#34;math inline&#34;&gt;\(j\)&lt;/span&gt; is in the intervention in period &lt;span class=&#34;math inline&#34;&gt;\(t\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(s_j\)&lt;/span&gt; is the period where the intervention starts for cluster &lt;span class=&#34;math inline&#34;&gt;\(j\)&lt;/span&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(logit(Y_{ijt})\)&lt;/span&gt; is the log odds of the outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; for individual &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt; in cluster &lt;span class=&#34;math inline&#34;&gt;\(j\)&lt;/span&gt; during period &lt;span class=&#34;math inline&#34;&gt;\(t\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;We start by defining the data structure using &lt;code&gt;simstudy&lt;/code&gt; “data def”&amp;quot; commands. We are assuming that there will be 100 individuals followed at each site for the full study. (We are not assuming any dropout, though we could easily do that.) In this particular case, we are assuming an effect size of 0.8 (which is a log odds ratio):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+
+starts &amp;lt;- &amp;quot;rep(c(2 : 5), each = 10)&amp;quot;
+
+siteDef &amp;lt;- defData(varname = &amp;quot;bj&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = 0, 
+                   variance = .01, id=&amp;quot;site&amp;quot;)
+siteDef &amp;lt;- defData(siteDef, varname = &amp;quot;sj&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;, 
+                   formula = starts)
+siteDef &amp;lt;- defData(siteDef, varname = &amp;quot;ips&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;, 
+                   formula = 100)
+
+indDef &amp;lt;- defDataAdd(varname = &amp;quot;bi&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = 0,
+                     variance = 0.01)
+
+trtDef &amp;lt;- defDataAdd(varname = &amp;quot;Ijt&amp;quot; , 
+                     formula = &amp;quot;as.numeric(period &amp;gt;= sj)&amp;quot;, 
+                     dist = &amp;quot;nonrandom&amp;quot;)
+
+f = &amp;quot;0.8 + .01 * period + 0.8 * Ijt + 0.001 * Ijt * (period-sj) + bi + bj&amp;quot;
+trtDef &amp;lt;- defDataAdd(trtDef, varname = &amp;quot;Yijt&amp;quot;, formula = f, 
+                     dist = &amp;quot;binary&amp;quot;, link = &amp;quot;logit&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;To generate 40 clusters of data, we use the following code:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;set.seed(6789)
+
+dtSite &amp;lt;- genData(40, siteDef)
+dtSite &amp;lt;- genCluster(dtSite, cLevelVar = &amp;quot;site&amp;quot;, numIndsVar = &amp;quot;ips&amp;quot;,
+                     level1ID = &amp;quot;id&amp;quot;)
+dtSite &amp;lt;- addColumns(indDef, dtSite)
+
+dtSiteTm &amp;lt;- addPeriods(dtSite, nPeriods = 7, idvars = &amp;quot;id&amp;quot;)
+dtSiteTm &amp;lt;- addColumns(trtDef, dtSiteTm)
+
+dtSiteTm&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          id period site         bj sj ips         bi timeID Ijt Yijt
+##     1:    1      0    1 -0.1029785  2 100 0.08926153      1   0    1
+##     2:    1      1    1 -0.1029785  2 100 0.08926153      2   0    1
+##     3:    1      2    1 -0.1029785  2 100 0.08926153      3   1    1
+##     4:    1      3    1 -0.1029785  2 100 0.08926153      4   1    1
+##     5:    1      4    1 -0.1029785  2 100 0.08926153      5   1    1
+##    ---                                                              
+## 27996: 4000      2   40  0.1000898  5 100 0.18869371  27996   0    1
+## 27997: 4000      3   40  0.1000898  5 100 0.18869371  27997   0    0
+## 27998: 4000      4   40  0.1000898  5 100 0.18869371  27998   0    1
+## 27999: 4000      5   40  0.1000898  5 100 0.18869371  27999   1    1
+## 28000: 4000      6   40  0.1000898  5 100 0.18869371  28000   1    1&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And to visualize what the study data might looks like under these assumptions:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# summary by site
+dt &amp;lt;- dtSiteTm[, .(Y = mean(Yijt)), keyby = .(site, period, Ijt, sj)] 
+
+ggplot(data = dt, aes(x=period, y=Y, group=site)) +
+  geom_hline(yintercept = c(.7, .83),  color = &amp;quot;grey99&amp;quot;) +
+  geom_line(aes(color=factor(site))) +
+  geom_point(data = dt[sj == period], color=&amp;quot;grey50&amp;quot;) +
+  theme(panel.background = element_rect(fill = &amp;quot;grey90&amp;quot;), 
+        panel.grid = element_blank(), 
+        plot.title = element_text(size = 10, hjust = 0), 
+        panel.border = element_rect(fill = NA, colour = &amp;quot;gray90&amp;quot;),
+        legend.position = &amp;quot;none&amp;quot;,
+        axis.title.x = element_blank()
+  ) +
+  ylab(&amp;quot;Proportion controlled&amp;quot;) +
+  scale_x_continuous(breaks = seq(0, 10, by = 2), 
+                     labels = c(&amp;quot;Baseline&amp;quot;, paste(&amp;quot;Year&amp;quot;, c(1:5)))) +
+  scale_y_continuous(limits = c(.5, 1), 
+                     breaks = c(.5, .6, .7, .8, .9, 1)) +
+  ggtitle(&amp;quot;Stepped-wedge design with immediate effect&amp;quot;) +
+  facet_grid(sj~.)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-07-10-using-simulation-for-power-analysis-an-example-based-on-a-stepped-wedge-study-design_files/figure-html/unnamed-chunk-4-1.png&#34; width=&#34;480&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;estimating-power&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Estimating power&lt;/h2&gt;
+&lt;p&gt;We are going to estimate power using only 20 clusters and effect size of 0.25. (Assuming 40 clusters and a large effect size was useful for visualizing the data, but not so interesting for illustrating power, since under those assumptions we are virtually guaranteed to find an effect.)&lt;/p&gt;
+&lt;p&gt;After generating the data (code not shown) for one iteration, we fit a generalized mixed effects model to show the effect estimate. In this case, the effect estimate is 1.46 (95% CI 1.21-1.77) on the odds ratio scale or 0.37 (95% CI 0.19-0.57) on the log odds ratio scale.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(lme4)
+library(sjPlot)
+
+glmfit &amp;lt;- glmer(data = dtSiteTm, 
+      Yijt ~ period + Ijt + I(Ijt*(period - sj)) + (1|id) + (1|site), 
+      family=&amp;quot;binomial&amp;quot; )
+
+sjt.glmer(glmfit, show.icc = FALSE, show.dev = FALSE)&lt;/code&gt;&lt;/pre&gt;
+&lt;table style=&#34;border-collapse:collapse; border:none;border-bottom:double;&#34;&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; border-top:double;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;border-bottom:1px solid; padding-left:0.5em; padding-right:0.5em; border-top:double;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; border-bottom:1px solid; border-top:double;&#34; colspan=&#34;3&#34;&gt;
+Yijt
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; font-style:italic;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em; font-style:italic;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; font-style:italic; &#34;&gt;
+Odds Ratio
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; font-style:italic; &#34;&gt;
+CI
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; font-style:italic; &#34;&gt;
+p
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td colspan=&#34;5&#34; style=&#34;padding:0.2cm; text-align:left; border-top:1px solid; font-weight:bold; text-align:left;&#34;&gt;
+Fixed Parts
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:left;&#34;&gt;
+(Intercept)
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em; &#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+2.15
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+1.90 – 2.44
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+&amp;lt;.001
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:left;&#34;&gt;
+period
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+1.00
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+0.95 – 1.06
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+.959
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:left;&#34;&gt;
+Ijt
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+1.46
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+1.21 – 1.77
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+&amp;lt;.001
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:left;&#34;&gt;
+I(Ijt * (period - sj))
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+0.99
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+0.91 – 1.07
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; &#34;&gt;
+.759
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td colspan=&#34;5&#34; style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; font-weight:bold; text-align:left; padding-top:0.5em;&#34;&gt;
+Random Parts
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;&#34;&gt;
+τ&lt;sub&gt;00, id&lt;/sub&gt;
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;&#34; colspan=&#34;3&#34;&gt;
+0.011
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;&#34;&gt;
+τ&lt;sub&gt;00, site&lt;/sub&gt;
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;&#34; colspan=&#34;3&#34;&gt;
+0.029
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;&#34;&gt;
+N&lt;sub&gt;id&lt;/sub&gt;
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;&#34; colspan=&#34;3&#34;&gt;
+1000
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;&#34;&gt;
+N&lt;sub&gt;site&lt;/sub&gt;
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; text-align:center; padding-top:0.1cm; padding-bottom:0.1cm;&#34; colspan=&#34;3&#34;&gt;
+20
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; border-top:1px solid;&#34;&gt;
+Observations
+&lt;/td&gt;
+&lt;td style=&#34;padding-left:0.5em; padding-right:0.5em; border-top:1px solid;&#34;&gt;
+ 
+&lt;/td&gt;
+&lt;td style=&#34;padding:0.2cm; padding-top:0.1cm; padding-bottom:0.1cm; text-align:center; border-top:1px solid;&#34; colspan=&#34;3&#34;&gt;
+7000
+&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/table&gt;
+&lt;p&gt;In order to estimate power, we need to generate a large number of replications. I created a simple function that generates a new data set every iteration based on the definitions. If we want to vary the model assumptions across different replications, we can write code to modify the data definition part of the process. In this way we could look at power across different sample size, effect size, or variance assumptions. Here, I am only considering a single set of assumptions.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;gData &amp;lt;- function() {
+  
+  dtSite &amp;lt;- genData(nsites, siteDef)
+  dtSite &amp;lt;- genCluster(dtSite, cLevelVar = &amp;quot;site&amp;quot;, 
+                       numIndsVar = &amp;quot;ips&amp;quot;, level1ID = &amp;quot;id&amp;quot;)
+  dtSite &amp;lt;- addColumns(indDef, dtSite)
+  
+  dtSiteTm &amp;lt;- addPeriods(dtSite, nPeriods = 7, idvars = &amp;quot;id&amp;quot;)
+  dtSiteTm &amp;lt;- addColumns(trtDef, dtSiteTm)
+  
+  return(dtSiteTm)
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And finally, we iterate through a series of replications, keeping track of each hypothesis test in the variable &lt;em&gt;result&lt;/em&gt;. Typically, it would be nice to replicate a large number of times (say 1000), but this can sometimes take a long time. In this case, each call to &lt;code&gt;glmer&lt;/code&gt; is very resource intensive - unfortunately, I know of know way to speed this up (please get in touch if you have thoughts on this) - so for the purposes of illustration, I’ve only used 99 iterations. Note also that I check to see if the model converges in each iteration, and only include results from valid estimates. This can be an issue with mixed effects models, particularly when sample sizes are small. To estimate the power (which in this case is 78%), calculate the proportion of successful iterations with a p-value smaller than 0.05, the alpha-level threshold we have used in our hypothesis test:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;result &amp;lt;- NULL
+
+i=1
+
+while (i &amp;lt; 100) {
+  
+  dtSite &amp;lt;- gData()
+  
+  glmfit &amp;lt;- tryCatch(glmer(data = dtSite, 
+      Yijt ~ period + Ijt + I(Ijt*(period - sj)) + (1|id) + (1|site), 
+      family=&amp;quot;binomial&amp;quot; ),
+    warning = function(w) { &amp;quot;warning&amp;quot; }
+  )
+  
+  if (! is.character(glmfit)) {
+    
+    pvalue &amp;lt;- coef(summary(glmfit))[&amp;quot;Ijt&amp;quot;, &amp;quot;Pr(&amp;gt;|z|)&amp;quot;]
+    result &amp;lt;- c(result, pvalue)
+    i &amp;lt;- i + 1
+  }
+  
+}
+
+mean(result &amp;lt; .05)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.7812&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;To explore the sensitivity of the power estimates to changing underlying assumptions of effect size, sample size, variation, and time trends, we could vary those parameters and run a sequence of iterations. The code gets a little more complicated (essentially we need to change the “data defs” for each set of iterations), but it is still quite manageable. Of course, you might want to plan for fairly long execution times, particularly if you use 500 or 1000 iterations for each scenario, rather than the 100 I used here.&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>simstudy update: two new functions that generate correlated observations from non-normal distributions</title>
+      <link>/post/simstudy-update-two-functions-for-correlation/</link>
+      <pubDate>Wed, 05 Jul 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/simstudy-update-two-functions-for-correlation/</guid>
+      <description>&lt;p&gt;In an earlier &lt;a href=&#34;https://www.rdatagen.net/post/correlated-data-copula/&#34;&gt;post&lt;/a&gt;, I described in a fair amount of detail an algorithm to generate correlated binary or Poisson data. I mentioned that I would be updating &lt;code&gt;simstudy&lt;/code&gt; with functions that would make generating these kind of data relatively painless. Well, I have managed to do that, and the updated package (version 0.1.3) is available for download from &lt;a href=&#34;https://cran.r-project.org/web/packages/simstudy/index.html&#34;&gt;CRAN&lt;/a&gt;. There are now two additional functions to facilitate the generation of correlated data from &lt;em&gt;binomial&lt;/em&gt;, &lt;em&gt;poisson&lt;/em&gt;, &lt;em&gt;gamma&lt;/em&gt;, and &lt;em&gt;uniform&lt;/em&gt; distributions: &lt;code&gt;genCorGen&lt;/code&gt; and &lt;code&gt;addCorGen&lt;/code&gt;. Here’s a brief intro to these functions.&lt;/p&gt;
+&lt;div id=&#34;generate-generally-correlated-data&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Generate generally correlated data&lt;/h3&gt;
+&lt;p&gt;&lt;code&gt;genCorGen&lt;/code&gt; is an extension of &lt;code&gt;genCorData&lt;/code&gt;, which was provided in earlier versions of &lt;code&gt;simstudy&lt;/code&gt; to generate multivariate normal data. In the first example below, we are generating data from a multivariate Poisson distribution. To do this, we need to specify the mean of the Poisson distribution for each new variable, and then we specify the correlation structure, just as we did with the normal distribution.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;l &amp;lt;- c(8, 10, 12) # lambda for each new variable
+
+dp &amp;lt;- genCorGen(1000, nvars = 3, params1 = l, dist = &amp;quot;poisson&amp;quot;, 
+                rho = 0.3, corstr = &amp;quot;cs&amp;quot;, wide = TRUE)
+dp&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id V1 V2 V3
+##    1:    1  7 13 12
+##    2:    2  7 11 13
+##    3:    3  7  8 14
+##    4:    4  7 12  9
+##    5:    5  8 13 18
+##   ---              
+##  996:  996  8 14 15
+##  997:  997 10  5 11
+##  998:  998  4  9  9
+##  999:  999  5 10  9
+## 1000: 1000  6 12 17&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Here is the the estimated correlation (we would expect an estimate close to 0.3):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;round(cor(as.matrix(dp[, .(V1, V2, V3)])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3
+## V1 1.00 0.29 0.26
+## V2 0.29 1.00 0.31
+## V3 0.26 0.31 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Similarly, we can generate correlated binary data by specifying the probabilities:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;db&amp;lt;- genCorGen(1000, nvars = 3, params1 = c(.3, .5, .7), dist = &amp;quot;binary&amp;quot;, 
+          rho = 0.8, corstr = &amp;quot;cs&amp;quot;, wide = TRUE)
+db&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id V1 V2 V3
+##    1:    1  1  1  1
+##    2:    2  0  0  1
+##    3:    3  1  1  1
+##    4:    4  0  0  0
+##    5:    5  1  1  1
+##   ---              
+##  996:  996  0  1  1
+##  997:  997  0  0  0
+##  998:  998  0  1  1
+##  999:  999  1  1  1
+## 1000: 1000  0  0  0&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In the case of the binary outcome, the observed correlation will be lower that what is specified, which in this case was 0.8. I tried to provide some intuition about this in the earlier &lt;a href=&#34;https://www.rdatagen.net/post/correlated-data-copula/&#34;&gt;post&lt;/a&gt;:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;round(cor(as.matrix(db[, .(V1, V2, V3)])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     V1   V2   V3
+## V1 1.0 0.50 0.40
+## V2 0.5 1.00 0.56
+## V3 0.4 0.56 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The gamma distribution requires two parameters - the mean and dispersion. (These are converted into shape and rate parameters more commonly used.)&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dg &amp;lt;- genCorGen(1000, nvars = 3, params1 = c(3,5,7), params2 = c(1,1,1),
+                dist = &amp;quot;gamma&amp;quot;, rho = .7, corstr = &amp;quot;cs&amp;quot;, 
+                wide = TRUE, cnames=&amp;quot;a, b, c&amp;quot;)
+dg&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id         a          b         c
+##    1:    1 0.1957971  0.9902398  2.299307
+##    2:    2 0.2566630  2.4271728  1.217599
+##    3:    3 1.9550985 13.9248696  5.178042
+##    4:    4 3.5525418  2.5711661  7.848605
+##    5:    5 6.6981281  8.7494117 12.478329
+##   ---                                    
+##  996:  996 2.2059693  6.3474811  3.054551
+##  997:  997 2.3571427  7.7841085  7.887417
+##  998:  998 5.5326638  7.3273337 15.965228
+##  999:  999 5.6284681 13.3574118 17.215722
+## 1000: 1000 0.3749373  1.1480452  0.696243&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;round(cor(as.matrix(dg[, .(a, b, c)])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      a    b    c
+## a 1.00 0.65 0.67
+## b 0.65 1.00 0.62
+## c 0.67 0.62 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;These data sets can be generated in either &lt;em&gt;wide&lt;/em&gt; or &lt;em&gt;long&lt;/em&gt; form. So far, we have generated &lt;em&gt;wide&lt;/em&gt; form data, where there is one row per unique id. The &lt;em&gt;long&lt;/em&gt; form, where the correlated data are on different rows, is useful for plotting or fitting models, because there are repeated measurements for each id:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dgl &amp;lt;- genCorGen(1000, nvars = 3, params1 = l, params2 = c(1,1,1), 
+                 dist = &amp;quot;gamma&amp;quot;, rho = .7, corstr = &amp;quot;cs&amp;quot;, wide = FALSE, 
+                 cnames=&amp;quot;NewCol&amp;quot;)
+dgl&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id period    NewCol
+##    1:    1      0  1.066558
+##    2:    1      1  5.666802
+##    3:    1      2  5.366408
+##    4:    2      0  1.419593
+##    5:    2      1  9.318227
+##   ---                      
+## 2996:  999      1 21.821011
+## 2997:  999      2 21.800972
+## 2998: 1000      0 12.082063
+## 2999: 1000      1 18.541231
+## 3000: 1000      2 12.063846&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Here is a plot of a subset of the data:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ids &amp;lt;- sample(1000,50, replace = FALSE)
+ggplot(data=dgl[id %in% ids,], aes(x=factor(period), y=NewCol, group=id)) +
+  geom_line(aes(color=factor(id)))+
+  theme(legend.position = &amp;quot;none&amp;quot;) +
+  scale_x_discrete(expand = c(0,0.1))&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-07-05-simstudy-update-two-functions-to-generate-correlated-observations-from-non-normal-distributions_files/figure-html/unnamed-chunk-6-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;generate-data-based-on-values-from-existing-data-set&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Generate data based on values from existing data set&lt;/h3&gt;
+&lt;p&gt;&lt;code&gt;addCorGen&lt;/code&gt; allows us to create correlated data from an existing data set, as one can already do using &lt;code&gt;addCorData&lt;/code&gt;, but with non-normal data. In the case of &lt;code&gt;addCorGen&lt;/code&gt;, the parameter(s) used to define the distribution is a field (or fields) in the data set. The correlated data are added to the existing data set. In the example below, we are going to generate three sets (Poisson, binary, and gamma) of correlated data with means that are a function of the variable &lt;code&gt;xbase&lt;/code&gt;, which varies by id.&lt;/p&gt;
+&lt;p&gt;First we define the data and generate a data set:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;def &amp;lt;- defData(varname = &amp;quot;xbase&amp;quot;, formula = 5, variance = 0.2, 
+               dist = &amp;quot;gamma&amp;quot;, id = &amp;quot;cid&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;lambda&amp;quot;, formula = &amp;quot;0.5 + 0.1 * xbase&amp;quot;, 
+               dist=&amp;quot;nonrandom&amp;quot;, link = &amp;quot;log&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;p&amp;quot;, formula = &amp;quot;-2.0 + 0.3 * xbase&amp;quot;, 
+               dist=&amp;quot;nonrandom&amp;quot;, link = &amp;quot;logit&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;gammaMu&amp;quot;, formula = &amp;quot;0.5 + 0.2 * xbase&amp;quot;, 
+               dist=&amp;quot;nonrandom&amp;quot;, link = &amp;quot;log&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;gammaDis&amp;quot;, formula = 1, 
+               dist=&amp;quot;nonrandom&amp;quot;)
+
+dt &amp;lt;- genData(10000, def)
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          cid      xbase   lambda         p   gammaMu gammaDis
+##     1:     1 12.1128232 5.536056 0.8366960 18.588900        1
+##     2:     2  4.9148342 2.695230 0.3715554  4.405998        1
+##     3:     3 11.5550282 5.235712 0.8125261 16.626630        1
+##     4:     4  3.0802596 2.243475 0.2542785  3.052778        1
+##     5:     5  0.9767811 1.817893 0.1535577  2.004423        1
+##    ---                                                       
+##  9996:  9996  6.0564517 3.021173 0.4543613  5.536100        1
+##  9997:  9997  3.1298866 2.254636 0.2571119  3.083229        1
+##  9998:  9998 12.4642670 5.734076 0.8505956 19.942505        1
+##  9999:  9999  4.6559318 2.626345 0.3536072  4.183660        1
+## 10000: 10000  3.4314285 2.323658 0.2747666  3.274895        1&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The Poisson distribution has a single parameter, lambda:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtX1 &amp;lt;- addCorGen(dtOld = dt, idvar = &amp;quot;cid&amp;quot;, nvars = 3, rho = 0.1, 
+                  corstr = &amp;quot;cs&amp;quot;, dist = &amp;quot;poisson&amp;quot;, param1 = &amp;quot;lambda&amp;quot;, 
+                  cnames = &amp;quot;a, b, c&amp;quot;)
+
+dtX1[, .(cid, xbase, lambda, a, b, c)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          cid      xbase   lambda a b c
+##     1:     1 12.1128232 5.536056 4 6 7
+##     2:     2  4.9148342 2.695230 2 4 1
+##     3:     3 11.5550282 5.235712 5 6 4
+##     4:     4  3.0802596 2.243475 1 3 1
+##     5:     5  0.9767811 1.817893 2 1 0
+##    ---                                
+##  9996:  9996  6.0564517 3.021173 1 3 3
+##  9997:  9997  3.1298866 2.254636 2 3 1
+##  9998:  9998 12.4642670 5.734076 4 6 8
+##  9999:  9999  4.6559318 2.626345 2 3 5
+## 10000: 10000  3.4314285 2.323658 0 0 3&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The Bernoulli (binary) distribution has a single parameter, p:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtX2 &amp;lt;- addCorGen(dtOld = dt, idvar = &amp;quot;cid&amp;quot;, nvars = 4, rho = .4, 
+                  corstr = &amp;quot;ar1&amp;quot;, dist = &amp;quot;binary&amp;quot;, param1 = &amp;quot;p&amp;quot;)
+
+dtX2[, .(cid, xbase, p, V1, V2, V3, V4)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          cid      xbase         p V1 V2 V3 V4
+##     1:     1 12.1128232 0.8366960  1  1  1  1
+##     2:     2  4.9148342 0.3715554  0  0  0  0
+##     3:     3 11.5550282 0.8125261  1  1  1  1
+##     4:     4  3.0802596 0.2542785  0  1  0  0
+##     5:     5  0.9767811 0.1535577  0  0  0  1
+##    ---                                       
+##  9996:  9996  6.0564517 0.4543613  0  0  0  0
+##  9997:  9997  3.1298866 0.2571119  1  0  0  0
+##  9998:  9998 12.4642670 0.8505956  0  1  1  1
+##  9999:  9999  4.6559318 0.3536072  1  1  0  0
+## 10000: 10000  3.4314285 0.2747666  1  0  1  1&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And here is the the Gamma distribution, with its two parameters (mean and dispersion):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtX3 &amp;lt;- addCorGen(dtOld = dt, idvar = &amp;quot;cid&amp;quot;, nvars = 3, rho = .4, 
+                  corstr = &amp;quot;cs&amp;quot;, dist = &amp;quot;gamma&amp;quot;, 
+                  param1 = &amp;quot;gammaMu&amp;quot;, param2 = &amp;quot;gammaDis&amp;quot;)
+
+dtX3[, .(cid, xbase, gammaMu, gammaDis, 
+         V1 = round(V1,2), V2 = round(V2,2), V3 = round(V3,2))]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          cid      xbase   gammaMu gammaDis    V1    V2   V3
+##     1:     1 12.1128232 18.588900        1 11.24  3.44 9.11
+##     2:     2  4.9148342  4.405998        1  0.91  3.77 0.76
+##     3:     3 11.5550282 16.626630        1 68.47 12.91 1.72
+##     4:     4  3.0802596  3.052778        1  2.54  3.63 2.98
+##     5:     5  0.9767811  2.004423        1  0.39  0.14 0.42
+##    ---                                                     
+##  9996:  9996  6.0564517  5.536100        1  0.29  4.84 1.80
+##  9997:  9997  3.1298866  3.083229        1  4.81  0.38 0.81
+##  9998:  9998 12.4642670 19.942505        1 17.10  3.56 4.04
+##  9999:  9999  4.6559318  4.183660        1  1.17  0.21 1.47
+## 10000: 10000  3.4314285  3.274895        1  1.02  1.61 2.24&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;long-form-data&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Long form data&lt;/h3&gt;
+&lt;p&gt;If we have data in &lt;em&gt;long&lt;/em&gt; form (e.g. longitudinal data), the function will recognize the structure:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;def &amp;lt;- defData(varname = &amp;quot;xbase&amp;quot;, formula = 5, variance = .4, 
+               dist = &amp;quot;gamma&amp;quot;, id = &amp;quot;cid&amp;quot;)
+def &amp;lt;- defData(def, &amp;quot;nperiods&amp;quot;, formula = 3, 
+               dist = &amp;quot;noZeroPoisson&amp;quot;)
+
+def2 &amp;lt;- defDataAdd(varname = &amp;quot;lambda&amp;quot;, 
+                   formula = &amp;quot;0.5 + 0.5 * period + 0.1 * xbase&amp;quot;, 
+                   dist=&amp;quot;nonrandom&amp;quot;, link = &amp;quot;log&amp;quot;)
+
+dt &amp;lt;- genData(1000, def)
+
+dtLong &amp;lt;- addPeriods(dt, idvars = &amp;quot;cid&amp;quot;, nPeriods = 3)
+dtLong &amp;lt;- addColumns(def2, dtLong)
+
+dtLong&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##        cid period     xbase nperiods timeID   lambda
+##    1:    1      0  6.693980        1      1 3.220053
+##    2:    1      1  6.693980        1      2 5.308971
+##    3:    1      2  6.693980        1      3 8.753013
+##    4:    2      0 10.008645        2      4 4.485565
+##    5:    2      1 10.008645        2      5 7.395447
+##   ---                                               
+## 2996:  999      1  6.753605        2   2996 5.340720
+## 2997:  999      2  6.753605        2   2997 8.805359
+## 2998: 1000      0  2.006781        4   2998 2.015119
+## 2999: 1000      1  2.006781        4   2999 3.322369
+## 3000: 1000      2  2.006781        4   3000 5.477661&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Generate the data 
+
+dtX3 &amp;lt;- addCorGen(dtOld = dtLong, idvar = &amp;quot;cid&amp;quot;, nvars = 3, 
+                  rho = .6, corstr = &amp;quot;cs&amp;quot;, dist = &amp;quot;poisson&amp;quot;, 
+                  param1 = &amp;quot;lambda&amp;quot;, cnames = &amp;quot;NewPois&amp;quot;)
+dtX3&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##        cid period     xbase nperiods timeID   lambda NewPois
+##    1:    1      0  6.693980        1      1 3.220053       3
+##    2:    1      1  6.693980        1      2 5.308971       5
+##    3:    1      2  6.693980        1      3 8.753013       9
+##    4:    2      0 10.008645        2      4 4.485565       2
+##    5:    2      1 10.008645        2      5 7.395447       4
+##   ---                                                       
+## 2996:  999      1  6.753605        2   2996 5.340720       6
+## 2997:  999      2  6.753605        2   2997 8.805359      11
+## 2998: 1000      0  2.006781        4   2998 2.015119       2
+## 2999: 1000      1  2.006781        4   2999 3.322369       4
+## 3000: 1000      2  2.006781        4   3000 5.477661       7&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;We can fit a generalized estimating equation (GEE) model and examine the coefficients and the working correlation matrix. As we would expect, they match closely to the data generating parameters:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;geefit &amp;lt;- gee(NewPois ~ period + xbase, data = dtX3, id = cid, 
+              family = poisson, corstr = &amp;quot;exchangeable&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## Beginning Cgee S-function, @(#) geeformula.q 4.13 98/01/27&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## running glm to get initial regression estimate&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## (Intercept)      period       xbase 
+##  0.52045259  0.50354885  0.09746544&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;round(summary(geefit)$working.correlation, 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3]
+## [1,] 1.00 0.58 0.58
+## [2,] 0.58 1.00 0.58
+## [3,] 0.58 0.58 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In the future, I plan on adding other distributions. Some folks have suggested the negative binomial distribution, which I will do. If you have other suggestions/requests, &lt;a href=&#34;mailto:keith.goldfeld@nyumc.org&#34;&gt;let me know&lt;/a&gt;.&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Balancing on multiple factors when the sample is too small to stratify </title>
+      <link>/post/balancing-when-sample-is-too-small-to-stratify/</link>
+      <pubDate>Mon, 26 Jun 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/balancing-when-sample-is-too-small-to-stratify/</guid>
+      <description>&lt;p&gt;Ideally, a study that uses randomization provides a balance of characteristics that might be associated with the outcome being studied. This way, we can be more confident that any differences in outcomes between the groups are due to the group assignments and not to differences in characteristics. Unfortunately, randomization does not &lt;em&gt;guarantee&lt;/em&gt; balance, especially with smaller sample sizes. If we want to be certain that groups are balanced with respect to a particular characteristic, we need to do something like stratified randomization.&lt;/p&gt;
+&lt;p&gt;When the sample size is small and we want to guarantee balance across &lt;em&gt;multiple&lt;/em&gt; characteristics, the task is a bit more challenging. Say we have 20 schools that we are randomizing to two groups, 10 in each, and want to make sure the groups are balanced with respect to 4 characteristics: language, poverty, location, and size. Simple stratification may not work so well. If we assume that these four characteristics are binary (e.g. either “yes” or “no”), there are 16 possible combinations. One or more of these combinations could easily be represented by a single school - so it would be impossible to randomize within each of the 16 combinations. What to do?&lt;/p&gt;
+&lt;p&gt;One possible approach is to generate all possible randomization schemes of the 20 schools, and keep only those schemes that are balanced with respect to the four characteristics. Once we have a list of acceptable randomization schemes, we can just pick one of &lt;em&gt;those&lt;/em&gt; at random. (Of course, it is preferable if each school has close to a 50% chance of being assigned to either intervention group.)&lt;/p&gt;
+&lt;div id=&#34;simulate-school-level-data&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Simulate school-level data&lt;/h2&gt;
+&lt;p&gt;To start, we generate data for our 20 hypothetical schools using &lt;code&gt;simstudy&lt;/code&gt; functions:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+set.seed(125)
+
+# define data characteristics for schools
+ddef &amp;lt;- defData(varname = &amp;quot;language&amp;quot;, formula = .3, dist = &amp;quot;binary&amp;quot;)
+ddef &amp;lt;- defData(ddef, &amp;quot;poverty&amp;quot;, formula = .2, dist = &amp;quot;binary&amp;quot;)
+ddef &amp;lt;- defData(ddef, &amp;quot;location&amp;quot;, formula = .5, dist = &amp;quot;binary&amp;quot;)
+ddef &amp;lt;- defData(ddef, &amp;quot;size&amp;quot;, formula = .5, dist = &amp;quot;binary&amp;quot;)
+ddef&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     varname formula variance   dist     link
+## 1: language     0.3        0 binary identity
+## 2:  poverty     0.2        0 binary identity
+## 3: location     0.5        0 binary identity
+## 4:     size     0.5        0 binary identity&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# generate schools
+dt &amp;lt;- genData(20, ddef)
+
+# number of schools in each combination
+dt[, .N, keyby = .(language,poverty,location,size)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    language poverty location size N
+## 1:        0       0        0    1 5
+## 2:        0       0        1    0 1
+## 3:        0       0        1    1 5
+## 4:        0       1        0    0 1
+## 5:        0       1        1    0 2
+## 6:        1       0        0    0 2
+## 7:        1       0        0    1 1
+## 8:        1       0        1    0 1
+## 9:        1       0        1    1 2&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In this case, we have nine different combinations of the four characteristics, four of which include only a single school (rows 2, 4, 7, and 8). Stratification wouldn’t work necessarily work here if our goal was balance across all four characteristics.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;create-randomization-scenarios-to-assess-for-balance&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Create randomization scenarios to assess for balance&lt;/h2&gt;
+&lt;p&gt;Ideally, we would generate all possible randomization combinations and check them all for balance. If the number of total units (e.g. schools) is small, this does not pose a challenge (e.g. if N=4, then we only have six possible randomization schemes: TTCC, TCTC, TCCT, CTTC, CTCT, CCTT). However, with N=20, then there are 184,756 possible randomization schemes. Depending on the efficiency of the algorithm, it may be impractical to evaluate all the schemes. So, an alternative is to sample a subset of the schemes and evaluate those. For illustration purposes (so that you can understand what I am doing), I am using some very inefficient &lt;code&gt;R&lt;/code&gt; code (using a loops). As a result, I cannot evaluate all possible schemes in a reasonable period of time to get this post out; I decided to sample instead to evaluate 1000 possible randomizations. (At the end of this post, I show results using much more efficient code that uses data.table and Rcpp code much more effectively - so that we can quickly evaluate millions of randomization schemes.)&lt;/p&gt;
+&lt;p&gt;To start, I create all combinations of randomization schemes:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;totalSchools = 20
+rxSchools = 10
+
+xRx &amp;lt;- t(combn(totalSchools, rxSchools)) 
+
+# show 5 randomly sampled combinations
+
+sampleRows &amp;lt;- sample(nrow(xRx), 5, replace = FALSE)
+xRx[sampleRows,]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
+## [1,]    2    3    5    6    7    8   10   12   14    19
+## [2,]    5    6    7    8   13   14   15   16   17    18
+## [3,]    1    3    4    5    7    9   12   15   17    20
+## [4,]    2    3    4    5    9   11   14   15   19    20
+## [5,]    3    5    6    7    8   10   11   12   15    16&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Below is a function (which I chose to do in Rcpp) that converts the &lt;code&gt;xRx&lt;/code&gt; matrix of school ids to a 20-column matrix of 1’s and 0’s indicating whether or not a school is randomized to the intervention in a particular scenario:&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;RcppArmadillo.h&amp;gt;
+
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+using namespace arma;
+
+// [[Rcpp::export]]
+
+NumericMatrix convert01(NumericMatrix xmat, int tcols) {
+  
+  int xrows = xmat.nrow();
+  int xcols = xmat.ncol();
+  
+  NumericMatrix pmat(xrows, tcols);
+  
+  for (int i=0; i &amp;lt; xrows; i++) {
+    for (int j=0; j &amp;lt; xcols; j++)  {
+      pmat(i, xmat(i,j) - 1) = 1; 
+    }
+  } 
+  return(pmat);
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;x01 &amp;lt;- convert01(xRx, totalSchools)
+
+# show some rows
+
+x01[sampleRows,]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
+## [1,]    0    1    1    0    1    1    1    1    0     1     0     1
+## [2,]    0    0    0    0    1    1    1    1    0     0     0     0
+## [3,]    1    0    1    1    1    0    1    0    1     0     0     1
+## [4,]    0    1    1    1    1    0    0    0    1     0     1     0
+## [5,]    0    0    1    0    1    1    1    1    0     1     1     1
+##      [,13] [,14] [,15] [,16] [,17] [,18] [,19] [,20]
+## [1,]     0     1     0     0     0     0     1     0
+## [2,]     1     1     1     1     1     1     0     0
+## [3,]     0     0     1     0     1     0     0     1
+## [4,]     0     1     1     0     0     0     1     1
+## [5,]     0     0     1     1     0     0     0     0&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Because the evaluation code is so inefficient, I draw 1,000 rows at random from this “intervention” matrix &lt;code&gt;x01&lt;/code&gt; (after converting it to a data.table).&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# convert matrix to data.table
+d01 &amp;lt;- data.table(x01)
+d01[, id := .I]
+
+ids &amp;lt;- sample(nrow(d01), 1000, replace = FALSE)
+sampleD01 &amp;lt;- d01[id %in% ids]&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Now we are ready to evaluate each of the 1,000 schemes. As I mentioned before, this approach is highly inefficient as the algorithm requires us to literally loop through each each combination to find the balanced ones. I have sacrificed efficiency and speed for clarity of code (I hope).&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;for (i in 1:1000) {
+  
+  dt[, grp:= t(sampleD01[i,1:20])]
+  
+  dx &amp;lt;- dt[ , .N, keyby = .(language, grp)]
+  dc &amp;lt;- dcast(dx, language ~ grp, fill = 0, value.var = &amp;quot;N&amp;quot; )
+  dc[, diff := abs(`1` - `0`)]
+  
+  # we declare a scheme balanced if counts differ by
+  # no more than 1 school
+  
+  sampleD01[i, language := (sum(dc[, diff &amp;gt; 1]) == 0)]
+  
+  dx &amp;lt;- dt[ , .N, keyby = .(poverty, grp)]
+  dc &amp;lt;- dcast(dx, poverty ~ grp, fill = 0, value.var = &amp;quot;N&amp;quot; )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, poverty := (sum(dc[, diff &amp;gt; 1]) == 0)]
+  
+  dx &amp;lt;- dt[ , .N, keyby = .(location, grp)]
+  dc &amp;lt;- dcast(dx, location ~ grp, fill = 0, value.var = &amp;quot;N&amp;quot; )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, location := (sum(dc[, diff &amp;gt; 1]) == 0)]
+  
+  dx &amp;lt;- dt[ , .N, keyby = .(size, grp)]
+  dc &amp;lt;- dcast(dx, size ~ grp, fill = 0, value.var = &amp;quot;N&amp;quot; )
+  dc[, diff := abs(`1` - `0`)]
+  
+  sampleD01[i, size := (sum(dc[, diff &amp;gt; 1]) == 0)]
+  
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The final determination of balance is made if a scheme is balanced across all four characteristics. In this case, 136 of the 1,000 schemes were balanced based on this criterion:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;sampleD01[, balanced := all(language, poverty, location, size), keyby = id]
+
+# proportion of sampled combinations that are balanced ...
+
+sampleD01[,mean(balanced)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.136&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And let’s inspect the actual balance of two randomly selected schemes - one which is balanced, and one which is not:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;sTrue &amp;lt;- sampleD01[balanced == TRUE]
+sFalse &amp;lt;- sampleD01[balanced == FALSE]&lt;/code&gt;&lt;/pre&gt;
+&lt;div id=&#34;a-balanced-scheme&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;A balanced scheme&lt;/h3&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned &amp;lt;- copy(dt)
+dtAssigned[, group := as.vector(t(sTrue[sample(.N, 1), 1:20]))]
+
+dtAssigned[, .N, keyby=.(language, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    language group N
+## 1:        0     0 7
+## 2:        0     1 7
+## 3:        1     0 3
+## 4:        1     1 3&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(poverty, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    poverty group N
+## 1:       0     0 9
+## 2:       0     1 8
+## 3:       1     0 1
+## 4:       1     1 2&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(location, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    location group N
+## 1:        0     0 4
+## 2:        0     1 5
+## 3:        1     0 6
+## 4:        1     1 5&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(size, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    size group N
+## 1:    0     0 3
+## 2:    0     1 4
+## 3:    1     0 7
+## 4:    1     1 6&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;an-unbalanced-scheme&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;An unbalanced scheme&lt;/h3&gt;
+&lt;p&gt;In this case, language and location are imbalanced, though size and poverty are fine.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned &amp;lt;- copy(dt)
+dtAssigned[, group := as.vector(t(sFalse[sample(.N, 1), 1:20]))]
+
+dtAssigned[, .N, keyby=.(language, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    language group N
+## 1:        0     0 8
+## 2:        0     1 6
+## 3:        1     0 2
+## 4:        1     1 4&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(poverty, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    poverty group N
+## 1:       0     0 8
+## 2:       0     1 9
+## 3:       1     0 2
+## 4:       1     1 1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(location, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    location group N
+## 1:        0     0 3
+## 2:        0     1 6
+## 3:        1     0 7
+## 4:        1     1 4&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(size, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    size group N
+## 1:    0     0 4
+## 2:    0     1 3
+## 3:    1     0 6
+## 4:    1     1 7&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&#34;fast-implementation-with-data.table-and-rcpp&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Fast implementation with data.table and Rcpp&lt;/h2&gt;
+&lt;p&gt;As I alluded to before, if we want to implement this in the real world, it would be preferable to use code that does not bog down when we want to search 100,000+ possible randomization schemes. I have written a set of &lt;code&gt;R&lt;/code&gt; and &lt;code&gt;Rcpp&lt;/code&gt; functions the facilitate this. (Code is available &lt;a href=&#34;https://github.com/kgoldfeld/RDataGenBlog/tree/master/static/img/post-balance&#34;&gt;here&lt;/a&gt;.)&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# generate all possible schemes
+
+xperm &amp;lt;- xPerms(totalSchools, rxSchools, N=NULL) 
+
+nrow(xperm)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 184756&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;xperm[sample(nrow(xperm), 5, replace = FALSE)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    V1 V2 V3 V4 V5 V6 V7 V8 V9 V10 V11 V12 V13 V14 V15 V16 V17 V18 V19
+## 1:  0  1  1  1  1  0  1  1  0   0   0   1   0   1   0   0   0   1   0
+## 2:  1  1  0  1  1  1  1  1  0   1   0   0   0   0   1   0   1   0   0
+## 3:  1  0  1  0  0  1  1  1  1   1   1   0   1   0   0   1   0   0   0
+## 4:  1  1  1  0  0  1  0  1  0   1   1   1   1   0   0   1   0   0   0
+## 5:  1  1  0  0  1  0  0  1  1   1   1   0   1   0   0   0   1   1   0
+##    V20    id
+## 1:   1 94784
+## 2:   0 19535
+## 3:   0 61644
+## 4:   0 14633
+## 5:   0 35651&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# prepare data for evaluation
+
+dtMat &amp;lt;- as.matrix(dt[,-1])
+cc &amp;lt;- parse(text=attr(xperm, &amp;quot;varlist&amp;quot;))
+cc&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## expression(c(V1, V2, V3, V4, V5, V6, V7, V8, V9, V10, V11, V12, 
+##     V13, V14, V15, V16, V17, V18, V19, V20))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# evaluate each combination
+
+sF &amp;lt;-  xperm[, cppChk(eval(cc), dtMat), keyby = id]
+sF[sample(nrow(sF), 5, replace = FALSE)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##        id    V1
+## 1:  15924 FALSE
+## 2:  68284 FALSE
+## 3: 149360 FALSE
+## 4:  62924 FALSE
+## 5:  14009  TRUE&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# keep only the balanced schemes
+
+sFinal &amp;lt;- xperm[sF$V1]
+nrow(sFinal)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 7742&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# randomize from the balanced schemes
+
+selectRow &amp;lt;- sample(nrow(sFinal), 1)
+
+# check balance of randomized scheme
+
+dtAssigned &amp;lt;- copy(dt)
+dtAssigned[, group := as.vector(t(sFinal[selectRow, -&amp;quot;id&amp;quot;]))]
+
+dtAssigned[, .N, keyby=.(language, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    language group N
+## 1:        0     0 7
+## 2:        0     1 7
+## 3:        1     0 3
+## 4:        1     1 3&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(poverty, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    poverty group N
+## 1:       0     0 9
+## 2:       0     1 8
+## 3:       1     0 1
+## 4:       1     1 2&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(location, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    location group N
+## 1:        0     0 5
+## 2:        0     1 4
+## 3:        1     0 5
+## 4:        1     1 6&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtAssigned[, .N, keyby=.(size, group)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    size group N
+## 1:    0     0 3
+## 2:    0     1 4
+## 3:    1     0 7
+## 4:    1     1 6&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Copulas and correlated data generation: getting beyond the normal distribution</title>
+      <link>/post/correlated-data-copula/</link>
+      <pubDate>Mon, 19 Jun 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/correlated-data-copula/</guid>
+      <description>&lt;p&gt;Using the &lt;code&gt;simstudy&lt;/code&gt; package, it’s possible to generate correlated data from a normal distribution using the function &lt;em&gt;genCorData&lt;/em&gt;. I’ve wanted to extend the functionality so that we can generate correlated data from other sorts of distributions; I thought it would be a good idea to begin with binary and Poisson distributed data, since those come up so frequently in my work. &lt;code&gt;simstudy&lt;/code&gt; can already accommodate more general correlated data, but only in the context of a random effects data generation process. This might not be what we want, particularly if we are interested in explicitly generating data to explore marginal models (such as a GEE model) rather than a conditional random effects model (a topic I explored in my &lt;a href=&#34;https://www.rdatagen.net/post/marginal-v-conditional/&#34;&gt;previous&lt;/a&gt; discussion). The extension can quite easily be done using &lt;em&gt;copulas&lt;/em&gt;.&lt;/p&gt;
+&lt;p&gt;Based on &lt;a href=&#34;https://en.wikipedia.org/wiki/Copula_%28probability_theory%29&#34;&gt;this&lt;/a&gt; definition, a copula is a “multivariate probability distribution for which the marginal probability distribution of each variable is uniform.” It can be shown that &lt;span class=&#34;math inline&#34;&gt;\(U\)&lt;/span&gt; is uniformly distributed if &lt;span class=&#34;math inline&#34;&gt;\(U=F(X)\)&lt;/span&gt;, where &lt;span class=&#34;math inline&#34;&gt;\(F\)&lt;/span&gt; is the CDF of a continuous random variable &lt;span class=&#34;math inline&#34;&gt;\(X\)&lt;/span&gt;. Furthermore, if we can generate a multivariate &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{X}\)&lt;/span&gt;, say &lt;span class=&#34;math inline&#34;&gt;\((X_1, X_2, ..., X_k)\)&lt;/span&gt; with a known covariance or correlation structure (e.g. exchangeable, auto-regressive, unstructured), it turns that the corresponding multivariate &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{U}, (U_1, U_2, ..., U_k)\)&lt;/span&gt; will maintain that structure. And in a final step, we can transform &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{U}\)&lt;/span&gt; to another random variable &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{Y}\)&lt;/span&gt; that has a target distribution by applying the inverse CDF &lt;span class=&#34;math inline&#34;&gt;\(F_i^{-1}(U_i)\)&lt;/span&gt; of that target distribution to each &lt;span class=&#34;math inline&#34;&gt;\(U_i\)&lt;/span&gt;. Since we can generate a multivariate normal &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{X}\)&lt;/span&gt;, it is relatively short leap to implement this copula algorithm in order to generate correlated data from other distributions.&lt;/p&gt;
+&lt;div id=&#34;implementing-the-copula-algorithm-in-r&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Implementing the copula algorithm in R&lt;/h2&gt;
+&lt;p&gt;While this hasn’t been implemented just yet in &lt;code&gt;simstudy&lt;/code&gt;, this is along the lines of what I am thinking:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+library(data.table)
+
+set.seed(555)
+
+# Generate 1000 observations of 4 RVs from a multivariate normal 
+# dist - each N(0,1) - with a correlation matrix where rho = 0.4 
+
+dt &amp;lt;- genCorData(1000, mu = c(0, 0, 0, 0), sigma = 1, 
+                 rho = 0.4, corstr = &amp;quot;cs&amp;quot; )
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id         V1          V2         V3         V4
+##    1:    1 -1.1667574 -0.05296536  0.2995360 -0.5232691
+##    2:    2  0.4505618  0.57499589 -0.9629426  1.5495697
+##    3:    3 -0.1294505  1.68372035  1.1309223  0.4205397
+##    4:    4  0.0858846  1.27479473  0.4247491  0.1054230
+##    5:    5  0.4654873  3.05566796  0.5846449  1.0906072
+##   ---                                                  
+##  996:  996  0.3420099 -0.35783480 -0.8363306  0.2656964
+##  997:  997 -1.0928169  0.50081091 -0.8915582 -0.7428976
+##  998:  998  0.7490765 -0.09559294 -0.2351121  0.6632157
+##  999:  999  0.8143565 -1.00978384  0.2266132 -1.2345192
+## 1000: 1000 -1.9795559 -0.16668454 -0.5883966 -1.7424941&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;round(cor(dt[,-1]), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3   V4
+## V1 1.00 0.41 0.36 0.44
+## V2 0.41 1.00 0.33 0.42
+## V3 0.36 0.33 1.00 0.35
+## V4 0.44 0.42 0.35 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### create a long version of the data set
+
+dtM &amp;lt;- melt(dt, id.vars = &amp;quot;id&amp;quot;, variable.factor = TRUE, 
+            value.name = &amp;quot;X&amp;quot;, variable.name = &amp;quot;seq&amp;quot;)
+setkey(dtM, &amp;quot;id&amp;quot;)   # sort data by id
+dtM[, seqid := .I]  # add index for each record
+
+### apply CDF to X to get uniform distribution
+
+dtM[, U := pnorm(X)]
+
+### Generate correlated Poisson data with mean and variance 8
+### apply inverse CDF to U
+
+dtM[, Y_pois := qpois(U, 8), keyby = seqid]
+dtM&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id seq           X seqid          U Y_pois
+##    1:    1  V1 -1.16675744     1 0.12165417      5
+##    2:    1  V2 -0.05296536     2 0.47887975      8
+##    3:    1  V3  0.29953603     3 0.61773446      9
+##    4:    1  V4 -0.52326909     4 0.30039350      6
+##    5:    2  V1  0.45056179     5 0.67384729      9
+##   ---                                             
+## 3996:  999  V4 -1.23451924  3996 0.10850474      5
+## 3997: 1000  V1 -1.97955591  3997 0.02387673      3
+## 3998: 1000  V2 -0.16668454  3998 0.43380913      7
+## 3999: 1000  V3 -0.58839655  3999 0.27813308      6
+## 4000: 1000  V4 -1.74249414  4000 0.04071101      3&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check mean and variance of Y_pois
+
+dtM[, .(mean = round(mean(Y_pois), 1), 
+        var = round(var(Y_pois), 1)), keyby = seq]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    seq mean var
+## 1:  V1  8.0 8.2
+## 2:  V2  8.1 8.5
+## 3:  V3  8.1 7.6
+## 4:  V4  8.0 7.9&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check correlation matrix of Y_pois&amp;#39;s - I know this code is a bit ugly
+### but I just wanted to get the correlation matrix quickly.
+
+round(cor(as.matrix(dcast(data = dtM, id~seq, 
+                          value.var = &amp;quot;Y_pois&amp;quot;)[,-1])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3   V4
+## V1 1.00 0.40 0.37 0.43
+## V2 0.40 1.00 0.33 0.40
+## V3 0.37 0.33 1.00 0.35
+## V4 0.43 0.40 0.35 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The correlation matrices for &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{X}\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{Y_{Pois}}\)&lt;/span&gt; aren’t too far off.&lt;/p&gt;
+&lt;p&gt;Here are the results for an auto-regressive (AR-1) correlation structure. (I am omitting some of the code for brevity’s sake):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Generate 1000 observations of 4 RVs from a multivariate normal 
+# dist - each N(0,1) - with a correlation matrix where rho = 0.4 
+
+dt &amp;lt;- genCorData(1000, mu = c(0, 0, 0, 0), sigma = 1, 
+                 rho = 0.4, corstr = &amp;quot;ar1&amp;quot; )
+
+round(cor(dt[,-1]), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3   V4
+## V1 1.00 0.43 0.18 0.12
+## V2 0.43 1.00 0.39 0.13
+## V3 0.18 0.39 1.00 0.38
+## V4 0.12 0.13 0.38 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check mean and variance of Y_pois
+
+dtM[, .(mean = round(mean(Y_pois), 1), 
+        var = round(var(Y_pois), 1)), keyby = seq]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    seq mean var
+## 1:  V1  8.1 8.3
+## 2:  V2  7.9 7.8
+## 3:  V3  8.0 8.4
+## 4:  V4  8.0 7.5&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check correlation matrix of Y_pois&amp;#39;s
+
+round(cor(as.matrix(dcast(data = dtM, id~seq, 
+                          value.var = &amp;quot;Y_pois&amp;quot;)[,-1])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3   V4
+## V1 1.00 0.41 0.18 0.13
+## V2 0.41 1.00 0.39 0.14
+## V3 0.18 0.39 1.00 0.36
+## V4 0.13 0.14 0.36 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Again - comparing the two correlation matrices - the original normal data, and the derivative Poisson data - suggests that this can work pretty well.&lt;/p&gt;
+&lt;p&gt;Using the last data set, I fit a GEE model to see how well the data generating process is recovered:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(geepack)
+
+geefit &amp;lt;- geepack::geeglm(Y_pois ~ 1, data = dtM, family = poisson,
+                          id = id, corstr = &amp;quot;ar1&amp;quot;)
+
+summary(geefit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## 
+## Call:
+## geepack::geeglm(formula = Y_pois ~ 1, family = poisson, data = dtM, 
+##     id = id, corstr = &amp;quot;ar1&amp;quot;)
+## 
+##  Coefficients:
+##             Estimate  Std.err  Wald Pr(&amp;gt;|W|)    
+## (Intercept) 2.080597 0.007447 78060   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)   0.9984 0.02679
+## 
+## Correlation: Structure = ar1  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha   0.3987 0.02008
+## Number of clusters:   1000   Maximum cluster size: 4&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In the GEE output, alpha is an estimate of &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt;. The estimated alpha is 0.399, quite close to 0.40, the original value used to generate the normally distributed data.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;binary-outcomes&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Binary outcomes&lt;/h2&gt;
+&lt;p&gt;We can also generate binary data:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Generate binary data with p=0.5 (var = 0.25)
+
+dtM[, Y_bin := qbinom(U, 1, .5), keyby = seqid]
+dtM&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id seq       X seqid        U Y_pois Y_bin
+##    1:    1  V1  1.7425     1 0.959288     13     1
+##    2:    1  V2  1.4915     2 0.932086     12     1
+##    3:    1  V3  0.7379     3 0.769722     10     1
+##    4:    1  V4 -1.6581     4 0.048644      4     0
+##    5:    2  V1  2.3262     5 0.989997     15     1
+##   ---                                             
+## 3996:  999  V4 -0.3805  3996 0.351772      7     0
+## 3997: 1000  V1 -0.8724  3997 0.191505      6     0
+## 3998: 1000  V2 -1.0085  3998 0.156600      5     0
+## 3999: 1000  V3 -2.0451  3999 0.020420      3     0
+## 4000: 1000  V4 -2.7668  4000 0.002831      1     0&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check mean and variance of Y_bin
+
+dtM[, .(mean = round(mean(Y_bin), 2), 
+        var = round(var(Y_bin), 2)), keyby = seq]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    seq mean  var
+## 1:  V1 0.52 0.25
+## 2:  V2 0.50 0.25
+## 3:  V3 0.48 0.25
+## 4:  V4 0.49 0.25&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;### Check correlation matrix of Y_bin&amp;#39;s
+
+round(cor(as.matrix(dcast(data = dtM, id~seq, 
+                          value.var = &amp;quot;Y_bin&amp;quot;)[,-1])), 2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      V1   V2   V3   V4
+## V1 1.00 0.29 0.10 0.05
+## V2 0.29 1.00 0.27 0.03
+## V3 0.10 0.27 1.00 0.23
+## V4 0.05 0.03 0.23 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The binary data are correlated, but the correlation coefficient doesn’t replicate as well as the Poisson distribution. While both the Poisson and binary CDF’s are discontinuous, the extreme jump in the binary CDF leads to this discrepancy. Values that are relatively close to each other on the normal scale, and in particular on the uniform scale, can be ‘sent’ to opposite ends of the binary scale (that is to 0 and to 1) if they straddle the cutoff point &lt;span class=&#34;math inline&#34;&gt;\(p\)&lt;/span&gt; (the probability of the outcome in the binary distribution); values similar in the original data are very different in the target data. This bias is partially attenuated by values far apart on the uniform scale yet falling on the same side of &lt;span class=&#34;math inline&#34;&gt;\(p\)&lt;/span&gt; (both driven to 0 or both to 1); in this case values different in the original data are similar (actually identical) in the target data.&lt;/p&gt;
+&lt;p&gt;The series of plots below show bivariate data for the original multivariate normal data, and the corresponding uniform, Poisson, and binary data. We can see the effect of extreme discontinuity of the binary data. (R code available &lt;a href=&#34;https://github.com/kgoldfeld/RDataGenBlog/blob/master/static/img/post-copula/Check%20rho%20for%20dists.R&#34;&gt;here&lt;/a&gt;.)&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-06-19-generating-correlated-data-using-a-copula-approach_files/figure-html/unnamed-chunk-7-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;some-simulation-results&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Some simulation results&lt;/h2&gt;
+&lt;p&gt;A series of simulations shows how well the estimates of &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt; compare across a set of different assumptions. In each of the plots below, we see how &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt; for the non-normal data changes as a function of &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt; from the original normally distributed data. For each value of &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt;, I varied the parameter of the non-normal distribution (in the case of the binary data, I varied the probability of the outcome; in the case of the Poisson data, I varied the parameter &lt;span class=&#34;math inline&#34;&gt;\(\lambda\)&lt;/span&gt; which defines the mean and variance). I also considered both covariance structures, exchangeable and ar-1. (R code available &lt;a href=&#34;https://github.com/kgoldfeld/RDataGenBlog/blob/master/static/img/post-copula/Copula%20data%20generation.R&#34;&gt;here&lt;/a&gt;.)&lt;/p&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-copula/dists.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;p&gt;These simulations confirm what we saw earlier. The Poisson data generating process recovers the original &lt;span class=&#34;math inline&#34;&gt;\(\rho\)&lt;/span&gt; under both covariance structures reasonably well. The binary data generating process is less successful, with the exchangeable structure doing slightly better than then auto-regressive structure.&lt;/p&gt;
+&lt;p&gt;Hopefully soon, this will be implemented in &lt;code&gt;simstudy&lt;/code&gt; so that we can generate data from more general distributions with a single function call.&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
     
     <item>
       <title>When marginal and conditional logistic model estimates diverge</title>
       <link>/post/marginal-v-conditional/</link>
-      <pubDate>Thu, 08 Jun 2017 00:00:00 +0000</pubDate>
+      <pubDate>Fri, 09 Jun 2017 00:00:00 +0000</pubDate>
       <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
       <guid>/post/marginal-v-conditional/</guid>
-      <description>Say we have an intervention that is assigned at a group or cluster level but the outcome is measured at an individual level (e.g. students in different schools, eyes on different individuals). And, say this outcome is binary; that is, something happens, or it doesn’t. (This is important, because none of this is true if the outcome is continuous and at close to normally distributed.) If we want to measure the effect of the intervention - perhaps the risk difference, risk ratio, or odds ratio - it can really matter if we are interested in the marginal effect or the conditional effect, because there is a good chance they won’t be the same.</description>
+      <description>&lt;STYLE TYPE=&#34;text/css&#34;&gt;
+&lt;!--
+  td{
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 2px;
+    padding:0px;
+    cellpadding=&#34;0&#34;;
+    cellspacing=&#34;0&#34;;
+    text-align: center;
+  }
+  th {
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+  table { 
+    border-spacing: 0px;
+    border-collapse: collapse;
+  }
+---&gt;
+&lt;/STYLE&gt;
+&lt;p&gt;Say we have an intervention that is assigned at a group or cluster level but the outcome is measured at an individual level (e.g. students in different schools, eyes on different individuals). And, say this outcome is binary; that is, something happens, or it doesn’t. (This is important, because none of this is true if the outcome is continuous and close to normally distributed.) If we want to measure the &lt;em&gt;effect&lt;/em&gt; of the intervention - perhaps the risk difference, risk ratio, or odds ratio - it can really matter if we are interested in the &lt;em&gt;marginal&lt;/em&gt; effect or the &lt;em&gt;conditional&lt;/em&gt; effect, because they likely won’t be the same.&lt;/p&gt;
+&lt;p&gt;My aim is to show this through a couple of data simulations that allow us to see this visually.&lt;/p&gt;
+&lt;div id=&#34;first-example&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;First example&lt;/h3&gt;
+&lt;p&gt;In the first scenario, I am going to use a &lt;em&gt;causal inference&lt;/em&gt; framework that uses the idea that everyone has a potential outcome under one exposure (such as an intervention of some sort), and another potential outcome under a different exposure (such as treatment as usual or control). (I may discuss potential outcomes and causal inference in more detail in the future.) The potential outcome can be written with a superscript, lie &lt;span class=&#34;math inline&#34;&gt;\(Y^0\)&lt;/span&gt; or &lt;span class=&#34;math inline&#34;&gt;\(Y^1\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;To generate the data, I will use this simple model for each potential outcome: &lt;span class=&#34;math display&#34;&gt;\[ log\left[\frac{P(Y^0_{ij})}{1-P(Y^0_{ij})}\right] = \gamma + \alpha_i\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;and &lt;span class=&#34;math display&#34;&gt;\[ log\left[\frac{P(Y^1_{ij})}{1-P(Y^1_{ij})}\right] = \gamma + \alpha_i + \delta.\]&lt;/span&gt; &lt;span class=&#34;math inline&#34;&gt;\(\delta\)&lt;/span&gt; is the treatment effect and is constant across the clusters, on the log-odds scale. &lt;span class=&#34;math inline&#34;&gt;\(\alpha_i\)&lt;/span&gt; is the cluster specific effect for cluster &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt;. &lt;span class=&#34;math inline&#34;&gt;\(Y^a_{ij}\)&lt;/span&gt; is the potential outcome for individual &lt;span class=&#34;math inline&#34;&gt;\(j\)&lt;/span&gt; under exposure &lt;span class=&#34;math inline&#34;&gt;\(a\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;Now let’s generate some data and look at it:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Define data
+
+def1 &amp;lt;- defData(varname = &amp;quot;clustEff&amp;quot;, formula = 0, variance = 2, 
+                id = &amp;quot;cID&amp;quot;)
+def1 &amp;lt;- defData(def1, varname = &amp;quot;nInd&amp;quot;, formula = 10000, 
+                dist = &amp;quot;noZeroPoisson&amp;quot;)
+  
+def2 &amp;lt;- defDataAdd(varname = &amp;quot;Y0&amp;quot;, formula = &amp;quot;-1 + clustEff&amp;quot;, 
+                     dist = &amp;quot;binary&amp;quot;, link = &amp;quot;logit&amp;quot;)
+def2 &amp;lt;- defDataAdd(def2, varname = &amp;quot;Y1&amp;quot;, 
+                     formula = &amp;quot;-1 + clustEff + 2&amp;quot;, 
+                     dist = &amp;quot;binary&amp;quot;, link = &amp;quot;logit&amp;quot;)
+
+options(width = 80)
+def1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     varname formula variance          dist     link
+## 1: clustEff       0        2        normal identity
+## 2:     nInd   10000        0 noZeroPoisson identity&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;def2&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    varname           formula variance   dist  link
+## 1:      Y0     -1 + clustEff        0 binary logit
+## 2:      Y1 -1 + clustEff + 2        0 binary logit&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Generate cluster level data
+
+set.seed(123)
+  
+dtC &amp;lt;- genData(n = 100, def1)
+
+# Generate individual level data
+  
+dt &amp;lt;- genCluster(dtClust = dtC, cLevelVar = &amp;quot;cID&amp;quot;, numIndsVar = &amp;quot;nInd&amp;quot;, 
+                   level1ID = &amp;quot;id&amp;quot;)
+
+dt &amp;lt;- addColumns(def2, dt)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Since we have repeated measurements for each cluster (the two potential outcomes), we can transform this into a “longitudinal” data set, though the periods are not time but different exposures.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtLong &amp;lt;- addPeriods(dtName = dt, idvars = c(&amp;quot;id&amp;quot;,&amp;quot;cID&amp;quot;), 
+                     nPeriods = 2,timevars = c(&amp;quot;Y0&amp;quot;,&amp;quot;Y1&amp;quot;), 
+                     timevarName = &amp;quot;Y&amp;quot;
+)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;When we look at the data visually, we get a hint that the marginal (or average) effect might not be the same as the conditional (cluster-specific) effects.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Calculate average potential outcomes by exposure (which is called period)
+
+dtMean &amp;lt;- dtLong[, .(Y = mean(Y)), keyby = .(period, cID)] # conditional mean
+dtMMean &amp;lt;- dtLong[, .(Y = mean(Y)), keyby = .(period)] # marginal mean
+dtMMean[, cID := 999]
+
+ggplot(data = dtMean, aes(x=factor(period), y = Y, group= cID)) +
+  # geom_jitter(width= .25, color = &amp;quot;grey75&amp;quot;) +
+  geom_line(color = &amp;quot;grey75&amp;quot;, position=position_jitter(w=0.02, h=0.02)) +
+  geom_point(data=dtMMean) +
+  geom_line(data=dtMMean, size = 1, color = &amp;quot;red&amp;quot;) +
+  ylab(&amp;quot;Estimated cluster probability&amp;quot;) +
+  scale_y_continuous(labels = scales::percent) +
+  theme(axis.title.x = element_blank()) +
+  my_theme()&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-06-09-marginal-v-conditional_files/figure-html/unnamed-chunk-2-1.png&#34; width=&#34;672&#34; style=&#34;display: block; margin: auto;&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;Looking at the plot, we see that the slopes of the grey lines - each representing the change in probability as a result of the exposure for each cluster - vary quite a bit. When the probability without exposure (&lt;span class=&#34;math inline&#34;&gt;\(Y^0\)&lt;/span&gt;) is particularly low or high, the absolute effect of the intervention is small (the slope is minimal). The slope or absolute effect increases when the starting probability is closer to 50%. The red line represents the averages of &lt;span class=&#34;math inline&#34;&gt;\(Y^0\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y^1\)&lt;/span&gt; across all individuals in all clusters. There is no reason to believe that the average slope of the grey lines is the same as the slope of the red line, which is slope of the averages. We will see that more clearly with the next data generation scenario.&lt;/p&gt;
+&lt;p&gt;Finally, if we look at cluster-specific effects of exposure, we see that on the risk difference scale (difference in probabilities), there is much variation, but on the log-odds ratio scale there is almost no variation. This is as it should be, because on the log-odds scale (which is how we generated the data), the difference between exposure and non-exposure is additive. On the probability scale, the difference is multiplicative. Here are some estimated differences for a sample of clusters:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtChange &amp;lt;- dt[, .(Y0 = mean(Y0), Y1 = mean(Y1)), keyby = cID]
+dtChange[, riskdiff := round(Y1 - Y0, 2)]
+dtChange[, loratio := round( log( (Y1 / (1-Y1)) / (Y0 / (1-Y0) )), 2)]
+
+dtChange[sample(1:100, 10, replace = F),
+         .(Y0 = round(Y0,2), Y1 = round(Y1,2), riskdiff, loratio), 
+         keyby=cID]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     cID   Y0   Y1 riskdiff loratio
+##  1:  18 0.02 0.14     0.12    1.95
+##  2:  19 0.50 0.89     0.39    2.06
+##  3:  22 0.22 0.67     0.45    1.97
+##  4:  24 0.12 0.49     0.37    1.94
+##  5:  30 0.69 0.94     0.26    2.00
+##  6:  31 0.40 0.83     0.42    1.95
+##  7:  34 0.56 0.90     0.35    1.99
+##  8:  38 0.26 0.72     0.46    2.01
+##  9:  72 0.01 0.09     0.08    1.97
+## 10:  99 0.22 0.66     0.44    1.93&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;second-example&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Second example&lt;/h2&gt;
+&lt;p&gt;This time around, we will add an additional individual level covariate that will help us visualize the difference a bit more clearly. Let us say that &lt;em&gt;age&lt;/em&gt; is positively associated with increased probability in the outcome. (In this case, we measured age and then normalized it so that the mean age in the sample is 0.) And this time around, we are not going to use potential outcomes, but will randomly assign clusters to an intervention or treatment group.&lt;/p&gt;
+&lt;p&gt;This is the data generating model and the code:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ log\left[\frac{P(Y_{ij})}{1-P(Y_{ij})}\right] = \gamma + \alpha_j + \beta_1*Trt_j + \beta_2*Age_i\]&lt;/span&gt;&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;def1 &amp;lt;- defData(varname = &amp;quot;clustEff&amp;quot;, formula = 0, variance = 2, id = &amp;quot;cID&amp;quot;)
+def1 &amp;lt;- defData(def1, varname = &amp;quot;nInd&amp;quot;, formula = 100, dist = &amp;quot;noZeroPoisson&amp;quot;)
+  
+# Each individual now has a measured age
+
+def2 &amp;lt;- defDataAdd(varname = &amp;quot;age&amp;quot;, formula = 0, variance = 2)
+def2 &amp;lt;- defDataAdd(def2, varname = &amp;quot;Y&amp;quot;, 
+                   formula = &amp;quot;-4 + clustEff + 2*trt + 2*age&amp;quot;, 
+                   dist = &amp;quot;binary&amp;quot;, link = &amp;quot;logit&amp;quot;)
+  
+# Generate cluster level data
+  
+dtC &amp;lt;- genData(200, def1)
+dtC &amp;lt;- trtAssign(dtC, grpName = &amp;quot;trt&amp;quot;) #
+  
+# Generate individual level data
+  
+dt &amp;lt;- genCluster(dtClust = dtC, cLevelVar = &amp;quot;cID&amp;quot;, numIndsVar = &amp;quot;nInd&amp;quot;, 
+                 level1ID = &amp;quot;id&amp;quot;)
+dt &amp;lt;- addColumns(def2, dt)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;By fitting a conditional model (generalized linear mixed effects model) and a marginal model (we should fit a generalized estimating equation model to get the proper standard error estimates, but will estimate a generalized linear model, because the GEE model does not have a “predict” option in R; the point estimates for both marginal models should be quite close), we can see that indeed the conditional and marginal averages can be quite different.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;glmerFit1 &amp;lt;- glmer(Y ~ trt + age + (1 | cID), data = dt, family=&amp;quot;binomial&amp;quot;)
+glmFit1 &amp;lt;- glm(Y ~ trt + age, family = binomial, data = dt)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##                   Intercept  Trt  Age
+## conditional model     -3.82 1.99 2.01
+## marginal model        -2.97 1.60 1.54&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Now, we’d like to visualize how the conditional and marginal treatment effects diverge. We can use the model estimates from the conditional model to predict probabilities for each cluster, age, and treatment group. (These will appear as grey lines in the plots below). We can also predict marginal probabilities from the marginal model based on age and treatment group while ignoring cluster. (These marginal estimates appear as red lines.) Finally, we can predict probability of outcomes for the conditional model also based on age and treatment group alone, but fixed at a mythical cluster whose random effect is 0. (These “average” conditional estimates appear as black lines.)&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;newCond &amp;lt;- expand.grid(cID = unique(dt$cID), age=seq(-4, 4, by =.1))
+newCond0 &amp;lt;- data.table(trt = 0, newCond)
+newCond1 &amp;lt;- data.table(trt = 1, newCond)
+
+newMarg0 &amp;lt;- data.table(trt = 0, age = seq(-4, 4, by = .1))
+newMarg1 &amp;lt;- data.table(trt = 1, age = seq(-4, 4, by = .1))
+
+newCond0[, pCond0 := predict(glmerFit1, newCond0, type = &amp;quot;response&amp;quot;)]
+newCond1[, pCond1 := predict(glmerFit1, newCond1, type = &amp;quot;response&amp;quot;)]
+
+newMarg0[, pMarg0 := predict(glmFit1, newMarg0, type = &amp;quot;response&amp;quot;)]
+newMarg0[, pCAvg0 := predict(glmerFit1, newMarg0[,c(1,2)], 
+                             re.form = NA, type=&amp;quot;response&amp;quot;)]
+
+newMarg1[, pMarg1 := predict(glmFit1, newMarg1, type = &amp;quot;response&amp;quot;)]
+newMarg1[, pCAvg1 := predict(glmerFit1, newMarg1[,c(1,2)], 
+                             re.form = NA, type=&amp;quot;response&amp;quot;)]
+
+dtAvg &amp;lt;- data.table(age = newMarg1$age, 
+           avgMarg = newMarg1$pMarg1 - newMarg0$pMarg0, 
+           avgCond = newMarg1$pCAvg1 - newMarg0$pCAvg0
+)
+
+p1 &amp;lt;- ggplot(aes(x = age, y = pCond1), data=newCond1) + 
+  geom_line(color=&amp;quot;grey&amp;quot;, aes(group = cID)) +
+  geom_line(data=newMarg1, aes(x = age, y = pMarg1), color = &amp;quot;red&amp;quot;, size = 1) +
+  geom_line(data=newMarg1, aes(x = age, y = pCAvg1), color = &amp;quot;black&amp;quot;, size = 1) +
+  ggtitle(&amp;quot;Treatment group&amp;quot;) +
+  xlab(&amp;quot;Age&amp;quot;) +
+  ylab(&amp;quot;Probability&amp;quot;) +
+  my_theme()
+
+p0 &amp;lt;- ggplot(aes(x = age, y = pCond0), data=newCond0) + 
+  geom_line(color=&amp;quot;grey&amp;quot;, aes(group = cID)) +
+  geom_line(data=newMarg0, aes(x = age, y = pMarg0), color = &amp;quot;red&amp;quot;, size = 1) +
+  geom_line(data=newMarg0, aes(x = age, y = pCAvg0), color = &amp;quot;black&amp;quot;, size = 1) +
+  ggtitle(&amp;quot;Control group&amp;quot;) +
+  xlab(&amp;quot;Age&amp;quot;) +
+  ylab(&amp;quot;Probability&amp;quot;) +
+  my_theme()
+
+pdiff &amp;lt;- ggplot(data = dtAvg) + 
+  geom_line(aes(x = age, y = avgMarg), color = &amp;quot;red&amp;quot;, size = 1) +
+  geom_line(aes(x = age, y = avgCond), color = &amp;quot;black&amp;quot;, size = 1) +
+  ggtitle(&amp;quot;Risk difference&amp;quot;) +
+  xlab(&amp;quot;Age&amp;quot;) +
+  ylab(&amp;quot;Probability&amp;quot;) +
+  my_theme()
+
+grid.arrange(p1, p0, pdiff)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-06-09-marginal-v-conditional_files/figure-html/unnamed-chunk-7-1.png&#34; width=&#34;432&#34; style=&#34;display: block; margin: auto;&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;We see pretty clearly across all ages that the marginal and conditional estimates of average treatment differences differ quite dramatically.&lt;/p&gt;
+&lt;p&gt;Below are point estimates and plots for data generated with very little variance across clusters, that is &lt;span class=&#34;math inline&#34;&gt;\(var(\alpha_i)\)&lt;/span&gt; is close to 0. (We change this in the simulation by setting &lt;code&gt;def1 &amp;lt;- defData(varname = &amp;quot;clustEff&amp;quot;, formula = 0, variance = 0.05, id = &amp;quot;cID&amp;quot;)&lt;/code&gt;.)&lt;/p&gt;
+&lt;pre&gt;&lt;code&gt;##                   Intercept  Trt  Age
+## conditional model     -4.03 2.08 2.01
+## marginal model        -4.00 2.07 1.99&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-06-09-marginal-v-conditional_files/figure-html/unnamed-chunk-8-1.png&#34; width=&#34;432&#34; style=&#34;display: block; margin: auto;&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;The black lines obscure the red - the marginal model estimate is not much different from the conditional model estimate - because the variance across clusters is negligible.&lt;/p&gt;
+&lt;/div&gt;
+</description>
     </item>
     
     <item>
@@ -27,7 +1696,306 @@
       <pubDate>Tue, 16 May 2017 00:00:00 +0000</pubDate>
       <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
       <guid>/post/intro-to-simstudy/</guid>
-      <description>I learned statistics and probability by simulating data. Sure, I did the occasional proof, but I never believed the results until I saw it in a simulation. I guess I have it backwards, but I that’s just the way I am. And now that I am a so-called professional, I continue to use simulation to understand models, to do sample size estimates and power calculations, and of course to teach.</description>
+      <description>&lt;STYLE TYPE=&#34;text/css&#34;&gt;
+&lt;!--
+  td{
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 2px;
+    padding:0px;
+    cellpadding=&#34;0&#34;;
+    cellspacing=&#34;0&#34;;
+    text-align: center;
+  }
+  th {
+    font-family: Arial; 
+    font-size: 9pt;
+    height: 20px;
+    font-weight: bold;
+    text-align: center;
+  }
+  table { 
+    border-spacing: 0px;
+    border-collapse: collapse;
+  }
+---&gt;
+&lt;/STYLE&gt;
+&lt;p&gt;I learned statistics and probability by simulating data. Sure, I did the occasional proof, but I never believed the results until I saw it in a simulation. I guess I have it backwards, but I that’s just the way I am. And now that I am a so-called professional, I continue to use simulation to understand models, to do sample size estimates and power calculations, and of course to teach. Sure - I’ll use the occasional formula when one exists, but I always feel the need to check it with simulation. It’s just the way I am.&lt;/p&gt;
+&lt;p&gt;Since I found myself constantly setting up simulations, over time I developed ways to make the process a bit easier. Those processes turned into a package, which I called &lt;a href = https://cran.r-project.org/web/packages/simstudy/index.html&gt;simstudy&lt;/a&gt;, which obviously means &lt;em&gt;simulating study data&lt;/em&gt;. The purpose here in this blog entyr is to introduce the basic idea behind simstudy, and provide a relatively brief example that actually comes from a question a user posed about generating correlated longitudinal data.&lt;/p&gt;
+&lt;div id=&#34;the-basic-idea&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;The basic idea&lt;/h2&gt;
+&lt;p&gt;Simulation using simstudy has two primary steps. First, the user defines the data elements of a data set either in an external csv file or internally through a set of repeated definition statements. Second, the user generates the data, using these definitions. Data generation can be as simple as a cross-sectional design or prospective cohort design, or it can be more involved, extending to allow simulators to generate observed or randomized &lt;em&gt;treatment assignment/exposures&lt;/em&gt;, &lt;em&gt;survival&lt;/em&gt; data, &lt;em&gt;longitudinal/panel&lt;/em&gt; data, &lt;em&gt;multi-level/hierarchical&lt;/em&gt; data, datasets with &lt;em&gt;correlated variables&lt;/em&gt; based on a specified covariance structure, and to data sets with &lt;em&gt;missing&lt;/em&gt; data based on a variety of missingness patterns.&lt;/p&gt;
+&lt;p&gt;The key to simulating data in simstudy is the creation of series of data defintion tables that look like this:&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr class=&#34;header&#34;&gt;
+&lt;th align=&#34;left&#34;&gt;varname&lt;/th&gt;
+&lt;th align=&#34;left&#34;&gt;formula&lt;/th&gt;
+&lt;th align=&#34;right&#34;&gt;variance&lt;/th&gt;
+&lt;th align=&#34;left&#34;&gt;dist&lt;/th&gt;
+&lt;th align=&#34;left&#34;&gt;link&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;tbody&gt;
+&lt;tr class=&#34;odd&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;nr&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;7&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;0&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;nonrandom&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;identity&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;even&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;x1&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;10;20&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;0&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;uniform&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;identity&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;odd&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;y1&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;nr + x1 * 2&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;8&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;normal&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;identity&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;even&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;y2&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;nr - 0.2 * x1&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;0&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;poisson&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;log&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;odd&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;xCat&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;0.3;0.2;0.5&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;0&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;categorical&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;identity&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;even&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;g1&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;5+xCat&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;1&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;gamma&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;log&lt;/td&gt;
+&lt;/tr&gt;
+&lt;tr class=&#34;odd&#34;&gt;
+&lt;td align=&#34;left&#34;&gt;a1&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;-3 + xCat&lt;/td&gt;
+&lt;td align=&#34;right&#34;&gt;0&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;binary&lt;/td&gt;
+&lt;td align=&#34;left&#34;&gt;logit&lt;/td&gt;
+&lt;/tr&gt;
+&lt;/tbody&gt;
+&lt;/table&gt;
+&lt;p&gt;Here’s the code that is used to generate this definition, which is stored as a &lt;a href = https://github.com/Rdatatable/data.table/wiki&gt;data.table &lt;/a&gt;:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;def &amp;lt;- defData(varname = &amp;quot;nr&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;, formula = 7, id = &amp;quot;idnum&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;x1&amp;quot;, dist = &amp;quot;uniform&amp;quot;, formula = &amp;quot;10;20&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;y1&amp;quot;, formula = &amp;quot;nr + x1 * 2&amp;quot;, variance = 8)
+def &amp;lt;- defData(def, varname = &amp;quot;y2&amp;quot;, dist = &amp;quot;poisson&amp;quot;, formula = &amp;quot;nr - 0.2 * x1&amp;quot;, 
+    link = &amp;quot;log&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;xCat&amp;quot;, formula = &amp;quot;0.3;0.2;0.5&amp;quot;, dist = &amp;quot;categorical&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;g1&amp;quot;, dist = &amp;quot;gamma&amp;quot;, formula = &amp;quot;5+xCat&amp;quot;, variance = 1, 
+    link = &amp;quot;log&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;a1&amp;quot;, dist = &amp;quot;binary&amp;quot;, formula = &amp;quot;-3 + xCat&amp;quot;, 
+    link = &amp;quot;logit&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;To create a simple data set based on these definitions, all one needs to do is execute a single &lt;code&gt;genData&lt;/code&gt; command. In this example, we generate 500 records that are based on the definition in the &lt;code&gt;def&lt;/code&gt;table:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt &amp;lt;- genData(500, def)
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      idnum nr       x1       y1  y2 xCat         g1 a1
+##   1:     1  7 11.78709 30.24305 109    1  297.03396  0
+##   2:     2  7 13.02129 30.58814  87    3  929.80474  0
+##   3:     3  7 15.37784 37.31205  44    2 3738.52996  1
+##   4:     4  7 18.66916 42.51506  24    2   78.17338  0
+##   5:     5  7 10.55980 26.39898 131    2  147.42608  0
+##  ---                                                  
+## 496:   496  7 19.74327 46.62290  24    1   15.49462  0
+## 497:   497  7 18.41837 43.35002  24    1  201.66739  0
+## 498:   498  7 18.64485 47.62767  26    1  215.74763  0
+## 499:   499  7 12.07687 28.65423 105    3  864.30964  1
+## 500:   500  7 11.37337 29.71361 132    2  149.21883  0&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;There’s a lot more functionality in the package, and I’ll be writing about that in the future. But here, I just want give a little more introduction by way of an example that came in from around the world a couple of days ago. (I’d say the best thing about building a package is hearing from folks literally all over the world and getting to talk to them about statistics and R. It is really incredible to be able to do that.)&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;going-a-bit-further-simulating-a-prosepctive-cohort-study-with-repeated-measures&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Going a bit further: simulating a prosepctive cohort study with repeated measures&lt;/h2&gt;
+&lt;p&gt;The question was, can we simulate a study with two arms, say a control and treatment, with repeated measures at three time points: baseline, after 1 month, and after 2 months? Of course.&lt;/p&gt;
+&lt;p&gt;This was what I sent back to my correspondent:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Define the outcome
+
+ydef &amp;lt;- defDataAdd(varname = &amp;quot;Y&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = &amp;quot;5 + 2.5*period + 1.5*T + 3.5*period*T&amp;quot;, 
+    variance = 3)
+
+# Generate a &amp;#39;blank&amp;#39; data.table with 24 observations and assign them to
+# groups
+
+set.seed(1234)
+
+indData &amp;lt;- genData(24)
+indData &amp;lt;- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = &amp;quot;T&amp;quot;)
+
+# Create a longitudinal data set of 3 records for each id
+
+longData &amp;lt;- addPeriods(indData, nPeriods = 3, idvars = &amp;quot;id&amp;quot;)
+longData &amp;lt;- addColumns(dtDefs = ydef, longData)
+
+longData[, `:=`(T, factor(T, labels = c(&amp;quot;No&amp;quot;, &amp;quot;Yes&amp;quot;)))]
+
+# Let&amp;#39;s look at the data
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + geom_line(aes(color = T, 
+    group = id)) + scale_color_manual(values = c(&amp;quot;#e38e17&amp;quot;, &amp;quot;#8e17e3&amp;quot;)) + xlab(&amp;quot;Time&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-05-16-intro-to-simstudy_files/figure-html/unnamed-chunk-4-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;If we generate a data set based on 1,000 indviduals and estimate a linear regression model we see that the parameter estimates are quite good. However, my correspondent wrote back saying she wanted correlated data, which makes sense. We can see from the alpha estimate of approximately 0.02 (at the bottom of the output), we don’t have much correlation:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Fit a GEE model to the data
+
+fit &amp;lt;- geeglm(Y ~ factor(T) + period + factor(T) * period, family = gaussian(link = &amp;quot;identity&amp;quot;), 
+    data = longData, id = id, corstr = &amp;quot;exchangeable&amp;quot;)
+summary(fit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## 
+## Call:
+## geeglm(formula = Y ~ factor(T) + period + factor(T) * period, 
+##     family = gaussian(link = &amp;quot;identity&amp;quot;), data = longData, id = id, 
+##     corstr = &amp;quot;exchangeable&amp;quot;)
+## 
+##  Coefficients:
+##                     Estimate Std.err   Wald Pr(&amp;gt;|W|)    
+## (Intercept)          4.98268 0.07227 4753.4   &amp;lt;2e-16 ***
+## factor(T)Yes         1.48555 0.10059  218.1   &amp;lt;2e-16 ***
+## period               2.53946 0.05257 2333.7   &amp;lt;2e-16 ***
+## factor(T)Yes:period  3.51294 0.07673 2096.2   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)    2.952 0.07325
+## 
+## Correlation: Structure = exchangeable  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha  0.01737 0.01862
+## Number of clusters:   1000   Maximum cluster size: 3&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;one-way-to-generate-correlated-data&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;One way to generate correlated data&lt;/h2&gt;
+&lt;p&gt;The first way to approach this is to use the simstudy function &lt;code&gt;genCorData&lt;/code&gt; to generate correlated errors that are normally distributed with mean 0, variance of 3, and and common correlation coeffcient of 0.7. This approach is a bit mysterious, because we are acknowledging that we don’t know what is driving the relationship between the three outcomes, just that they have a common cause.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# define the outcome
+ydef &amp;lt;- defDataAdd(varname = &amp;quot;Y&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = &amp;quot;5 + 2.5*period + 1.5*T + 3.5*period*T + e&amp;quot;)
+
+# define the correlated errors
+
+mu &amp;lt;- c(0, 0, 0)
+sigma &amp;lt;- rep(sqrt(3), 3)
+
+# generate correlated data for each id and assign treatment
+
+dtCor &amp;lt;- genCorData(24, mu = mu, sigma = sigma, rho = 0.7, corstr = &amp;quot;cs&amp;quot;)
+dtCor &amp;lt;- trtAssign(dtCor, nTrt = 2, balanced = TRUE, grpName = &amp;quot;T&amp;quot;)
+
+# create longitudinal data set and generate outcome based on definition
+
+longData &amp;lt;- addPeriods(dtCor, nPeriods = 3, idvars = &amp;quot;id&amp;quot;, timevars = c(&amp;quot;V1&amp;quot;, 
+    &amp;quot;V2&amp;quot;, &amp;quot;V3&amp;quot;), timevarName = &amp;quot;e&amp;quot;)
+longData &amp;lt;- addColumns(ydef, longData)
+
+longData[, `:=`(T, factor(T, labels = c(&amp;quot;No&amp;quot;, &amp;quot;Yes&amp;quot;)))]
+
+# look at the data, outcomes should appear more correlated, lines a bit
+# straighter
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + geom_line(aes(color = T, 
+    group = id)) + scale_color_manual(values = c(&amp;quot;#e38e17&amp;quot;, &amp;quot;#8e17e3&amp;quot;)) + xlab(&amp;quot;Time&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-05-16-intro-to-simstudy_files/figure-html/unnamed-chunk-7-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;Again, we recover the true parameters. And this time, if we look at the estimated correlation, we see that indeed the outcomes are correlated within each indivdual. The estimate is 0.77, close to the our specified value of 0.7.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;fit &amp;lt;- geeglm(Y ~ factor(T) + period + factor(T) * period, family = gaussian(link = &amp;quot;identity&amp;quot;), 
+    data = longData, id = id, corstr = &amp;quot;exchangeable&amp;quot;)
+
+summary(fit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## 
+## Call:
+## geeglm(formula = Y ~ factor(T) + period + factor(T) * period, 
+##     family = gaussian(link = &amp;quot;identity&amp;quot;), data = longData, id = id, 
+##     corstr = &amp;quot;exchangeable&amp;quot;)
+## 
+##  Coefficients:
+##                     Estimate Std.err Wald Pr(&amp;gt;|W|)    
+## (Intercept)           5.0636  0.0762 4411   &amp;lt;2e-16 ***
+## factor(T)Yes          1.4945  0.1077  192   &amp;lt;2e-16 ***
+## period                2.4972  0.0303 6798   &amp;lt;2e-16 ***
+## factor(T)Yes:period   3.5204  0.0426 6831   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)     3.07   0.117
+## 
+## Correlation: Structure = exchangeable  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha    0.711  0.0134
+## Number of clusters:   1000   Maximum cluster size: 3&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;another-way-to-generate-correlated-data&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Another way to generate correlated data&lt;/h2&gt;
+&lt;p&gt;A second way to generate correlatd data is through an individual level random-effect or random intercept. This could be considered some unmeasured characteristic of the individuals (which happens to have a convenient normal distribution with mean zero). This random effect contributes equally to all instances of an individuals outcomes, but the outcomes for a particular individual deviate slightly from the hypothetical straight line as a result of unmeasured noise.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ydef1 &amp;lt;- defData(varname = &amp;quot;randomEffect&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = 0, variance = sqrt(3))
+ydef2 &amp;lt;- defDataAdd(varname = &amp;quot;Y&amp;quot;, dist = &amp;quot;normal&amp;quot;, formula = &amp;quot;5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect&amp;quot;, 
+    variance = 1)
+
+indData &amp;lt;- genData(24, ydef1)
+indData &amp;lt;- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = &amp;quot;T&amp;quot;)
+
+indData[1:6]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    id T randomEffect
+## 1:  1 0      -1.3101
+## 2:  2 1       0.3423
+## 3:  3 0       0.5716
+## 4:  4 1       2.6723
+## 5:  5 0      -0.9996
+## 6:  6 1      -0.0722&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;longData &amp;lt;- addPeriods(indData, nPeriods = 3, idvars = &amp;quot;id&amp;quot;)
+longData &amp;lt;- addColumns(dtDefs = ydef2, longData)
+
+longData[, `:=`(T, factor(T, labels = c(&amp;quot;No&amp;quot;, &amp;quot;Yes&amp;quot;)))]
+
+ggplot(data = longData, aes(x = factor(period), y = Y)) + geom_line(aes(color = T, 
+    group = id)) + scale_color_manual(values = c(&amp;quot;#e38e17&amp;quot;, &amp;quot;#8e17e3&amp;quot;)) + xlab(&amp;quot;Time&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-05-16-intro-to-simstudy_files/figure-html/unnamed-chunk-10-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;fit &amp;lt;- geeglm(Y ~ factor(T) + period + factor(T) * period, family = gaussian(link = &amp;quot;identity&amp;quot;), 
+    data = longData, id = id, corstr = &amp;quot;exchangeable&amp;quot;)
+summary(fit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## 
+## Call:
+## geeglm(formula = Y ~ factor(T) + period + factor(T) * period, 
+##     family = gaussian(link = &amp;quot;identity&amp;quot;), data = longData, id = id, 
+##     corstr = &amp;quot;exchangeable&amp;quot;)
+## 
+##  Coefficients:
+##                     Estimate Std.err Wald Pr(&amp;gt;|W|)    
+## (Intercept)           4.9230  0.0694 5028   &amp;lt;2e-16 ***
+## factor(T)Yes          1.4848  0.1003  219   &amp;lt;2e-16 ***
+## period                2.5310  0.0307 6793   &amp;lt;2e-16 ***
+## factor(T)Yes:period   3.5076  0.0449 6104   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)     2.63  0.0848
+## 
+## Correlation: Structure = exchangeable  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha    0.619  0.0146
+## Number of clusters:   1000   Maximum cluster size: 3&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;I sent all this back to my correspondent, but I haven’t heard yet if it is what she wanted. I certainly hope so. If there are specific topics you’d like me to discuss related to simstudy, definitely get in touch, and I will try to write something up.&lt;/p&gt;
+&lt;/div&gt;
+</description>
     </item>
     
     <item>
@@ -36,16 +2004,320 @@
       <pubDate>Wed, 10 May 2017 00:00:00 +0000</pubDate>
       <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
       <guid>/post/first-blog-entry/</guid>
-      <description>It goes without saying that there are always many ways to solve a problem in R, but clearly some ways are better (for example, faster) than others. Recently, I found myself in a situation where I could not find a way to avoid using a loop, and I was immediately concerned, knowding that I would want this code to be flexible enough to run with a very large number of observations, possibly over many observations.</description>
-    </item>
+      <description>&lt;p&gt;It goes without saying that there are always many ways to solve a problem in R, but clearly some ways are better (for example, faster) than others. Recently, I found myself in a situation where I could not find a way to avoid using a loop, and I was immediately concerned, knowing that I would want this code to be flexible enough to run with a very large number of observations, possibly over many observations. Two tools immediately came to mind: &lt;a href = https://github.com/Rdatatable/data.table/wiki&gt;data.table &lt;/a&gt; and &lt;a href = http://adv-r.had.co.nz/Rcpp.html&gt;Rcpp &lt;/a&gt;. This brief description explains the background of the simulation problem I was working on and walks through the evolution of ideas to address the problems I ran into when I tried to simulate a large number of inviduals. In particular, when I tried to simulate a very large number of individuals, say over 1 million, running the simulation over night wasn’t enough.&lt;/p&gt;
+&lt;div id=&#34;setting-up-the-problem&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Setting up the problem&lt;/h2&gt;
+&lt;p&gt;The task in question here is not the focus, but needs a little explanation to understand what is motivating the programming issue. I am conducting a series of simulations that involve generating an individual-level stochastic (Markov) process for any number of individuals. For the data generation, I am using the &lt;a href = https://cran.r-project.org/web/packages/simstudy/index.html&gt;simstudy&lt;/a&gt; package developed to help facilitate simulated data.&lt;/p&gt;
+&lt;p&gt;The functions &lt;code&gt;defDataAdd&lt;/code&gt; and &lt;code&gt;genData&lt;/code&gt; are both from &lt;code&gt;simstudy&lt;/code&gt;. The first part of the simulation involves specifying the transition matrix &lt;code&gt;P&lt;/code&gt; that determine a state I am calling &lt;code&gt;status&lt;/code&gt;, and then defining the probability of an event that are based on a particular status level at a particular time point. For each individual, I generate 36 months of data and a status and event for each month.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(data.table)
+library(simstudy)
+
+set.seed(123)
+
+P &amp;lt;- matrix(c(0.985, 0.015, 0.000, 0.000, 
+              0.000, 0.950, 0.050, 0.000,
+              0.000, 0.000, 0.850, 0.150,
+              0.000, 0.000, 0.000, 1.000), 
+            nrow = 4, byrow = TRUE)
+
+form &amp;lt;- &amp;quot;(status == 1) * 0.02 + (status == 2) * 0.10 + (status == 3) * 0.20&amp;quot;
+
+dtDef &amp;lt;- defDataAdd(varname = &amp;quot;event&amp;quot;, 
+            formula = form, 
+            dist = &amp;quot;binary&amp;quot;,
+            link = &amp;quot;identity&amp;quot;)
+
+N = 5000
+did &amp;lt;- genData(N)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In order to simulate the Markov process, I decided immediately that &lt;code&gt;Rcpp&lt;/code&gt; would be most appropriate because I knew I could not avoid looping. Since each state of a Markov process depends on the state immediately preceding, states need to be generated sequentially, which means no obvious way to vectorize (if someone has figured that out, let me know.)&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;RcppArmadilloExtensions/sample.h&amp;gt;
+// [[Rcpp::depends(RcppArmadillo)]]
+
+using namespace Rcpp;
+
+// [[Rcpp::export]]
+IntegerVector MCsim( unsigned int nMonths, NumericMatrix P, 
+                     int startStatus, unsigned int startMonth ) {
+  
+  IntegerVector sim( nMonths );
+  IntegerVector m( P.ncol());
+  NumericVector currentP;
+  IntegerVector newstate;
+  
+  unsigned int q = P.ncol();
+  
+  m = Rcpp::seq(1, q);
+  
+  sim[startMonth - 1] = startStatus;
+  
+  for (unsigned int i = startMonth; i &amp;lt; nMonths; i++) {
     
-    <item>
-      <title>About me</title>
-      <link>/page/about/</link>
-      <pubDate>Mon, 01 Jan 0001 00:00:00 +0000</pubDate>
-      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
-      <guid>/page/about/</guid>
-      <description>My name is Keith Goldfeld and I am on the faculty in the Division of Biostatistics, which is part of the Department of Population Health at the NYU School of Medicine, located in New York City.</description>
+    newstate = RcppArmadillo::sample(m, 1, TRUE, P.row(sim(i-1) - 1));
+    sim(i) = newstate(0);
+    
+  }
+  
+  return sim;
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The process is simulated for each individual using the &lt;strong&gt;Rcpp&lt;/strong&gt; function &lt;code&gt;MCsim&lt;/code&gt;, but is done in the context of a &lt;code&gt;data.table&lt;/code&gt; statement. The key here is that each individual is processed separately through the &lt;code&gt;keyby = id&lt;/code&gt; statement. This obviates the requirement to loop through individuals even though I still need to loop within individuals for the stochastic process. This algorithm is quite fast, even with very large numbers of individuals and large numbers of observations (in this case months) per individual.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt &amp;lt;- did[, .(status = MCsim(36, P, 1, 1)), 
+          keyby = id]
+dt[, month := 1 : .N, keyby = id]
+dt &amp;lt;- addColumns(dtDefs = dtDef, dtOld = dt)
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##           id status month event
+##      1:    1      1     1     0
+##      2:    1      1     2     0
+##      3:    1      1     3     0
+##      4:    1      1     4     0
+##      5:    1      1     5     0
+##     ---                        
+## 179996: 5000      4    32     0
+## 179997: 5000      4    33     0
+## 179998: 5000      4    34     0
+## 179999: 5000      4    35     0
+## 180000: 5000      4    36     0&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;this-is-where-things-begin-to-slow-down&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;This is where things begin to slow down&lt;/h2&gt;
+&lt;p&gt;It is the next phase of the simulation that started to cause me problems. For the simulation, I need to assign individuals to a group or cohort which is defined by a month and is based on several factors: (1) whether an event occurred in that month, (2) whether the status of that individual in that month exceeded a value of &lt;code&gt;1&lt;/code&gt;, and (3) whether or not the individual experienced 2 or more events in the prior 12 months. An indivdual might be eligible for more than one cohort, but will be assigned to the first possible cohort (i.e. the earliest month where all three criteria are met.)&lt;/p&gt;
+&lt;p&gt;Again, the specifics of the simulation are not important here. What is important, is the notion that the problem requires looking through individual data sequentially, something R is generally not so good at when the sequences get particularly long, and they must be repeated a large number of times.&lt;/p&gt;
+&lt;p&gt;My first, naïve, approach was to create an &lt;strong&gt;R&lt;/strong&gt; function that loops through all the individuals and loops within each individual until a cohort is found:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;rAssignCohortID &amp;lt;- function(id, month, status, 
+                            event, nInds, 
+                            startMonth, thresholdNum) {
+  
+  cohort &amp;lt;-   rep(0, length(id));
+
+  for (j in (1 : nInds))  {
+    
+    idMonth = month[id == j];
+    idEvent = event[id == j];
+    idStatus = status[id == j];
+    
+    endMonth = length(idMonth);
+    
+    done = FALSE;
+    i = max(startMonth - idMonth[1], 13);
+    
+    while (i &amp;lt;= endMonth &amp;amp;&amp;amp; !done) {
+      
+      if (idEvent[i] == 1 &amp;amp;&amp;amp; idStatus[i] &amp;gt; 1) {
+        
+        begin = i-12;
+        end = i-1;
+        
+        sumED = sum(idEvent[begin:end]);
+        
+        if (sumED &amp;gt;= thresholdNum) {
+          
+          cohort[id == j] &amp;lt;- i - 1 + month[1];
+          done = TRUE;
+        }
+      }    
+      i = i + 1;
+    }    
+  }
+  
+  return(cohort);
+} &lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;working-through-possible-solutions&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Working through possible solutions&lt;/h2&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;system.time(dt[, cohort1 := rAssignCohortID(id, month, status, event, 
+                    nInds = N, startMonth = 13, thresholdNum = 2)])&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    user  system elapsed 
+##  12.555   0.180  13.256&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The naïve approach works, but can we do better? I thought &lt;strong&gt;Rcpp&lt;/strong&gt; might be a solution, because we know that loops in C++ are much more efficient. However, things did not turn out so well after I translated the function into C++; in fact, they got a little worse.&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;Rcpp.h&amp;gt;
+
+using namespace Rcpp;
+
+// [[Rcpp::export]]
+IntegerVector cAssignCohortID( IntegerVector id, 
+                    IntegerVector month, 
+                    IntegerVector status, 
+                    IntegerVector event,
+                    int nInds, 
+                    int startMonth, 
+                    int thresholdNum) {
+    
+  IntegerVector cohort(id.length(), 0);
+  
+  IntegerVector idMonth;
+  IntegerVector idEvent;
+  IntegerVector idStatus;
+  
+  for (int j = 0; j &amp;lt; nInds; j++) {
+    
+    idMonth = month[id == j+1];
+    idEvent = event[id == j+1];
+    idStatus = status[id == j+1];
+
+    int endMonth = idMonth.length();
+    int sumED;
+    bool done = FALSE;
+    int i = std::max(startMonth - idMonth(0), 12);
+    int begin;
+    int end;
+
+    while (i &amp;lt; endMonth &amp;amp;&amp;amp; !done) {
+      
+      if (idEvent(i) == 1 &amp;amp;&amp;amp; idStatus(i) &amp;gt; 1) {
+        
+        begin = i-12;
+        end = i-1;
+        
+        sumED = sum(idEvent[Rcpp::seq(begin, end)]);
+        
+        if (sumED &amp;gt;= thresholdNum) {
+          cohort[id == j + 1] = i + month(0);
+          done = TRUE;
+        }
+      }    
+      i += 1;
+    }    
+  }
+   
+  return(cohort);
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;system.time(dt[, cohort2 := cAssignCohortID(id, month, status, event, 
+                    nInds = N, startMonth = 13, thresholdNum = 2)])&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    user  system elapsed 
+##  12.405   0.140  12.886&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;I know that the function &lt;code&gt;cAssignCohortID&lt;/code&gt; bogs down not in the loop, but in each phase where I need to subset the data set to work on a single &lt;code&gt;id&lt;/code&gt;. For example, I need to execute the statement &lt;code&gt;idMonth = month[id == j+1]&lt;/code&gt; for each &lt;code&gt;id&lt;/code&gt;, and this apparently uses a lot of resources. I tried variations on this theme, alternatives to subset the data set within the Rcpp function, but could get no improvements.&lt;/p&gt;
+&lt;p&gt;But a light bulb went off in my head (dim as it might be), telling me that this is one of the many things &lt;code&gt;data.table&lt;/code&gt; is particularly good at. In fact, I used this trick earlier in generating the stochastic process data. So, rather than subsetting the data within the function, I created a regular R function that handles only a single individual &lt;code&gt;id&lt;/code&gt; at a time, and let &lt;code&gt;data.table&lt;/code&gt; do the hard work of splitting up the data set to process by individual.&lt;/p&gt;
+&lt;p&gt;As you can see, things got markedly faster.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;rAssignCohort &amp;lt;- function(id, month, status, event, 
+                   nInds, startMonth, thresholdNum) {
+  
+  cohort &amp;lt;- 0
+  
+  endMonth = length(month);
+    
+  done = FALSE;
+  i = max(startMonth - month[1], 13);
+  
+  while (i &amp;lt;= endMonth &amp;amp;&amp;amp; !done) {
+    
+    if (event[i] == 1 &amp;amp;&amp;amp; status[i] &amp;gt; 1) {
+        
+      begin = i-12;
+      end = i-1;
+        
+      sumED = sum(event[begin:end]);
+        
+      if (sumED &amp;gt;= thresholdNum) {
+          
+        cohort &amp;lt;- i - 1 + month[1];
+        done = TRUE;
+      }
+    }    
+    i = i + 1;
+  }
+  
+  return(cohort)
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;system.time(dt[, cohort3 := rAssignCohort(id, month, status, event, 
+                    nInds = N, startMonth = 13, thresholdNum = 2), 
+               keyby=id])&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    user  system elapsed 
+##   0.150   0.009   0.171&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Finally, it occurred to me that an &lt;code&gt;Rcpp&lt;/code&gt; function that is not required to subset the data might offer more yet improvements in speed. So, for the last iteration, I combined the strengths of looping in &lt;code&gt;Rcpp&lt;/code&gt; with the strengths of subsetting in &lt;code&gt;data.table&lt;/code&gt; to create a formidable combination. (Even when sample sizes exceed 1 million, the data are generated in a flash.)&lt;/p&gt;
+&lt;pre class=&#34;cpp&#34;&gt;&lt;code&gt;#include &amp;lt;Rcpp.h&amp;gt;
+
+using namespace Rcpp;
+
+// [[Rcpp::export]]
+int cAssignCohort( IntegerVector month, 
+                  IntegerVector status,
+                  IntegerVector event,
+                  int startMonth, int thresholdNum) {
+  
+  int endMonth = month.length();
+  int sumED;
+  int cohort = 0;
+  bool done = FALSE;
+  int i = std::max(startMonth - month(0), 12);
+  int begin;
+  int end;
+  
+  while (i &amp;lt; endMonth &amp;amp;&amp;amp; !done) {
+    
+    if (event(i) == 1 &amp;amp;&amp;amp; status(i) &amp;gt; 1) {
+      
+      begin = i-12;
+      end = i-1;
+      
+      sumED = sum(event[Rcpp::seq(begin, end)]);
+      
+      if (sumED &amp;gt;= thresholdNum) {
+        cohort = i + month(0);
+        done = TRUE;
+      }
+    }    
+    i += 1;
+  }
+  
+   
+  return(cohort);
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;system.time(dt[, cohort4 := cAssignCohort(month, status, event, 
+                               startMonth=13,  thresholdNum = 2), keyby=id])&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    user  system elapsed 
+##   0.029   0.004   0.035&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;For a more robust comparison, let’s use the &lt;code&gt;benchmark&lt;/code&gt; function in package &lt;code&gt;rbenchmark&lt;/code&gt;, and you can see how well &lt;code&gt;data.table&lt;/code&gt; performs and how much &lt;code&gt;Rcpp&lt;/code&gt; can add when used efficiently.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(rbenchmark)
+
+benchmark(
+  dt[, cohort1 := rAssignCohortID(id, month, status, event,       # Naïve approach
+                      nInds = N, startMonth = 13, thresholdNum = 2)],
+  dt[, cohort2 := cAssignCohortID(id, month, status, event,        # Rcpp approach
+                      nInds = N, startMonth = 13, thresholdNum = 2)],
+  dt[, cohort3 := rAssignCohort(id, month, status, event,    # data.table approach
+                      nInds = N, startMonth = 13, thresholdNum = 2), keyby=id],
+  dt[, cohort4 := cAssignCohort(month, status, event,   # combined data.table/Rcpp
+                      startMonth=13,  thresholdNum = 2), keyby=id],
+    replications = 5,
+    columns = c(&amp;quot;replications&amp;quot;, &amp;quot;elapsed&amp;quot;, &amp;quot;relative&amp;quot;))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##   replications elapsed relative
+## 1            5  52.578  395.323
+## 2            5  66.528  500.211
+## 3            5   0.752    5.654
+## 4            5   0.133    1.000&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;postscript&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Postscript&lt;/h2&gt;
+&lt;p&gt;I shared all of this with the incredibly helpful folks who have created data.table, and they offered a data.table only solution that avoids all looping, which I will share here for completeness. While it is an improvement over the third approach presented above (R function with data.table statment &lt;code&gt;keyby&lt;/code&gt;), it is still no match for the fastest solution. (But, this all just goes to show you there will always be new approaches to consider, and I don’t claim to have come any where near to trying them all out.)&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dtfunc &amp;lt;- function(dx) {
+  
+  dx[, prev12 := Reduce(`+`, shift(event, 1:12)), by=id]
+  map &amp;lt;- CJ(id=1:N, start=13L, end=36L, event=1L, statusx=1L, prev12x=1L)
+  ans &amp;lt;- dx[map, on=.(id, event, status &amp;gt; statusx, prev12 &amp;gt; prev12x, month &amp;gt;= start, month &amp;lt;= end), 
+            .I, allow=TRUE, by=.EACHI, nomatch=0L][, .(id, I)]
+  minans &amp;lt;- ans[, .(I=min(I)), by=id]
+  
+  dx &amp;lt;- dx[, cohort5 := 0L][minans, cohort5 := min(month) - 1L + dx$month[I], on=&amp;quot;id&amp;quot;, by=.EACHI]
+
+  return(dx)
+}
+
+system.time(dtfunc(dt))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    user  system elapsed 
+##   0.195   0.011   0.210&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And here is a more complete comparison of the fastest version with this additional approach:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;benchmark(
+  dt[, cohort6 := cAssignCohort(month, status, event,   # combined data.table/Rcpp
+                      startMonth=13,  thresholdNum = 2), keyby=id],
+  dt2 &amp;lt;- dtfunc(dt),
+  replications = 5,
+  columns = c(&amp;quot;replications&amp;quot;, &amp;quot;elapsed&amp;quot;, &amp;quot;relative&amp;quot;))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##   replications elapsed relative
+## 1            5   0.112    1.000
+## 2            5   0.899    8.027&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+</description>
     </item>
     
   </channel>
