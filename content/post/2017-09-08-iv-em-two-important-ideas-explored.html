@@ -1,0 +1,171 @@
+---
+title: Complier average causal effect? Exploring what we learn from an RCT with participants who don't do what they are told.
+author: ''
+date: '2017-09-12'
+slug: CACE-explored
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Inspired by a free online <a href="https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/">course</a> titled <em>Complier Average Causal Effects (CACE) Analysis</em> and taught by Booil Jo and Elizabeth Stuart (through Johns Hopkins University), I’ve decided to explore the topic a little bit. My goal here isn’t to explain CACE analysis in extensive detail (you should definitely go take the course for that), but to describe the problem generally and then (of course) simulate some data. A plot of the simulated data gives a sense of what we are estimating and assuming. And I end by describing two simple methods to estimate the CACE, which we can compare to the truth (since this is a simulation); next time, I will describe a third way.</p>
+<div id="non-compliance-in-randomized-trials" class="section level3">
+<h3>Non-compliance in randomized trials</h3>
+<p>Here’s the problem. In a randomized trial, investigators control the randomization process; they determine if an individual is assigned to the treatment group or control group (I am talking about randomized trials here, but many of these issues can apply in the context of observed or quasi-experimental settings, but require more data and assumptions). However, those investigators may not have as much control over the actual treatments that study participants receive. For example, an individual randomized to some type of behavioral intervention may opt not to take advantage of the intervention. Likewise, someone assigned to control may, under some circumstances, figure out a way to get services that are quite similar to the intervention. In all cases, the investigator is able to collect outcome data on all of these patients, regardless of whether or not they followed directions. (This is different from drop-out or loss-to-followup, where outcome data may be missing.)</p>
+</div>
+<div id="cace" class="section level3">
+<h3>CACE</h3>
+<p>Typically, studies analyze data based on treatment <em>assignment</em> rather than treatment <em>received</em>. This focus on assignment is called an intention-to-treat (ITT) analysis. In a policy environment, the ITT may make a lot of sense; we are answering this specific question: “What is the overall effect in the real world where the intervention is made available yet some people take advantage of it while others do not?” Alternatively, researchers may be interested in different question: “What is the causal effect of actually receiving the treatment?”</p>
+<p>Now, to answer the second question, there are numerous subtle issues that you need to wrestle with (again, go take the <a href="https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/">course</a>). But, long story short, we need to (1) identify the folks in the <em>intervention</em> group who actually do what they have been encouraged to do (receive the intervention) but only because they were encouraged, and not because they would have received the intervention anyways had they not been randomized, and compare their outcomes with (2) the folks in the control group who did not seek out the intervention on their own initiative but would have received the intervention had they been encouraged. These two groups are considered to be <em>compliers</em> - they would always do what they are told in the context of the study. And the effect of the intervention that is based on outcomes from this type of patient is called the <em>complier average causal effect</em> (CACE).</p>
+<p>The biggest challenge in estimating the CACE is that we cannot actually identify if people are compliers or not. Some of those receiving the treatment in the intervention group are <em>compliers</em>, but the rest are <em>always-takers</em>. Some of those not receiving the treatment in the control arm are also <em>compliers</em>, but the others are <em>never-takers</em>. There are several methods available to overcome this challenge, two of which I will briefly mention here: method of moments and instrumental variables.</p>
+</div>
+<div id="using-potential-outcomes-to-define-cace" class="section level3">
+<h3>Using potential outcomes to define CACE</h3>
+<p>In an earlier <a href="https://www.rdatagen.net/post/be-careful/">post</a>, I briefly introduced the idea of potential outcomes. Since we are talking about causal relationships, they are useful here. If <span class="math inline">\(Z\)</span> is the randomization indicator, <span class="math inline">\(Z=1\)</span> for those randomized to the intervention, <span class="math inline">\(Z=0\)</span> for those in control. <span class="math inline">\(M\)</span> is the indicator of whether or not the individual received the intervention. Since <span class="math inline">\(M\)</span> is an outcome, we can imagine the potential outcomes <span class="math inline">\(M_{0i}\)</span> and <span class="math inline">\(M_{1i}\)</span>, or what the value of <span class="math inline">\(M_i\)</span> would be for an individual if <span class="math inline">\(Z_i=0\)</span> or <span class="math inline">\(Z_i=1\)</span>, respectively. And let us say <span class="math inline">\(Y\)</span> is the outcome, so we have potential outcomes that can be written as <span class="math inline">\(Y_{0,M_0}\)</span> and <span class="math inline">\(Y_{1,M_1}\)</span>. Think about that for a bit.</p>
+<p>Using these potential outcomes, we can define the compliers and the CACE. Compliers are people for whom <span class="math inline">\(M_0 = 0\)</span> <em>and</em> <span class="math inline">\(M_1 = 1\)</span>. (Never-takers look like this: <span class="math inline">\(M_0 = 0\)</span> <em>and</em> <span class="math inline">\(M_1 = 0\)</span>. Always-takers: <span class="math inline">\(M_0 = 1\)</span> <em>and</em> <span class="math inline">\(M_1 = 1\)</span>). Now, the average causal effect is the average difference between potential outcomes. In this case, the CACE is <span class="math inline">\(E[Y_{1,M_1} - Y_{0,M_0}|M_0 = 0 \ \&amp; \ M_1 = 1]\)</span>. The patients for whom <span class="math inline">\(M_0 = 0\)</span> <em>and</em> <span class="math inline">\(M_1 = 1\)</span> are the compliers.</p>
+</div>
+<div id="simulating-data" class="section level3">
+<h3>Simulating data</h3>
+<p>The data simulation will be based on generating potential outcomes. Observed outcomes will be a function of randomization group and complier status.</p>
+<pre class="r"><code>options(digits = 3)
+
+library(data.table)
+library(simstudy)
+library(ggplot2)
+
+# Status :
+
+# 1 = A(lways taker)
+# 2 = N(ever taker)
+# 3 = C(omplier)
+
+def &lt;- defDataAdd(varname = &quot;Status&quot;, 
+               formula = &quot;0.20; 0.40; 0.40&quot;, dist = &quot;categorical&quot;)
+
+# potential outcomes (PO) for intervention 
+
+def &lt;- defDataAdd(def, varname = &quot;M0&quot;, 
+               formula = &quot;(Status == 1) * 1&quot;, dist = &quot;nonrandom&quot;)
+def &lt;- defDataAdd(def, varname = &quot;M1&quot;, 
+               formula = &quot;(Status != 2) * 1&quot;, dist = &quot;nonrandom&quot;)
+
+# observed intervention status based on randomization and PO
+
+def &lt;- defDataAdd(def, varname = &quot;m&quot;, 
+               formula = &quot;(z==0) * M0 + (z==1) * M1&quot;, dist = &quot;nonrandom&quot;)
+
+# potential outcome for Y (depends on potential outcome for M)
+
+set.seed(888)
+
+dt &lt;- genData(2000)
+dt &lt;- trtAssign(dt, n=2, grpName = &quot;z&quot;)
+
+dt &lt;- addColumns(def, dt)
+
+# using data functions here, not simstudy - I need add
+# this functionality to simstudy
+
+dt[, AStatus := factor(Status, 
+          labels = c(&quot;Always-taker&quot;,&quot;Never-taker&quot;, &quot;Complier&quot;))]
+
+# potential outcomes depend on group status - A, N, or C
+
+dt[Status == 1, Y0 := rnorm(.N, 1.0, sqrt(0.25))]
+dt[Status == 2, Y0 := rnorm(.N, 0.0, sqrt(0.36))]
+dt[Status == 3, Y0 := rnorm(.N, 0.1, sqrt(0.16))]
+  
+dt[Status == 1, Y1 := rnorm(.N, 1.0, sqrt(0.25))]
+dt[Status == 2, Y1 := rnorm(.N, 0.0, sqrt(0.36))]
+dt[Status == 3, Y1 := rnorm(.N, 0.9, sqrt(0.49))]
+
+# observed outcome function of actual treatment
+
+dt[, y := (m == 0) * Y0 + (m == 1) * Y1]
+
+dt</code></pre>
+<pre><code>##         id z Status M0 M1 m      AStatus      Y0    Y1       y
+##    1:    1 1      3  0  1 1     Complier  0.5088 0.650  0.6500
+##    2:    2 1      3  0  1 1     Complier  0.1503 0.729  0.7292
+##    3:    3 1      2  0  0 0  Never-taker  1.4277 0.454  1.4277
+##    4:    4 0      3  0  1 0     Complier  0.6393 0.998  0.6393
+##    5:    5 0      1  1  1 1 Always-taker  0.6506 1.927  1.9267
+##   ---                                                         
+## 1996: 1996 0      3  0  1 0     Complier -0.9554 0.114 -0.9554
+## 1997: 1997 0      3  0  1 0     Complier  0.0366 0.903  0.0366
+## 1998: 1998 1      3  0  1 1     Complier  0.3606 1.098  1.0982
+## 1999: 1999 1      3  0  1 1     Complier  0.6651 1.708  1.7082
+## 2000: 2000 0      3  0  1 0     Complier  0.2207 0.531  0.2207</code></pre>
+<p>The plot shows outcomes <span class="math inline">\(y\)</span> for the two randomization groups. The ITT estimate would be based on an average of all the points in group, regardless of color or shape. The difference between the average of the black circles in the two groups represents the CACE.</p>
+<pre class="r"><code>ggplot(data=dt, aes(y=y, x = factor(z, labels = c(&quot;Assigned to control&quot;,
+                                                  &quot;Assigned to treatment&quot;)))) +
+  geom_jitter(aes(shape=factor(m, labels = c(&quot;No treatment&quot;, &quot;Treatment&quot;)),
+                  color=AStatus),
+              width = 0.35) +
+  scale_shape_manual(values = c(1,19)) +
+  scale_color_manual(values = c(&quot;#e1d07d&quot;, &quot;#7d8ee1&quot;,  &quot;grey25&quot;)) +
+  scale_y_continuous(breaks = seq(-3, 3, 1), labels = seq(-3, 3, 1)) +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank())</code></pre>
+<p><img src="/post/2017-09-08-iv-em-two-important-ideas-explored_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>In the real world, we cannot see the colors, yet we need to estimate as if we do, or at least use a method to bypasses that need:</p>
+<p><img src="/post/2017-09-08-iv-em-two-important-ideas-explored_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="estimating-cace-using-observed-data" class="section level3">
+<h3>Estimating CACE using observed data</h3>
+<p>The challenge is to estimate the CACE using <em>observed</em> data only, since that is all we have (along with a couple of key assumptions). We start of by claiming that the average causal effect of treatment <strong>assignment</strong> (<span class="math inline">\(ACE\)</span>) is a weighted average of the three sub-populations of <em>compliers</em>, <em>never-takers</em>, and <em>always-takers</em>:</p>
+<p><span class="math display">\[ ACE = \pi_C \times CACE + \pi_N \times NACE + \pi_A \times AACE, \]</span> where <span class="math inline">\(CACE\)</span> is the average causal effect of treatment assignment for the subset of those in the sample who are <em>compliers</em>, <span class="math inline">\(NACE\)</span> is the average causal effect of treatment assignment for the subset who are <em>never-takers</em>, and <span class="math inline">\(AACE\)</span> is the average causal effect for those who are <em>always-takers</em>. <span class="math inline">\(\pi_C\)</span>, <span class="math inline">\(\pi_N\)</span>, and <span class="math inline">\(\pi_A\)</span> represent the sample proportions of compliers, never-takers, and always-takers, respectively.</p>
+<p>A key assumption often made to estimate <span class="math inline">\(CACE\)</span> is known as the <em>exclusion restriction</em>: treatment assignment has an effect on the outcome <em>only</em> if it changes the actual treatment taken. (A second key assumption is that there are no <em>deniers</em>, or folks who do the opposite of what they are told. This is called the monotonicity assumption.) This <em>exclusion restriction</em> implies that both <span class="math inline">\(NACE=0\)</span> and <span class="math inline">\(AACE=0\)</span>, since in both cases the treatment <em>received</em> is the same regardless of treatment assignment. In that case, we can re-write the equality as</p>
+<p><span class="math display">\[ ACE = \pi_C \times CACE,\]</span></p>
+<p>and finally with a little re-arranging,</p>
+<p><span class="math display">\[ CACE = \frac{ACE}{\pi_C}. \]</span> So, in order estimate <span class="math inline">\(CACE\)</span>, we need to be able to estimate <span class="math inline">\(ACE\)</span> and <span class="math inline">\(\pi_C\)</span>. Fortunately, we are in a position to do this. Since this is a randomized trial, the average causal effect of treatment assignment is just the difference in observed outcomes for the two treatment assignment groups:</p>
+<p><span class="math display">\[ ACE = E[Y | Z = 1] - E[Y | Z = 0] \]</span> This also happens to be the <em>intention-to-treat</em> ) (<span class="math inline">\(ITT\)</span>) estimate.</p>
+<p><span class="math inline">\(\pi_C\)</span> is a little harder, but in this simplified scenario, not that hard. We just need to follow a little logic: for the control group, we can identify the <em>always-takers</em> (they’re the ones who actually receive the treatment), so we know <span class="math inline">\(\pi_A\)</span> for the the control group. This can be estimated as <span class="math inline">\(P(M=1|Z=0)\)</span>. And, since the study was randomized, the distribution of <em>always-takers</em> in the treatment group must be the same. So, we can use <span class="math inline">\(\pi_A\)</span> estimated from the control group as an estimate for the treatment group.</p>
+<p>For the treatment group, we know that <span class="math inline">\(\pi_C + \pi_A = P(M = 1 | Z = 1)\)</span>. That is everyone who receives treatment in the treatment group is either a complier or always-taker. With this, we can say</p>
+<p><span class="math display">\[\pi_C  = P(M=1 | Z = 1) - \pi_A.\]</span></p>
+<p>But, of course, we argued above that we can estimate <span class="math inline">\(\pi_A\)</span> as <span class="math inline">\(P(M=1|Z=0)\)</span>. So, finally, we have</p>
+<p><span class="math display">\[\pi_C  = P(M=1 | Z = 1) - P(M=1|Z=0).\]</span> This gives us a method of moments estimator for <span class="math inline">\(CACE\)</span> from observed data:</p>
+<p><span class="math display">\[ CACE = \frac{ACE}{\pi_C} = \frac{E[Y | Z = 1] - E[Y | Z = 0]}{P(M=1 | Z = 1) - P(M=1|Z=0)}. \]</span></p>
+</div>
+<div id="the-simulated-estimate" class="section level2">
+<h2>The simulated estimate</h2>
+<pre class="r"><code>ACE &lt;- dt[z==1, mean(y)] - dt[z==0, mean(y)]   # Also ITT
+ACE</code></pre>
+<pre><code>## [1] 0.307</code></pre>
+<pre class="r"><code>pi_C &lt;- dt[z==1, mean(m)] - dt[z==0, mean(m)]  # strength of instrument
+pi_C</code></pre>
+<pre><code>## [1] 0.372</code></pre>
+<pre class="r"><code>truth &lt;- dt[AStatus == &quot;Complier&quot;, mean(Y1 - Y0)]
+truth</code></pre>
+<pre><code>## [1] 0.81</code></pre>
+<pre class="r"><code>ACE/pi_C</code></pre>
+<pre><code>## [1] 0.826</code></pre>
+<p>A method quite commonly used to analyze non-compliance is the instrumental variable model estimated with two-staged least squares regression. The R package <code>ivpack</code> is one of several that facilitates this type of analysis. A discussio of this methodology far exceeds the scope of this post. In any case, we can see that in this simple example, the IV estimate is the same as the method of moments estimator (by looking at the coefficient estimate of <code>m</code>).</p>
+<pre class="r"><code>library(ivpack)
+
+ivmodel &lt;- ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+summary(ivmodel)</code></pre>
+<pre><code>## 
+## Call:
+## ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+## 
+## Residuals:
+##      Min       1Q   Median       3Q      Max 
+## -2.19539 -0.36249  0.00248  0.35859  2.27902 
+## 
+## Coefficients:
+##             Estimate Std. Error t value Pr(&gt;|t|)    
+## (Intercept)   0.0932     0.0302    3.09    0.002 ** 
+## m             0.8262     0.0684   12.08   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Residual standard error: 0.569 on 1998 degrees of freedom
+## Multiple R-Squared: 0.383,   Adjusted R-squared: 0.383 
+## Wald test:  146 on 1 and 1998 DF,  p-value: &lt;2e-16</code></pre>
+<p>So, again, if I have piqued your interest of this very rich and interesting topic, or if I have totally confused you, go check out the <a href="https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/">course</a>. In my next post, I will describe a simple latent variable model using a maximum likelihood EM (expectation-maximization) algorithm that arrives at an estimate by predicting complier status.</p>
+</div>
