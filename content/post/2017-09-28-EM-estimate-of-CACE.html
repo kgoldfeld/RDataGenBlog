@@ -1,0 +1,293 @@
+---
+title: "CACE closed: EM opens up exclusion restriction (among other things)"
+author: ''
+date: '2017-09-28'
+slug: em-estimation-of-CACE
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>This is the third, and probably last, of a series of posts touching on the estimation of <a href="https://www.rdatagen.net/post/cace-explored/">complier average causal effects</a> (CACE) and <a href="https://www.rdatagen.net/post/simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class/">latent variable modeling techniques</a> using an expectation-maximization (EM) algorithm . What follows is a simplistic way to implement an EM algorithm in <code>R</code> to do principal strata estimation of CACE.</p>
+<div id="the-em-algorithm" class="section level3">
+<h3>The EM algorithm</h3>
+<p>In this approach, we assume that individuals fall into one of three possible groups - <em>never-takers</em>, <em>always-takers</em>, and <em>compliers</em> - but we cannot see who is who (except in a couple of cases). For each group, we are interested in estimating the unobserved potential outcomes <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span> using observed outcome measures of <span class="math inline">\(Y\)</span>. The EM algorithm does this in two steps. The <em>E-step</em> estimates the missing class membership for each individual, and the <em>M-step</em> provides maximum likelihood estimates of the group-specific potential outcomes and variation.</p>
+<p>An estimate group membership was presented in this <a href="https://projecteuclid.org/euclid.aos/1034276631">Imbens &amp; Rubin 1997 paper</a>. The probability that an individual is a member of a particular group is a function of how close the individual’s observed outcome is to the mean of the group and the overall probability of group membership:</p>
+<div class="figure">
+<img src="/img/post-em-cace/table.png" />
+
+</div>
+<p>where <span class="math inline">\(Z\)</span> is treatment assignment and <span class="math inline">\(M\)</span> is treatment received. In addition, <span class="math inline">\(g_{c0}^i = \phi\left( \frac{Y_{obs,i} - \mu_{c0}}{\sigma_{c0}} \right)/\sigma_{c0}\)</span>, where <span class="math inline">\(\phi(.)\)</span> is the standard normal density. (And the same goes for the other <span class="math inline">\(g^i\)</span>’s.) <span class="math inline">\(\pi_a\)</span>, <span class="math inline">\(\pi_n\)</span>, and <span class="math inline">\(\pi_c\)</span> are estimated in the prior stage (or with starting values). <span class="math inline">\(\mu_{c0}\)</span>, <span class="math inline">\(\mu_{c1}\)</span>, <span class="math inline">\(\sigma_{c0}\)</span>, <span class="math inline">\(\sigma_{c1}\)</span>, etc. are also estimated in the prior <em>M-step</em> or with starting values in the case of the first <em>E-step</em>. Note that because we <em>are</em> assuming monotonicity (no <em>deniers</em> - which is not a necessary assumption for the EM approach, but used here to simplify things a bit), the probability of group membership is 1 for those randomized to control but who receive treatment (<em>always-takers</em>) and for those randomized to intervention but refuse (<em>never-takers</em>).</p>
+</div>
+<div id="em-steps" class="section level3">
+<h3>EM steps</h3>
+<p>I’ve created a separate function for each step in the algorithm. The <em>E-step</em> follows the Imbens &amp; Rubin specification just described. The <em>M-step</em> just calculates the weighted averages and variances of the outcomes within each <span class="math inline">\(Z\)</span>/<span class="math inline">\(M\)</span> pair, with the weights coming from the probabilities estimated in the <em>E-step</em>. (These are, in fact, maximum likelihood estimates of the means and variances.) There are a pair of functions to estimate the log likelihood after each iteration. We stop iterating once the log likelihood has reached a stable state. And finally, there is a function to initialize the 15 parameters.</p>
+<p>One thing to highlight here is that a strong motivation for using the EM algorithm is that we do <em>not</em> need to assume the exclusion restriction. That is, it is possible that randomizing someone to the intervention may have an effect on the outcome even if there is no effect on whether or not the intervention is used. Or in other words, we are saying it is possible that randomization has an effect on <em>always-takers</em> and <em>never-takers</em>, an assumption we <em>cannot</em> make using an instrumental variable (IV) approach. I mention that here, because the <em>M-step</em> function as written here explicitly drops the exclusion restriction assumption. However, I will first illustrate the model estimates in a case where data are indeed based on that assumption; while my point is to show that the EM estimates are unbiased as are the IV estimates in this scenario, I may actually be introducing a small amount of bias into the EM estimate by not re-writing the function to create a single mean for <em>always-takers</em> and <em>never-takers</em>. But, for brevity’s sake, this seems adequate.</p>
+<pre class="r"><code>estep &lt;- function(params, y, z, m) {
+  
+  piC &lt;- 0
+  piN &lt;- 0
+  piA &lt;- 0
+  
+  if (z == 0 &amp; m == 0) {
+    
+    gC0 &lt;- dnorm((y - params$mC0)/params$sC0) / params$sC0
+    gN0 &lt;- dnorm((y - params$mN0)/params$sN0) / params$sN0
+    
+    piC &lt;- params$pC * gC0 / ( params$pC * gC0 + params$pN * gN0)
+    piN &lt;- 1- piC
+    
+  }
+  
+  if (z == 0 &amp; m == 1) {
+    piA &lt;- 1
+  }
+  
+  if (z == 1 &amp; m == 0) {
+    piN &lt;- 1
+  }
+  
+  if (z == 1 &amp; m == 1) {
+    
+    gC1 &lt;- dnorm((y - params$mC1)/params$sC1) / params$sC1
+    gA1 &lt;- dnorm((y - params$mA1)/params$sA1) / params$sA1
+    
+    piC &lt;- params$pC * gC1 / ( params$pC * gC1 + params$pA * gA1)
+    piA &lt;- 1 - piC
+  }
+  
+  return(list(piC = piC, piN = piN, piA = piA))
+  
+}
+
+library(Weighted.Desc.Stat)
+
+mstep &lt;- function(params, dx) {
+  
+  params$mN0 &lt;- dx[z == 0 &amp; m == 0, w.mean(y, piN)] # never-taker
+  params$sN0 &lt;- dx[z == 0 &amp; m == 0, sqrt(w.var(y, piN))] # never-taker
+  
+  params$mN1 &lt;- dx[z == 1 &amp; m == 0, w.mean(y, piN)] # never-taker
+  params$sN1 &lt;- dx[z == 1 &amp; m == 0, sqrt(w.var(y, piN))] # never-taker
+  
+  params$mA0 &lt;- dx[z == 0 &amp; m == 1, w.mean(y, piA)]# always-taker
+  params$sA0 &lt;- dx[z == 0 &amp; m == 1, sqrt(w.var(y, piA))] # always-taker
+  
+  params$mA1 &lt;- dx[z == 1 &amp; m == 1, w.mean(y, piA)]# always-taker
+  params$sA1 &lt;- dx[z == 1 &amp; m == 1, sqrt(w.var(y, piA))] # always-taker
+  
+  params$mC0 &lt;- dx[z == 0 &amp; m == 0, w.mean(y, piC)] # complier, z=0
+  params$sC0 &lt;- dx[z == 0 &amp; m == 0, sqrt(w.var(y, piC))] # complier, z=0
+  
+  params$mC1 &lt;- dx[z == 1 &amp; m == 1, w.mean(y, piC)] # complier, z=1
+  params$sC1 &lt;- dx[z == 1 &amp; m == 1, sqrt(w.var(y, piC))] # complier, z=1
+  
+  nC &lt;- dx[, sum(piC)]
+  nN &lt;- dx[, sum(piN)]
+  nA &lt;- dx[, sum(piA)]
+  
+  params$pC &lt;- (nC / sum(nC, nN, nA))
+  params$pN &lt;- (nN / sum(nC, nN, nA))
+  params$pA &lt;- (nA / sum(nC, nN, nA))
+  
+  return(params)
+}
+
+like.i &lt;- function(params, y, z, m) {
+  
+  if (z == 0 &amp; m == 0) {
+    l &lt;- params$pC * dnorm(x = y, mean = params$mC0, sd = params$sC0) +
+      params$pN * dnorm(x = y, mean = params$mN0, sd = params$sN0)
+  }
+  
+  if (z == 0 &amp; m == 1) {
+    l &lt;- params$pA * dnorm(x = y, mean = params$mA0, sd = params$sA0)
+  }
+  
+  if (z == 1 &amp; m == 0) {
+    l &lt;- params$pN * dnorm(x = y, mean = params$mN1, sd = params$sN1)
+  }
+  
+  if (z == 1 &amp; m == 1) {
+    l &lt;- params$pC * dnorm(x = y, mean = params$mC1, sd = params$sC1) +
+      params$pA * dnorm(x = y, mean = params$mA1, sd = params$sA1)
+  }
+  
+  return(l)
+}
+
+loglike &lt;- function(dt, params){
+  
+  dl &lt;- dt[, .(l.i = like.i(params, y, z, m)), keyby = id]
+  return(dl[, sum(log(l.i))])
+  
+}
+
+initparams &lt;- function() {
+  
+  params = list(pC = 1/3, pN = 1/3, pA = 1/3, 
+                mC0 = rnorm(1,0,.1), sC0 = 0.2,
+                mC1 = rnorm(1,0,.1), sC1 = 0.2, 
+                mN0 = rnorm(1,0,.1), sN0 = 0.2,
+                mN1 = rnorm(1,0,.1), sN1 = 0.2,
+                mA0 = rnorm(1,0,.1), sA0 = 0.2,
+                mA1 = rnorm(1,0,.1), sA1 = 0.2)
+  
+  return(params)
+}</code></pre>
+</div>
+<div id="data-defintions" class="section level3">
+<h3>Data defintions</h3>
+<p>These next set of statements define the data that will be generated. I define the distribution of group assignment as well as potential outcomes for the intervention and the outcome <span class="math inline">\(Y\)</span>. We also define how the observed data will be generated, which is a function of treatment randomization …</p>
+<pre class="r"><code>library(simstudy)
+
+### Define data distributions
+
+# Status :
+
+# 1 = A(lways taker)
+# 2 = N(ever taker)
+# 3 = C(omplier)
+
+def &lt;- defDataAdd(varname = &quot;Status&quot;, 
+                  formula = &quot;0.25; 0.40; 0.35&quot;, dist = &quot;categorical&quot;)
+
+# potential outcomes (PO) for intervention depends on group status
+
+def &lt;- defDataAdd(def, varname = &quot;M0&quot;, 
+                  formula = &quot;(Status == 1) * 1&quot;, dist = &quot;nonrandom&quot;)
+def &lt;- defDataAdd(def, varname = &quot;M1&quot;, 
+                  formula = &quot;(Status != 2) * 1&quot;, dist = &quot;nonrandom&quot;)
+
+# observed intervention status based on randomization and PO
+
+def &lt;- defDataAdd(def, varname = &quot;m&quot;, 
+                  formula = &quot;(z==0) * M0 + (z==1) * M1&quot;, 
+                  dist = &quot;nonrandom&quot;)
+
+# potential outcome for Y (depends group status - A, N, or C)
+# under assumption of exclusion restriction
+
+defY0 &lt;- defCondition(condition = &quot;Status == 1&quot;,
+                      formula = 0.3, variance = .25, dist = &quot;normal&quot;)
+defY0 &lt;- defCondition(defY0, condition = &quot;Status == 2&quot;,
+                      formula = 0.0, variance = .36, dist = &quot;normal&quot;)
+defY0 &lt;- defCondition(defY0, condition = &quot;Status == 3&quot;,
+                      formula = 0.1, variance = .16, dist = &quot;normal&quot;)
+
+defY1 &lt;- defCondition(condition = &quot;Status == 1&quot;,
+                      formula = 0.3, variance = .25, dist = &quot;normal&quot;)
+defY1 &lt;- defCondition(defY1, condition = &quot;Status == 2&quot;,
+                      formula = 0.0, variance = .36, dist = &quot;normal&quot;)
+defY1 &lt;- defCondition(defY1, condition = &quot;Status == 3&quot;,
+                      formula = 0.9, variance = .49, dist = &quot;normal&quot;)
+
+# observed outcome function of actual treatment
+
+defy &lt;- defDataAdd(varname = &quot;y&quot;, 
+                   formula = &quot;(z == 0) * Y0 + (z == 1) * Y1&quot;, 
+                   dist = &quot;nonrandom&quot;)</code></pre>
+</div>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>I am generating multiple data sets and estimating the causal effects for each using the EM and IV approaches. This gives better picture of the bias and variation under the two different scenarios (exclusion restriction &amp; no exclusion restriction) and different methods (EM &amp; IV). To simplify the code a bit, I’ve written a function to consolidate the data generating process:</p>
+<pre class="r"><code>createDT &lt;- function(n, def, defY0, defY1, defy) {
+  
+  dt &lt;- genData(n)
+  dt &lt;- trtAssign(dt, n=2, grpName = &quot;z&quot;)
+  dt &lt;- addColumns(def, dt)
+  
+  genFactor(dt, &quot;Status&quot;, 
+            labels = c(&quot;Always-taker&quot;,&quot;Never-taker&quot;, &quot;Complier&quot;), 
+            prefix = &quot;A&quot;)
+  
+  dt &lt;- addCondition(defY0, dt, &quot;Y0&quot;)
+  dt &lt;- addCondition(defY1, dt, &quot;Y1&quot;)
+  dt &lt;- addColumns(defy, dt)
+  
+}
+
+set.seed(16)
+dt &lt;- createDT(2500, def, defY0, defY1, defy)
+
+options(digits = 3)
+
+dt</code></pre>
+<pre><code>##         id       Y1        Y0 z Status M0 M1 m      AStatus       y
+##    1:    1  0.12143 -0.400007 0      2  0  0 0  Never-taker -0.4000
+##    2:    2  0.13114  0.713202 1      1  1  1 1 Always-taker  0.1311
+##    3:    3  0.73766 -0.212530 1      3  0  1 1     Complier  0.7377
+##    4:    4 -0.07531  0.209330 1      1  1  1 1 Always-taker -0.0753
+##    5:    5 -0.25214 -0.696207 0      2  0  0 0  Never-taker -0.6962
+##   ---                                                              
+## 2496: 2496 -0.00882  0.206581 0      2  0  0 0  Never-taker  0.2066
+## 2497: 2497  0.39226  0.749465 1      2  0  0 0  Never-taker  0.3923
+## 2498: 2498 -0.81486  0.000605 1      2  0  0 0  Never-taker -0.8149
+## 2499: 2499  0.10359 -0.417344 0      2  0  0 0  Never-taker -0.4173
+## 2500: 2500 -0.68397  0.304398 1      2  0  0 0  Never-taker -0.6840</code></pre>
+</div>
+<div id="cace-estimation" class="section level3">
+<h3>CACE estimation</h3>
+<p>Finally, we are ready to put all of this together and estimate the CACE using the EM algorithm. After initializing the parameters (here we just use random values except for the probabilities of group membership, which we assume to be 1/3 to start), we loop through the E and M steps, checking the change in log likelihood each time. For this single data set, we provide a point estimate of the CACE using EM and IV. (We could provide an estimate of standard error using a bootstrap approach.) We see that both do a reasonable job, getting fairly close to the truth.</p>
+<pre class="r"><code>params &lt;- initparams()
+prev.loglike &lt;- -Inf
+continue &lt;- TRUE
+  
+while (continue) {
+    
+  dtPIs &lt;- dt[, estep(params, y, z, m), keyby = id]
+  dx &lt;- dt[dtPIs]
+    
+  params &lt;- mstep(params, dx)
+    
+  EM.CACE &lt;- params$mC1 - params$mC0
+  
+  current.loglike &lt;- loglike(dt, params)
+  diff &lt;- current.loglike - prev.loglike
+  prev.loglike &lt;- current.loglike
+  if ( diff &lt; 1.00e-07 ) continue = FALSE
+    
+}
+  
+library(ivpack)
+ivmodel &lt;- ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+  
+data.table(truthC = dt[AStatus == &quot;Complier&quot;, mean(Y1 - Y0)],
+           IV.CACE = coef(ivmodel)[2],
+           EM.CACE)</code></pre>
+<pre><code>##    truthC IV.CACE EM.CACE
+## 1:  0.806   0.823   0.861</code></pre>
+</div>
+<div id="more-general-performance" class="section level3">
+<h3>More general performance</h3>
+<p>I am not providing the code here (it is just a slight modification of what has come before), but I want to show the results of generating 1000 data sets of 500 observations in each. The first plot assumes all data sets were generated using an exclusion restriction - just as we did with the single data set. The IV approach, as expected is unbiased (estimated bias 0.01), while the EM approach is slightly biased (-0.13). We can also see that the EM approach (standard deviation 0.30) has more variation than IV (standard deviation 0.15), while the actual sample CACE (calculated based on the actual group membership and potential outcomes) had a standard deviation of 0.05, which we can see from the narrow vertical band in the plot:</p>
+<div class="figure">
+<img src="/img/post-em-cace/Exclusion_restriction.png" />
+
+</div>
+<p>In the second set of simulations, I change the potential outcomes definition so that the exclusion restriction is no longer relevant.</p>
+<pre class="r"><code>defY0 &lt;- defCondition(condition = &quot;Status == 1&quot;,
+                      formula = 0.3, variance = .20, dist = &quot;normal&quot;)
+defY0 &lt;- defCondition(defY0, condition = &quot;Status == 2&quot;,
+                      formula = 0.0, variance = .36, dist = &quot;normal&quot;)
+defY0 &lt;- defCondition(defY0, condition = &quot;Status == 3&quot;,
+                      formula = 0.1, variance = .16, dist = &quot;normal&quot;)
+
+defY1 &lt;- defCondition(condition = &quot;Status == 1&quot;,
+                      formula = 0.7, variance = .25, dist = &quot;normal&quot;)
+defY1 &lt;- defCondition(defY1, condition = &quot;Status == 2&quot;,
+                      formula = 0.2, variance = .40, dist = &quot;normal&quot;)
+defY1 &lt;- defCondition(defY1, condition = &quot;Status == 3&quot;,
+                      formula = 0.9, variance = .49, dist = &quot;normal&quot;)</code></pre>
+<p>In this second case, the IV estimate is biased (0.53), while the EM estimated does quite well (-.03). (I suspect EM did worse in the first example above, because estimates were made without the assumption of the exclusion restriction, even though that was the case.) However, EM estimates still have more variation than IV: standard deviation 0.26 vs 0.17, consistent with the estimates under the exclusion restriction assumption. This variation arises from the fact that we don’t know what the true group membership is, and we need to estimate it. Here is what the estimates look like:</p>
+<div class="figure">
+<img src="/img/post-em-cace/No_exclusion_restriction.png" />
+
+</div>
+</div>
+<div id="can-we-expand-on-this" class="section level3">
+<h3>Can we expand on this?</h3>
+<p>The whole point of this was to illustrate that there might be a way around some rather restrictive assumptions, which in some cases might not seem so reasonable. EM methods provide an alternative way to approach things - more of which you can see in the <a href="https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/">free online course</a> that inspired these last few posts. Unfortunately, there is no obvious way to tackle these problems in <code>R</code> using existing packages, and I am not suggesting that what I have done here is the best way to go about it. The course suggests using <code>Mplus</code>. While that is certainly a great software package, maybe it would be worthwhile to build an R package to implement these methods more completely in R? Or maybe someone has already done this, and I just haven’t come across it yet?</p>
+</div>
