@@ -1,0 +1,196 @@
+---
+title: A minor update to simstudy provides an excuse to talk a bit about the negative binomial and Poisson distributions
+author: ''
+date: '2017-10-05'
+slug: a-small-update-to-simstudy-neg-bin
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>I just updated <code>simstudy</code> to version 0.1.5 (available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html">CRAN</a>) so that it now includes several new distributions - <em>exponential</em>, <em>discrete uniform</em>, and <em>negative binomial</em>.</p>
+<p>As part of the release, I thought I’d explore the negative binomial just a bit, particularly as it relates to the Poisson distribution. The Poisson distribution is a discrete (integer) distribution of outcomes of non-negative values that is often used to describe count outcomes. It is characterized by a mean (or rate) and its variance equals its mean.</p>
+<div id="added-variation" class="section level3">
+<h3>Added variation</h3>
+<p>In many situations, when count data are modeled, it turns out that the variance of the data exceeds the mean (a situation called <em>over-dispersion</em>). In this case an alternative model is used that allows for the greater variance, which is based on the negative binomial distribution. It turns out that if the negative binomial distribution has mean <span class="math inline">\(\mu\)</span>, it has a variance of <span class="math inline">\(\mu + \theta \mu^2\)</span>, where <span class="math inline">\(\theta\)</span> is called a <em>dispersion</em> parameter. If <span class="math inline">\(\theta = 0\)</span>, we have the Poisson distribution, but otherwise the variance of a negative binomial random variable will exceed the variance of a Poisson random variable as long as they share the same mean, because <span class="math inline">\(\mu &gt; 0\)</span> and <span class="math inline">\(\theta \ge 0\)</span>.</p>
+<p>We can see this by generating data from each distribution with mean 15, and a dispersion parameter of 0.2 for the negative binomial. We expect a variance around 15 for the Poisson distribution, and 60 for the negative binomial distribution.</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+
+# for a less cluttered look
+
+theme_no_minor &lt;- function(color = &quot;grey90&quot;) {    
+  theme(panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill=&quot;grey95&quot;)
+  )
+}
+
+options(digits = 2)
+
+# define data
+
+defC &lt;- defCondition(condition = &quot;dist == 0&quot;, formula = 15, 
+                     dist = &quot;poisson&quot;, link = &quot;identity&quot;)
+
+defC &lt;- defCondition(defC, condition = &quot;dist == 1&quot;, formula = 15, 
+                     variance = 0.2, dist = &quot;negBinomial&quot;, 
+                     link = &quot;identity&quot;)
+
+# generate data
+
+set.seed(50)
+dt &lt;- genData(500)
+dt &lt;- trtAssign(dt, 2, grpName = &quot;dist&quot;)
+dt &lt;- addCondition(defC, dt, &quot;y&quot;)
+genFactor(dt, &quot;dist&quot;, c(&quot;Poisson&quot;, &quot;Negative binomial&quot;))
+
+# compare distributions
+
+dt[, .(mean = mean(y), var = var(y)), keyby = fdist]</code></pre>
+<pre><code>##                fdist mean var
+## 1:           Poisson   15  15
+## 2: Negative binomial   15  54</code></pre>
+<pre class="r"><code>ggplot(data = dt, aes(x = y, group = fdist)) +
+  geom_density(aes(fill=fdist), alpha = .4) +
+  scale_fill_manual(values = c(&quot;#808000&quot;, &quot;#000080&quot;)) +
+  scale_x_continuous(limits = c(0,60), 
+                     breaks = seq(0, 60, by = 20)) +
+  theme_no_minor() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.80, 0.83))</code></pre>
+<p><img src="/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+</div>
+<div id="underestimating-standard-errors" class="section level3">
+<h3>Underestimating standard errors</h3>
+<p>In the context of a regression, misspecifying a model as Poisson rather than negative binomial, can lead to an underestimation of standard errors, even though the point estimates may be quite reasonable (or may not). The Poisson model will force the variance estimate to be equal to the mean at any particular point on the regression curve. The Poisson model will effectively ignore the true extent of the variation, which can lead to problems of interpretation. We might conclude that there is an association when in fact there is none.</p>
+<p>In this simple simulation, we generate two predictors (<span class="math inline">\(x\)</span> and <span class="math inline">\(b\)</span>) and an outcome (<span class="math inline">\(y\)</span>). The outcome is a function of <span class="math inline">\(x\)</span> only:</p>
+<pre class="r"><code>library(broom)
+library(MASS)
+
+# Generating data from negative binomial dist
+
+def &lt;- defData(varname = &quot;x&quot;, formula = 0, variance = 1, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;b&quot;, formula = 0, variance = 1, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, formula = &quot;0.9 + 0.6*x&quot;, 
+               variance = 0.3, dist = &quot;negBinomial&quot;, link = &quot;log&quot;)
+
+set.seed(35)
+dt &lt;- genData(500, def)
+
+ggplot(data = dt, aes(x=x, y = y)) +
+  geom_jitter(width = .1) +
+  ggtitle(&quot;Outcome as function of 1st predictor&quot;) +
+  theme_no_minor()</code></pre>
+<p><img src="/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<pre class="r"><code>ggplot(data = dt, aes(x=b, y = y)) +
+  geom_jitter(width = 0) +
+  ggtitle(&quot;Outcome as function of 2nd predictor&quot;) +
+  theme_no_minor()</code></pre>
+<p><img src="/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-2-2.png" width="672" /></p>
+<p>I fit two models using both predictors. The first assumes (incorrectly) a Poisson distribution, and the second assumes (correctly) a negative binomial distribution. We can see that although the point estimates are quite close, the standard error estimates for the predictors in the Poisson model are considerably greater (about 50% higher) than the negative binomial model. And if we were basing any conclusion on the p-value (which is not always the obvious way to do <a href="http://www.stat.columbia.edu/~gelman/research/unpublished/abandon.pdf">things</a>), we might make the wrong call since the p-value for the slope of <span class="math inline">\(b\)</span> is estimated to be 0.029. Under the correct model model, the p-value is 0.29.</p>
+<pre class="r"><code>glmfit &lt;- glm(y ~ x + b, data = dt, family = poisson (link = &quot;log&quot;) )
+tidy(glmfit)</code></pre>
+<pre><code>##          term estimate std.error statistic  p.value
+## 1 (Intercept)    0.956     0.030      32.3 1.1e-228
+## 2           x    0.516     0.024      21.9 1.9e-106
+## 3           b   -0.052     0.024      -2.2  2.9e-02</code></pre>
+<pre class="r"><code>nbfit &lt;- glm.nb(y ~ x + b, data = dt)
+tidy(nbfit)</code></pre>
+<pre><code>##          term estimate std.error statistic  p.value
+## 1 (Intercept)    0.954     0.039      24.2 1.1e-129
+## 2           x    0.519     0.037      14.2  7.9e-46
+## 3           b   -0.037     0.036      -1.1  2.9e-01</code></pre>
+<p>A plot of the fitted regression curve and confidence bands of <span class="math inline">\(b\)</span> estimated by each model reinforces the difference. The lighter shaded region is the wider confidence band of the negative binomial model, and the darker shaded region the based on the Poisson model.</p>
+<pre class="r"><code>newb &lt;- data.table(b=seq(-3,3,length = 100), x = 0)
+
+poispred &lt;- predict(glmfit, newdata = newb, se.fit = TRUE, 
+                    type = &quot;response&quot;)
+nbpred &lt;-predict(nbfit, newdata = newb, se.fit = TRUE, 
+                 type = &quot;response&quot;)
+
+poisdf &lt;- data.table(b = newb$b, y = poispred$fit, 
+                     lwr = poispred$fit - 1.96*poispred$se.fit,
+                     upr = poispred$fit + 1.96*poispred$se.fit)
+
+nbdf &lt;- data.table(b = newb$b,  y = nbpred$fit, 
+                     lwr = nbpred$fit - 1.96*nbpred$se.fit,
+                     upr = nbpred$fit + 1.96*nbpred$se.fit)
+
+ggplot(data = poisdf, aes(x=b, y = y)) +
+  geom_line() +
+  geom_ribbon(data=nbdf, aes(ymin = lwr, ymax=upr), alpha = .3, 
+              fill = &quot;red&quot;) +
+  geom_ribbon(aes(ymin = lwr, ymax=upr), alpha = .5, 
+              fill = &quot;red&quot;) +
+  theme_no_minor()</code></pre>
+<p><img src="/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>And finally, if we take 500 samples of size 500, and estimate slope for <span class="math inline">\(b\)</span> each time and calculate the standard deviation of those estimates, it is quite close to the standard error estimate we saw in the model of the original simulated data set using the negative binomial assumption (0.036). And the mean of those estimates is quite close to zero, the true value.</p>
+<pre class="r"><code>result &lt;- data.table()
+
+for (i in 1:500) {
+  
+  dt &lt;- genData(500, def)
+  glmfit &lt;- glm(y ~ x + b, data = dt, family = poisson)
+  nbfit &lt;- glm.nb(y ~ x + b, data = dt)
+
+  result &lt;- rbind(result, data.table(bPois = coef(glmfit)[&quot;b&quot;],
+                                     bNB = coef(nbfit)[&quot;b&quot;])
+  )
+  
+}
+
+result[,.(sd(bPois), sd(bNB))]   # observed standard error</code></pre>
+<pre><code>##       V1    V2
+## 1: 0.037 0.036</code></pre>
+<pre class="r"><code>result[,.(mean(bPois), mean(bNB))] # observed mean</code></pre>
+<pre><code>##        V1     V2
+## 1: 0.0025 0.0033</code></pre>
+</div>
+<div id="negative-binomial-as-mixture-of-poissons" class="section level3">
+<h3>Negative binomial as mixture of Poissons</h3>
+<p>An interesting relationship between the two distributions is that a negative binomial distribution can be generated from a mixture of individuals whose outcomes come from a Poisson distribution, but each individual has her own rate or mean. Furthermore, those rates must have a specific distribution - a Gamma. (For much more on this, you can take a look <a href="https://probabilityandstats.wordpress.com/tag/poisson-gamma-mixture/">here</a>.) Here is a little simulation:</p>
+<pre class="r"><code>mu = 15
+disp = 0.2
+
+# Gamma distributed means
+
+def &lt;- defData(varname = &quot;gmu&quot;, formula = mu, variance = disp, 
+               dist = &quot;gamma&quot;)
+
+# generate data from each distribution
+
+defC &lt;- defCondition(condition = &quot;nb == 0&quot;, formula = &quot;gmu&quot;, 
+                     dist = &quot;poisson&quot;)
+
+defC &lt;- defCondition(defC, condition = &quot;nb == 1&quot;, formula = mu,
+                     variance = disp, dist = &quot;negBinomial&quot;)
+
+dt &lt;- genData(5000, def)
+dt &lt;- trtAssign(dt, 2, grpName = &quot;nb&quot;)
+genFactor(dt, &quot;nb&quot;, labels = c(&quot;Poisson-Gamma&quot;, &quot;Negative binomial&quot;))
+
+dt &lt;- addCondition(defC, dt, &quot;y&quot;)
+
+# means and variances should be very close
+
+dt[, .(Mean = mean(y), Var = var(y)), keyby = fnb]</code></pre>
+<pre><code>##                  fnb Mean Var
+## 1:     Poisson-Gamma   15  62
+## 2: Negative binomial   15  57</code></pre>
+<pre class="r"><code># plot
+
+ggplot(data = dt, aes(x = y, group = fnb)) +
+  geom_density(aes(fill=fnb), alpha = .4) +
+  scale_fill_manual(values = c(&quot;#808000&quot;, &quot;#000080&quot;)) +
+  scale_x_continuous(limits = c(0,60), 
+                     breaks = seq(0, 60, by = 20)) +
+  theme_no_minor() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.80, 0.83))</code></pre>
+<p><img src="/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>```</p>
+</div>
