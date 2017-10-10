@@ -7,8 +7,1495 @@
     <generator>Hugo -- gohugo.io</generator>
     <managingEditor>keith.goldfeld@nyumc.org (Keith Goldfeld)</managingEditor>
     <webMaster>keith.goldfeld@nyumc.org (Keith Goldfeld)</webMaster>
-    <lastBuildDate>Mon, 21 Aug 2017 00:00:00 +0000</lastBuildDate>
+    <lastBuildDate>Thu, 05 Oct 2017 00:00:00 +0000</lastBuildDate>
     <atom:link href="/post/" rel="self" type="application/rss+xml" />
+    
+    <item>
+      <title>A minor update to simstudy provides an excuse to talk a bit about the negative binomial and Poisson distributions</title>
+      <link>/post/a-small-update-to-simstudy-neg-bin/</link>
+      <pubDate>Thu, 05 Oct 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/a-small-update-to-simstudy-neg-bin/</guid>
+      <description>&lt;p&gt;I just updated &lt;code&gt;simstudy&lt;/code&gt; to version 0.1.5 (available on &lt;a href=&#34;https://cran.r-project.org/web/packages/simstudy/index.html&#34;&gt;CRAN&lt;/a&gt;) so that it now includes several new distributions - &lt;em&gt;exponential&lt;/em&gt;, &lt;em&gt;discrete uniform&lt;/em&gt;, and &lt;em&gt;negative binomial&lt;/em&gt;.&lt;/p&gt;
+&lt;p&gt;As part of the release, I thought I’d explore the negative binomial just a bit, particularly as it relates to the Poisson distribution. The Poisson distribution is a discrete (integer) distribution of outcomes of non-negative values that is often used to describe count outcomes. It is characterized by a mean (or rate) and its variance equals its mean.&lt;/p&gt;
+&lt;div id=&#34;added-variation&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Added variation&lt;/h3&gt;
+&lt;p&gt;In many situations, when count data are modeled, it turns out that the variance of the data exceeds the mean (a situation called &lt;em&gt;over-dispersion&lt;/em&gt;). In this case an alternative model is used that allows for the greater variance, which is based on the negative binomial distribution. It turns out that if the negative binomial distribution has mean &lt;span class=&#34;math inline&#34;&gt;\(\mu\)&lt;/span&gt;, it has a variance of &lt;span class=&#34;math inline&#34;&gt;\(\mu + \theta \mu^2\)&lt;/span&gt;, where &lt;span class=&#34;math inline&#34;&gt;\(\theta\)&lt;/span&gt; is called a &lt;em&gt;dispersion&lt;/em&gt; parameter. If &lt;span class=&#34;math inline&#34;&gt;\(\theta = 0\)&lt;/span&gt;, we have the Poisson distribution, but otherwise the variance of a negative binomial random variable will exceed the variance of a Poisson random variable as long as they share the same mean, because &lt;span class=&#34;math inline&#34;&gt;\(\mu &amp;gt; 0\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(\theta \ge 0\)&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;We can see this by generating data from each distribution with mean 15, and a dispersion parameter of 0.2 for the negative binomial. We expect a variance around 15 for the Poisson distribution, and 60 for the negative binomial distribution.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+library(ggplot2)
+
+# for a less cluttered look
+
+theme_no_minor &amp;lt;- function(color = &amp;quot;grey90&amp;quot;) {    
+  theme(panel.grid.minor = element_blank(),
+        panel.background = element_rect(fill=&amp;quot;grey95&amp;quot;)
+  )
+}
+
+options(digits = 2)
+
+# define data
+
+defC &amp;lt;- defCondition(condition = &amp;quot;dist == 0&amp;quot;, formula = 15, 
+                     dist = &amp;quot;poisson&amp;quot;, link = &amp;quot;identity&amp;quot;)
+
+defC &amp;lt;- defCondition(defC, condition = &amp;quot;dist == 1&amp;quot;, formula = 15, 
+                     variance = 0.2, dist = &amp;quot;negBinomial&amp;quot;, 
+                     link = &amp;quot;identity&amp;quot;)
+
+# generate data
+
+set.seed(50)
+dt &amp;lt;- genData(500)
+dt &amp;lt;- trtAssign(dt, 2, grpName = &amp;quot;dist&amp;quot;)
+dt &amp;lt;- addCondition(defC, dt, &amp;quot;y&amp;quot;)
+genFactor(dt, &amp;quot;dist&amp;quot;, c(&amp;quot;Poisson&amp;quot;, &amp;quot;Negative binomial&amp;quot;))
+
+# compare distributions
+
+dt[, .(mean = mean(y), var = var(y)), keyby = fdist]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##                fdist mean var
+## 1:           Poisson   15  15
+## 2: Negative binomial   15  54&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ggplot(data = dt, aes(x = y, group = fdist)) +
+  geom_density(aes(fill=fdist), alpha = .4) +
+  scale_fill_manual(values = c(&amp;quot;#808000&amp;quot;, &amp;quot;#000080&amp;quot;)) +
+  scale_x_continuous(limits = c(0,60), 
+                     breaks = seq(0, 60, by = 20)) +
+  theme_no_minor() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.80, 0.83))&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-1-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;underestimating-standard-errors&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Underestimating standard errors&lt;/h3&gt;
+&lt;p&gt;In the context of a regression, misspecifying a model as Poisson rather than negative binomial, can lead to an underestimation of standard errors, even though the point estimates may be quite reasonable (or may not). The Poisson model will force the variance estimate to be equal to the mean at any particular point on the regression curve. The Poisson model will effectively ignore the true extent of the variation, which can lead to problems of interpretation. We might conclude that there is an association when in fact there is none.&lt;/p&gt;
+&lt;p&gt;In this simple simulation, we generate two predictors (&lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(b\)&lt;/span&gt;) and an outcome (&lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;). The outcome is a function of &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; only:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(broom)
+library(MASS)
+
+# Generating data from negative binomial dist
+
+def &amp;lt;- defData(varname = &amp;quot;x&amp;quot;, formula = 0, variance = 1, 
+               dist = &amp;quot;normal&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;b&amp;quot;, formula = 0, variance = 1, 
+               dist = &amp;quot;normal&amp;quot;)
+def &amp;lt;- defData(def, varname = &amp;quot;y&amp;quot;, formula = &amp;quot;0.9 + 0.6*x&amp;quot;, 
+               variance = 0.3, dist = &amp;quot;negBinomial&amp;quot;, link = &amp;quot;log&amp;quot;)
+
+set.seed(35)
+dt &amp;lt;- genData(500, def)
+
+ggplot(data = dt, aes(x=x, y = y)) +
+  geom_jitter(width = .1) +
+  ggtitle(&amp;quot;Outcome as function of 1st predictor&amp;quot;) +
+  theme_no_minor()&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-2-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ggplot(data = dt, aes(x=b, y = y)) +
+  geom_jitter(width = 0) +
+  ggtitle(&amp;quot;Outcome as function of 2nd predictor&amp;quot;) +
+  theme_no_minor()&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-2-2.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;I fit two models using both predictors. The first assumes (incorrectly) a Poisson distribution, and the second assumes (correctly) a negative binomial distribution. We can see that although the point estimates are quite close, the standard error estimates for the predictors in the Poisson model are considerably greater (about 50% higher) than the negative binomial model. And if we were basing any conclusion on the p-value (which is not always the obvious way to do &lt;a href=&#34;http://www.stat.columbia.edu/~gelman/research/unpublished/abandon.pdf&#34;&gt;things&lt;/a&gt;), we might make the wrong call since the p-value for the slope of &lt;span class=&#34;math inline&#34;&gt;\(b\)&lt;/span&gt; is estimated to be 0.029. Under the correct model model, the p-value is 0.29.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;glmfit &amp;lt;- glm(y ~ x + b, data = dt, family = poisson (link = &amp;quot;log&amp;quot;) )
+tidy(glmfit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term estimate std.error statistic  p.value
+## 1 (Intercept)    0.956     0.030      32.3 1.1e-228
+## 2           x    0.516     0.024      21.9 1.9e-106
+## 3           b   -0.052     0.024      -2.2  2.9e-02&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;nbfit &amp;lt;- glm.nb(y ~ x + b, data = dt)
+tidy(nbfit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term estimate std.error statistic  p.value
+## 1 (Intercept)    0.954     0.039      24.2 1.1e-129
+## 2           x    0.519     0.037      14.2  7.9e-46
+## 3           b   -0.037     0.036      -1.1  2.9e-01&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;A plot of the fitted regression curve and confidence bands of &lt;span class=&#34;math inline&#34;&gt;\(b\)&lt;/span&gt; estimated by each model reinforces the difference. The lighter shaded region is the wider confidence band of the negative binomial model, and the darker shaded region the based on the Poisson model.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;newb &amp;lt;- data.table(b=seq(-3,3,length = 100), x = 0)
+
+poispred &amp;lt;- predict(glmfit, newdata = newb, se.fit = TRUE, 
+                    type = &amp;quot;response&amp;quot;)
+nbpred &amp;lt;-predict(nbfit, newdata = newb, se.fit = TRUE, 
+                 type = &amp;quot;response&amp;quot;)
+
+poisdf &amp;lt;- data.table(b = newb$b, y = poispred$fit, 
+                     lwr = poispred$fit - 1.96*poispred$se.fit,
+                     upr = poispred$fit + 1.96*poispred$se.fit)
+
+nbdf &amp;lt;- data.table(b = newb$b,  y = nbpred$fit, 
+                     lwr = nbpred$fit - 1.96*nbpred$se.fit,
+                     upr = nbpred$fit + 1.96*nbpred$se.fit)
+
+ggplot(data = poisdf, aes(x=b, y = y)) +
+  geom_line() +
+  geom_ribbon(data=nbdf, aes(ymin = lwr, ymax=upr), alpha = .3, 
+              fill = &amp;quot;red&amp;quot;) +
+  geom_ribbon(aes(ymin = lwr, ymax=upr), alpha = .5, 
+              fill = &amp;quot;red&amp;quot;) +
+  theme_no_minor()&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-4-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;And finally, if we take 500 samples of size 500, and estimate slope for &lt;span class=&#34;math inline&#34;&gt;\(b\)&lt;/span&gt; each time and calculate the standard deviation of those estimates, it is quite close to the standard error estimate we saw in the model of the original simulated data set using the negative binomial assumption (0.036). And the mean of those estimates is quite close to zero, the true value.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;result &amp;lt;- data.table()
+
+for (i in 1:500) {
+  
+  dt &amp;lt;- genData(500, def)
+  glmfit &amp;lt;- glm(y ~ x + b, data = dt, family = poisson)
+  nbfit &amp;lt;- glm.nb(y ~ x + b, data = dt)
+
+  result &amp;lt;- rbind(result, data.table(bPois = coef(glmfit)[&amp;quot;b&amp;quot;],
+                                     bNB = coef(nbfit)[&amp;quot;b&amp;quot;])
+  )
+  
+}
+
+result[,.(sd(bPois), sd(bNB))]   # observed standard error&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##       V1    V2
+## 1: 0.037 0.036&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;result[,.(mean(bPois), mean(bNB))] # observed mean&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##        V1     V2
+## 1: 0.0025 0.0033&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;negative-binomial-as-mixture-of-poissons&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Negative binomial as mixture of Poissons&lt;/h3&gt;
+&lt;p&gt;An interesting relationship between the two distributions is that a negative binomial distribution can be generated from a mixture of individuals whose outcomes come from a Poisson distribution, but each individual has her own rate or mean. Furthermore, those rates must have a specific distribution - a Gamma. (For much more on this, you can take a look &lt;a href=&#34;https://probabilityandstats.wordpress.com/tag/poisson-gamma-mixture/&#34;&gt;here&lt;/a&gt;.) Here is a little simulation:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;mu = 15
+disp = 0.2
+
+# Gamma distributed means
+
+def &amp;lt;- defData(varname = &amp;quot;gmu&amp;quot;, formula = mu, variance = disp, 
+               dist = &amp;quot;gamma&amp;quot;)
+
+# generate data from each distribution
+
+defC &amp;lt;- defCondition(condition = &amp;quot;nb == 0&amp;quot;, formula = &amp;quot;gmu&amp;quot;, 
+                     dist = &amp;quot;poisson&amp;quot;)
+
+defC &amp;lt;- defCondition(defC, condition = &amp;quot;nb == 1&amp;quot;, formula = mu,
+                     variance = disp, dist = &amp;quot;negBinomial&amp;quot;)
+
+dt &amp;lt;- genData(5000, def)
+dt &amp;lt;- trtAssign(dt, 2, grpName = &amp;quot;nb&amp;quot;)
+genFactor(dt, &amp;quot;nb&amp;quot;, labels = c(&amp;quot;Poisson-Gamma&amp;quot;, &amp;quot;Negative binomial&amp;quot;))
+
+dt &amp;lt;- addCondition(defC, dt, &amp;quot;y&amp;quot;)
+
+# means and variances should be very close
+
+dt[, .(Mean = mean(y), Var = var(y)), keyby = fnb]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##                  fnb Mean Var
+## 1:     Poisson-Gamma   15  62
+## 2: Negative binomial   15  57&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# plot
+
+ggplot(data = dt, aes(x = y, group = fnb)) +
+  geom_density(aes(fill=fnb), alpha = .4) +
+  scale_fill_manual(values = c(&amp;quot;#808000&amp;quot;, &amp;quot;#000080&amp;quot;)) +
+  scale_x_continuous(limits = c(0,60), 
+                     breaks = seq(0, 60, by = 20)) +
+  theme_no_minor() +
+  theme(legend.title = element_blank(),
+        legend.position = c(0.80, 0.83))&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-10-05-a-small-update-to-simstudy-provides-an-excuse-to-compare-the-negative-binomial-and-poisson-distributions_files/figure-html/unnamed-chunk-6-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;```&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>CACE closed: EM opens up exclusion restriction (among other things)</title>
+      <link>/post/em-estimation-of-cace/</link>
+      <pubDate>Thu, 28 Sep 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/em-estimation-of-cace/</guid>
+      <description>&lt;p&gt;This is the third, and probably last, of a series of posts touching on the estimation of &lt;a href=&#34;https://www.rdatagen.net/post/cace-explored/&#34;&gt;complier average causal effects&lt;/a&gt; (CACE) and &lt;a href=&#34;https://www.rdatagen.net/post/simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class/&#34;&gt;latent variable modeling techniques&lt;/a&gt; using an expectation-maximization (EM) algorithm . What follows is a simplistic way to implement an EM algorithm in &lt;code&gt;R&lt;/code&gt; to do principal strata estimation of CACE.&lt;/p&gt;
+&lt;div id=&#34;the-em-algorithm&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The EM algorithm&lt;/h3&gt;
+&lt;p&gt;In this approach, we assume that individuals fall into one of three possible groups - &lt;em&gt;never-takers&lt;/em&gt;, &lt;em&gt;always-takers&lt;/em&gt;, and &lt;em&gt;compliers&lt;/em&gt; - but we cannot see who is who (except in a couple of cases). For each group, we are interested in estimating the unobserved potential outcomes &lt;span class=&#34;math inline&#34;&gt;\(Y_0\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y_1\)&lt;/span&gt; using observed outcome measures of &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;. The EM algorithm does this in two steps. The &lt;em&gt;E-step&lt;/em&gt; estimates the missing class membership for each individual, and the &lt;em&gt;M-step&lt;/em&gt; provides maximum likelihood estimates of the group-specific potential outcomes and variation.&lt;/p&gt;
+&lt;p&gt;An estimate group membership was presented in this &lt;a href=&#34;https://projecteuclid.org/euclid.aos/1034276631&#34;&gt;Imbens &amp;amp; Rubin 1997 paper&lt;/a&gt;. The probability that an individual is a member of a particular group is a function of how close the individual’s observed outcome is to the mean of the group and the overall probability of group membership:&lt;/p&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-em-cace/table.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;p&gt;where &lt;span class=&#34;math inline&#34;&gt;\(Z\)&lt;/span&gt; is treatment assignment and &lt;span class=&#34;math inline&#34;&gt;\(M\)&lt;/span&gt; is treatment received. In addition, &lt;span class=&#34;math inline&#34;&gt;\(g_{c0}^i = \phi\left( \frac{Y_{obs,i} - \mu_{c0}}{\sigma_{c0}} \right)/\sigma_{c0}\)&lt;/span&gt;, where &lt;span class=&#34;math inline&#34;&gt;\(\phi(.)\)&lt;/span&gt; is the standard normal density. (And the same goes for the other &lt;span class=&#34;math inline&#34;&gt;\(g^i\)&lt;/span&gt;’s.) &lt;span class=&#34;math inline&#34;&gt;\(\pi_a\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\pi_n\)&lt;/span&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(\pi_c\)&lt;/span&gt; are estimated in the prior stage (or with starting values). &lt;span class=&#34;math inline&#34;&gt;\(\mu_{c0}\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\mu_{c1}\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\sigma_{c0}\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\sigma_{c1}\)&lt;/span&gt;, etc. are also estimated in the prior &lt;em&gt;M-step&lt;/em&gt; or with starting values in the case of the first &lt;em&gt;E-step&lt;/em&gt;. Note that because we &lt;em&gt;are&lt;/em&gt; assuming monotonicity (no &lt;em&gt;deniers&lt;/em&gt; - which is not a necessary assumption for the EM approach, but used here to simplify things a bit), the probability of group membership is 1 for those randomized to control but who receive treatment (&lt;em&gt;always-takers&lt;/em&gt;) and for those randomized to intervention but refuse (&lt;em&gt;never-takers&lt;/em&gt;).&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;em-steps&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;EM steps&lt;/h3&gt;
+&lt;p&gt;I’ve created a separate function for each step in the algorithm. The &lt;em&gt;E-step&lt;/em&gt; follows the Imbens &amp;amp; Rubin specification just described. The &lt;em&gt;M-step&lt;/em&gt; just calculates the weighted averages and variances of the outcomes within each &lt;span class=&#34;math inline&#34;&gt;\(Z\)&lt;/span&gt;/&lt;span class=&#34;math inline&#34;&gt;\(M\)&lt;/span&gt; pair, with the weights coming from the probabilities estimated in the &lt;em&gt;E-step&lt;/em&gt;. (These are, in fact, maximum likelihood estimates of the means and variances.) There are a pair of functions to estimate the log likelihood after each iteration. We stop iterating once the log likelihood has reached a stable state. And finally, there is a function to initialize the 15 parameters.&lt;/p&gt;
+&lt;p&gt;One thing to highlight here is that a strong motivation for using the EM algorithm is that we do &lt;em&gt;not&lt;/em&gt; need to assume the exclusion restriction. That is, it is possible that randomizing someone to the intervention may have an effect on the outcome even if there is no effect on whether or not the intervention is used. Or in other words, we are saying it is possible that randomization has an effect on &lt;em&gt;always-takers&lt;/em&gt; and &lt;em&gt;never-takers&lt;/em&gt;, an assumption we &lt;em&gt;cannot&lt;/em&gt; make using an instrumental variable (IV) approach. I mention that here, because the &lt;em&gt;M-step&lt;/em&gt; function as written here explicitly drops the exclusion restriction assumption. However, I will first illustrate the model estimates in a case where data are indeed based on that assumption; while my point is to show that the EM estimates are unbiased as are the IV estimates in this scenario, I may actually be introducing a small amount of bias into the EM estimate by not re-writing the function to create a single mean for &lt;em&gt;always-takers&lt;/em&gt; and &lt;em&gt;never-takers&lt;/em&gt;. But, for brevity’s sake, this seems adequate.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;estep &amp;lt;- function(params, y, z, m) {
+  
+  piC &amp;lt;- 0
+  piN &amp;lt;- 0
+  piA &amp;lt;- 0
+  
+  if (z == 0 &amp;amp; m == 0) {
+    
+    gC0 &amp;lt;- dnorm((y - params$mC0)/params$sC0) / params$sC0
+    gN0 &amp;lt;- dnorm((y - params$mN0)/params$sN0) / params$sN0
+    
+    piC &amp;lt;- params$pC * gC0 / ( params$pC * gC0 + params$pN * gN0)
+    piN &amp;lt;- 1- piC
+    
+  }
+  
+  if (z == 0 &amp;amp; m == 1) {
+    piA &amp;lt;- 1
+  }
+  
+  if (z == 1 &amp;amp; m == 0) {
+    piN &amp;lt;- 1
+  }
+  
+  if (z == 1 &amp;amp; m == 1) {
+    
+    gC1 &amp;lt;- dnorm((y - params$mC1)/params$sC1) / params$sC1
+    gA1 &amp;lt;- dnorm((y - params$mA1)/params$sA1) / params$sA1
+    
+    piC &amp;lt;- params$pC * gC1 / ( params$pC * gC1 + params$pA * gA1)
+    piA &amp;lt;- 1 - piC
+  }
+  
+  return(list(piC = piC, piN = piN, piA = piA))
+  
+}
+
+library(Weighted.Desc.Stat)
+
+mstep &amp;lt;- function(params, dx) {
+  
+  params$mN0 &amp;lt;- dx[z == 0 &amp;amp; m == 0, w.mean(y, piN)] # never-taker
+  params$sN0 &amp;lt;- dx[z == 0 &amp;amp; m == 0, sqrt(w.var(y, piN))] # never-taker
+  
+  params$mN1 &amp;lt;- dx[z == 1 &amp;amp; m == 0, w.mean(y, piN)] # never-taker
+  params$sN1 &amp;lt;- dx[z == 1 &amp;amp; m == 0, sqrt(w.var(y, piN))] # never-taker
+  
+  params$mA0 &amp;lt;- dx[z == 0 &amp;amp; m == 1, w.mean(y, piA)]# always-taker
+  params$sA0 &amp;lt;- dx[z == 0 &amp;amp; m == 1, sqrt(w.var(y, piA))] # always-taker
+  
+  params$mA1 &amp;lt;- dx[z == 1 &amp;amp; m == 1, w.mean(y, piA)]# always-taker
+  params$sA1 &amp;lt;- dx[z == 1 &amp;amp; m == 1, sqrt(w.var(y, piA))] # always-taker
+  
+  params$mC0 &amp;lt;- dx[z == 0 &amp;amp; m == 0, w.mean(y, piC)] # complier, z=0
+  params$sC0 &amp;lt;- dx[z == 0 &amp;amp; m == 0, sqrt(w.var(y, piC))] # complier, z=0
+  
+  params$mC1 &amp;lt;- dx[z == 1 &amp;amp; m == 1, w.mean(y, piC)] # complier, z=1
+  params$sC1 &amp;lt;- dx[z == 1 &amp;amp; m == 1, sqrt(w.var(y, piC))] # complier, z=1
+  
+  nC &amp;lt;- dx[, sum(piC)]
+  nN &amp;lt;- dx[, sum(piN)]
+  nA &amp;lt;- dx[, sum(piA)]
+  
+  params$pC &amp;lt;- (nC / sum(nC, nN, nA))
+  params$pN &amp;lt;- (nN / sum(nC, nN, nA))
+  params$pA &amp;lt;- (nA / sum(nC, nN, nA))
+  
+  return(params)
+}
+
+like.i &amp;lt;- function(params, y, z, m) {
+  
+  if (z == 0 &amp;amp; m == 0) {
+    l &amp;lt;- params$pC * dnorm(x = y, mean = params$mC0, sd = params$sC0) +
+      params$pN * dnorm(x = y, mean = params$mN0, sd = params$sN0)
+  }
+  
+  if (z == 0 &amp;amp; m == 1) {
+    l &amp;lt;- params$pA * dnorm(x = y, mean = params$mA0, sd = params$sA0)
+  }
+  
+  if (z == 1 &amp;amp; m == 0) {
+    l &amp;lt;- params$pN * dnorm(x = y, mean = params$mN1, sd = params$sN1)
+  }
+  
+  if (z == 1 &amp;amp; m == 1) {
+    l &amp;lt;- params$pC * dnorm(x = y, mean = params$mC1, sd = params$sC1) +
+      params$pA * dnorm(x = y, mean = params$mA1, sd = params$sA1)
+  }
+  
+  return(l)
+}
+
+loglike &amp;lt;- function(dt, params){
+  
+  dl &amp;lt;- dt[, .(l.i = like.i(params, y, z, m)), keyby = id]
+  return(dl[, sum(log(l.i))])
+  
+}
+
+initparams &amp;lt;- function() {
+  
+  params = list(pC = 1/3, pN = 1/3, pA = 1/3, 
+                mC0 = rnorm(1,0,.1), sC0 = 0.2,
+                mC1 = rnorm(1,0,.1), sC1 = 0.2, 
+                mN0 = rnorm(1,0,.1), sN0 = 0.2,
+                mN1 = rnorm(1,0,.1), sN1 = 0.2,
+                mA0 = rnorm(1,0,.1), sA0 = 0.2,
+                mA1 = rnorm(1,0,.1), sA1 = 0.2)
+  
+  return(params)
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;data-defintions&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Data defintions&lt;/h3&gt;
+&lt;p&gt;These next set of statements define the data that will be generated. I define the distribution of group assignment as well as potential outcomes for the intervention and the outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;. We also define how the observed data will be generated, which is a function of treatment randomization …&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+
+### Define data distributions
+
+# Status :
+
+# 1 = A(lways taker)
+# 2 = N(ever taker)
+# 3 = C(omplier)
+
+def &amp;lt;- defDataAdd(varname = &amp;quot;Status&amp;quot;, 
+                  formula = &amp;quot;0.25; 0.40; 0.35&amp;quot;, dist = &amp;quot;categorical&amp;quot;)
+
+# potential outcomes (PO) for intervention depends on group status
+
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;M0&amp;quot;, 
+                  formula = &amp;quot;(Status == 1) * 1&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;M1&amp;quot;, 
+                  formula = &amp;quot;(Status != 2) * 1&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+
+# observed intervention status based on randomization and PO
+
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;m&amp;quot;, 
+                  formula = &amp;quot;(z==0) * M0 + (z==1) * M1&amp;quot;, 
+                  dist = &amp;quot;nonrandom&amp;quot;)
+
+# potential outcome for Y (depends group status - A, N, or C)
+# under assumption of exclusion restriction
+
+defY0 &amp;lt;- defCondition(condition = &amp;quot;Status == 1&amp;quot;,
+                      formula = 0.3, variance = .25, dist = &amp;quot;normal&amp;quot;)
+defY0 &amp;lt;- defCondition(defY0, condition = &amp;quot;Status == 2&amp;quot;,
+                      formula = 0.0, variance = .36, dist = &amp;quot;normal&amp;quot;)
+defY0 &amp;lt;- defCondition(defY0, condition = &amp;quot;Status == 3&amp;quot;,
+                      formula = 0.1, variance = .16, dist = &amp;quot;normal&amp;quot;)
+
+defY1 &amp;lt;- defCondition(condition = &amp;quot;Status == 1&amp;quot;,
+                      formula = 0.3, variance = .25, dist = &amp;quot;normal&amp;quot;)
+defY1 &amp;lt;- defCondition(defY1, condition = &amp;quot;Status == 2&amp;quot;,
+                      formula = 0.0, variance = .36, dist = &amp;quot;normal&amp;quot;)
+defY1 &amp;lt;- defCondition(defY1, condition = &amp;quot;Status == 3&amp;quot;,
+                      formula = 0.9, variance = .49, dist = &amp;quot;normal&amp;quot;)
+
+# observed outcome function of actual treatment
+
+defy &amp;lt;- defDataAdd(varname = &amp;quot;y&amp;quot;, 
+                   formula = &amp;quot;(z == 0) * Y0 + (z == 1) * Y1&amp;quot;, 
+                   dist = &amp;quot;nonrandom&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;data-generation&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Data generation&lt;/h3&gt;
+&lt;p&gt;I am generating multiple data sets and estimating the causal effects for each using the EM and IV approaches. This gives better picture of the bias and variation under the two different scenarios (exclusion restriction &amp;amp; no exclusion restriction) and different methods (EM &amp;amp; IV). To simplify the code a bit, I’ve written a function to consolidate the data generating process:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;createDT &amp;lt;- function(n, def, defY0, defY1, defy) {
+  
+  dt &amp;lt;- genData(n)
+  dt &amp;lt;- trtAssign(dt, n=2, grpName = &amp;quot;z&amp;quot;)
+  dt &amp;lt;- addColumns(def, dt)
+  
+  genFactor(dt, &amp;quot;Status&amp;quot;, 
+            labels = c(&amp;quot;Always-taker&amp;quot;,&amp;quot;Never-taker&amp;quot;, &amp;quot;Complier&amp;quot;), 
+            prefix = &amp;quot;A&amp;quot;)
+  
+  dt &amp;lt;- addCondition(defY0, dt, &amp;quot;Y0&amp;quot;)
+  dt &amp;lt;- addCondition(defY1, dt, &amp;quot;Y1&amp;quot;)
+  dt &amp;lt;- addColumns(defy, dt)
+  
+}
+
+set.seed(16)
+dt &amp;lt;- createDT(2500, def, defY0, defY1, defy)
+
+options(digits = 3)
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id       Y1        Y0 z Status M0 M1 m      AStatus       y
+##    1:    1  0.12143 -0.400007 0      2  0  0 0  Never-taker -0.4000
+##    2:    2  0.13114  0.713202 1      1  1  1 1 Always-taker  0.1311
+##    3:    3  0.73766 -0.212530 1      3  0  1 1     Complier  0.7377
+##    4:    4 -0.07531  0.209330 1      1  1  1 1 Always-taker -0.0753
+##    5:    5 -0.25214 -0.696207 0      2  0  0 0  Never-taker -0.6962
+##   ---                                                              
+## 2496: 2496 -0.00882  0.206581 0      2  0  0 0  Never-taker  0.2066
+## 2497: 2497  0.39226  0.749465 1      2  0  0 0  Never-taker  0.3923
+## 2498: 2498 -0.81486  0.000605 1      2  0  0 0  Never-taker -0.8149
+## 2499: 2499  0.10359 -0.417344 0      2  0  0 0  Never-taker -0.4173
+## 2500: 2500 -0.68397  0.304398 1      2  0  0 0  Never-taker -0.6840&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;cace-estimation&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;CACE estimation&lt;/h3&gt;
+&lt;p&gt;Finally, we are ready to put all of this together and estimate the CACE using the EM algorithm. After initializing the parameters (here we just use random values except for the probabilities of group membership, which we assume to be 1/3 to start), we loop through the E and M steps, checking the change in log likelihood each time. For this single data set, we provide a point estimate of the CACE using EM and IV. (We could provide an estimate of standard error using a bootstrap approach.) We see that both do a reasonable job, getting fairly close to the truth.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;params &amp;lt;- initparams()
+prev.loglike &amp;lt;- -Inf
+continue &amp;lt;- TRUE
+  
+while (continue) {
+    
+  dtPIs &amp;lt;- dt[, estep(params, y, z, m), keyby = id]
+  dx &amp;lt;- dt[dtPIs]
+    
+  params &amp;lt;- mstep(params, dx)
+    
+  EM.CACE &amp;lt;- params$mC1 - params$mC0
+  
+  current.loglike &amp;lt;- loglike(dt, params)
+  diff &amp;lt;- current.loglike - prev.loglike
+  prev.loglike &amp;lt;- current.loglike
+  if ( diff &amp;lt; 1.00e-07 ) continue = FALSE
+    
+}
+  
+library(ivpack)
+ivmodel &amp;lt;- ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+  
+data.table(truthC = dt[AStatus == &amp;quot;Complier&amp;quot;, mean(Y1 - Y0)],
+           IV.CACE = coef(ivmodel)[2],
+           EM.CACE)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    truthC IV.CACE EM.CACE
+## 1:  0.806   0.823   0.861&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;more-general-performance&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;More general performance&lt;/h3&gt;
+&lt;p&gt;I am not providing the code here (it is just a slight modification of what has come before), but I want to show the results of generating 1000 data sets of 500 observations in each. The first plot assumes all data sets were generated using an exclusion restriction - just as we did with the single data set. The IV approach, as expected is unbiased (estimated bias 0.01), while the EM approach is slightly biased (-0.13). We can also see that the EM approach (standard deviation 0.30) has more variation than IV (standard deviation 0.15), while the actual sample CACE (calculated based on the actual group membership and potential outcomes) had a standard deviation of 0.05, which we can see from the narrow vertical band in the plot:&lt;/p&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-em-cace/Exclusion_restriction.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;p&gt;In the second set of simulations, I change the potential outcomes definition so that the exclusion restriction is no longer relevant.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;defY0 &amp;lt;- defCondition(condition = &amp;quot;Status == 1&amp;quot;,
+                      formula = 0.3, variance = .20, dist = &amp;quot;normal&amp;quot;)
+defY0 &amp;lt;- defCondition(defY0, condition = &amp;quot;Status == 2&amp;quot;,
+                      formula = 0.0, variance = .36, dist = &amp;quot;normal&amp;quot;)
+defY0 &amp;lt;- defCondition(defY0, condition = &amp;quot;Status == 3&amp;quot;,
+                      formula = 0.1, variance = .16, dist = &amp;quot;normal&amp;quot;)
+
+defY1 &amp;lt;- defCondition(condition = &amp;quot;Status == 1&amp;quot;,
+                      formula = 0.7, variance = .25, dist = &amp;quot;normal&amp;quot;)
+defY1 &amp;lt;- defCondition(defY1, condition = &amp;quot;Status == 2&amp;quot;,
+                      formula = 0.2, variance = .40, dist = &amp;quot;normal&amp;quot;)
+defY1 &amp;lt;- defCondition(defY1, condition = &amp;quot;Status == 3&amp;quot;,
+                      formula = 0.9, variance = .49, dist = &amp;quot;normal&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In this second case, the IV estimate is biased (0.53), while the EM estimated does quite well (-.03). (I suspect EM did worse in the first example above, because estimates were made without the assumption of the exclusion restriction, even though that was the case.) However, EM estimates still have more variation than IV: standard deviation 0.26 vs 0.17, consistent with the estimates under the exclusion restriction assumption. This variation arises from the fact that we don’t know what the true group membership is, and we need to estimate it. Here is what the estimates look like:&lt;/p&gt;
+&lt;div class=&#34;figure&#34;&gt;
+&lt;img src=&#34;/img/post-em-cace/No_exclusion_restriction.png&#34; /&gt;
+
+&lt;/div&gt;
+&lt;/div&gt;
+&lt;div id=&#34;can-we-expand-on-this&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Can we expand on this?&lt;/h3&gt;
+&lt;p&gt;The whole point of this was to illustrate that there might be a way around some rather restrictive assumptions, which in some cases might not seem so reasonable. EM methods provide an alternative way to approach things - more of which you can see in the &lt;a href=&#34;https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/&#34;&gt;free online course&lt;/a&gt; that inspired these last few posts. Unfortunately, there is no obvious way to tackle these problems in &lt;code&gt;R&lt;/code&gt; using existing packages, and I am not suggesting that what I have done here is the best way to go about it. The course suggests using &lt;code&gt;Mplus&lt;/code&gt;. While that is certainly a great software package, maybe it would be worthwhile to build an R package to implement these methods more completely in R? Or maybe someone has already done this, and I just haven’t come across it yet?&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>A simstudy update provides an excuse to talk a little bit about latent class regression and the EM algorithm</title>
+      <link>/post/simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class/</link>
+      <pubDate>Wed, 20 Sep 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class/</guid>
+      <description>&lt;p&gt;I was just going to make a quick announcement to let folks know that I’ve updated the &lt;code&gt;simstudy&lt;/code&gt; package to version 0.1.4 (now available on CRAN) to include functions that allow conversion of columns to factors, creation of dummy variables, and most importantly, specification of outcomes that are more flexibly conditional on previously defined variables. But, as I was coming up with an example that might illustrate the added conditional functionality, I found myself playing with package &lt;code&gt;flexmix&lt;/code&gt;, which uses an Expectation-Maximization (EM) algorithm to estimate latent classes and fit regression models. So, in the end, this turned into a bit more than a brief service announcement.&lt;/p&gt;
+&lt;div id=&#34;defining-data-conditionally&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Defining data conditionally&lt;/h3&gt;
+&lt;p&gt;Of course, simstudy has always enabled conditional distributions based on sequentially defined variables. That is really the whole point of simstudy. But, what if I wanted to specify completely different families of distributions or very different regression curves based on different individual characteristics? With the previous version of simstudy, it was not really easy to do. Now, with the addition of two key functions, &lt;code&gt;defCondition&lt;/code&gt; and &lt;code&gt;addCondition&lt;/code&gt; the process is much improved. &lt;code&gt;defCondition&lt;/code&gt; is analogous to the function &lt;code&gt;defData&lt;/code&gt;, in that this new function provides an easy way to specify conditional definitions (as does &lt;code&gt;defReadCond&lt;/code&gt;, which is analogous to &lt;code&gt;defRead&lt;/code&gt;). &lt;code&gt;addCondition&lt;/code&gt; is used to actually add the data column, just as &lt;code&gt;addColumns&lt;/code&gt; adds columns.&lt;/p&gt;
+&lt;p&gt;It is probably easiest to see in action:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+
+# Define baseline data set
+
+def &amp;lt;- defData(varname=&amp;quot;x&amp;quot;, dist=&amp;quot;normal&amp;quot;, formula=0, variance=9)
+def &amp;lt;- defData(def, varname = &amp;quot;group&amp;quot;, formula = &amp;quot;0.2;0.5;0.3&amp;quot;, 
+               dist = &amp;quot;categorical&amp;quot;)
+
+# Generate data
+
+set.seed(111)
+
+dt &amp;lt;- genData(1000, def)
+
+# Convert group to factor - new function
+
+dt &amp;lt;- genFactor(dt, &amp;quot;group&amp;quot;, replace = TRUE)   
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;code&gt;defCondition&lt;/code&gt; is the same as &lt;code&gt;defData&lt;/code&gt;, except that instead of specifying a variable name, we need to specify a condition that is based on a pre-defined field:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;defC &amp;lt;- defCondition(condition = &amp;quot;fgroup == 1&amp;quot;, formula = &amp;quot;5 + 2*x&amp;quot;,
+                     variance = 4, dist = &amp;quot;normal&amp;quot;)
+defC &amp;lt;- defCondition(defC, condition = &amp;quot;fgroup == 2&amp;quot;, formula = 4,
+                     variance = 3, dist=&amp;quot;normal&amp;quot;)
+defC &amp;lt;- defCondition(defC, condition = &amp;quot;fgroup == 3&amp;quot;, formula = &amp;quot;3 - 2*x&amp;quot;,
+                     variance = 2, dist=&amp;quot;normal&amp;quot;)
+
+defC&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      condition formula variance   dist     link
+## 1: fgroup == 1 5 + 2*x        4 normal identity
+## 2: fgroup == 2       4        3 normal identity
+## 3: fgroup == 3 3 - 2*x        2 normal identity&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;A subsequent call to &lt;code&gt;addCondition&lt;/code&gt; generates a data table with the new variable, in this case &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt &amp;lt;- addCondition(defC, dt, &amp;quot;y&amp;quot;)
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id          y          x fgroup
+##    1:    1  5.3036869  0.7056621      2
+##    2:    2  2.1521853 -0.9922076      2
+##    3:    3  4.7422359 -0.9348715      3
+##    4:    4 16.1814232 -6.9070370      3
+##    5:    5  4.3958893 -0.5126281      3
+##   ---                                  
+##  996:  996 -0.8115245 -2.7092396      1
+##  997:  997  1.9946074  0.7126094      2
+##  998:  998 11.8384871  2.3895135      1
+##  999:  999  3.3569664  0.8123200      1
+## 1000: 1000  3.4662074 -0.4653198      3&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In this example, I’ve partitioned the data into three subsets, each of which has a very different linear relationship between variables &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;, and different variation. In this particular case, all relationships are linear with normally distributed noise, but this is absolutely not required.&lt;/p&gt;
+&lt;p&gt;Here is what the data look like:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(ggplot2)
+
+mycolors &amp;lt;- c(&amp;quot;#555bd4&amp;quot;,&amp;quot;#d4555b&amp;quot;,&amp;quot;#d4ce55&amp;quot;)
+
+ggplot(data = dt, aes(x = x, y = y, group = fgroup)) +
+  geom_point(aes(color = fgroup), size = 1, alpha = .4) +
+  geom_smooth(aes(color = fgroup), se = FALSE, method = &amp;quot;lm&amp;quot;) +
+  scale_color_manual(name = &amp;quot;Cluster&amp;quot;, values = mycolors)  +
+  scale_x_continuous(limits = c(-10,10), breaks = c(-10, -5, 0, 5, 10)) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = &amp;quot;grey96&amp;quot;, color = &amp;quot;grey80&amp;quot;))&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-20-simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class_files/figure-html/unnamed-chunk-4-1.png&#34; width=&#34;576&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;latent-class-regression-models&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Latent class regression models&lt;/h3&gt;
+&lt;p&gt;Suppose we come across the same data set, but are not privy to the group classification, and we are still interested in the relationship between &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;. This is what the data set would look like - not as user-friendly:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;rawp &amp;lt;- ggplot(data = dt, aes(x = x, y = y, group = fgroup)) +
+  geom_point(color = &amp;quot;grey75&amp;quot;, size = .5) +
+  scale_x_continuous(limits = c(-10,10), breaks = c(-10, -5, 0, 5, 10)) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = &amp;quot;grey96&amp;quot;, color = &amp;quot;grey80&amp;quot;))
+
+rawp&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-20-simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class_files/figure-html/unnamed-chunk-5-1.png&#34; width=&#34;504&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;We might see from the plot, or we might have some subject-matter knowledge that suggests there are are several sub-clusters within the data, each of which appears to have a different relationship between &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;. (Obviously, we know this is the case, since we generated the data.) The question is, how can we estimate the regression lines if we don’t know the class membership? That is where the EM algorithm comes into play.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-em-algorithm-very-very-briefly&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The EM algorithm, very, very briefly&lt;/h3&gt;
+&lt;p&gt;The EM algorithm handles model parameter estimation in the context of incomplete or missing data. In the example I’ve been discussing here, the subgroups or cluster membership are the missing data. There is an extensive literature on EM methods (starting with &lt;a href=&#34;http://www.jstor.org/stable/2984875&#34;&gt;this article&lt;/a&gt; by Dempster, Laird &amp;amp; Rubin), and I am barely even touching the surface, let alone scratching it.&lt;/p&gt;
+&lt;p&gt;The missing data (cluster memberships) are estimated in the &lt;em&gt;Expectation-&lt;/em&gt; or &lt;em&gt;E-step&lt;/em&gt;. These are replaced with their expected values as given by the posterior probabilities. The mixture model assumes that each observation is exactly from one cluster, but this information has not been observed. The unknown model parameters (intercept, slope, and variance) for each of the clusters is estimated in the &lt;em&gt;Maximization-&lt;/em&gt; or &lt;em&gt;M-step&lt;/em&gt;, which in this case assumes the data come from a linear process with normally distributed noise - both the linear coefficients and variation around the line are conditional on cluster membership. The process is iterative. First, the &lt;em&gt;E-step&lt;/em&gt;, which is based on some starting model parameters at first and then updated with the most recent parameter estimates from the prior &lt;em&gt;M-step&lt;/em&gt;. Second, the &lt;em&gt;M-step&lt;/em&gt; is based on estimates of the maximum likelihood of all the data (including the ‘missing’ data estimated in the prior &lt;em&gt;E-step&lt;/em&gt;). We iterate back and forth until the parameter estimates in the &lt;em&gt;M-step&lt;/em&gt; reach a steady state, or the overal likelihood estimate becomes stable.&lt;/p&gt;
+&lt;p&gt;The strength or usefulness of the EM method is that the likelihood of the full data (both observed data - &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt;’s and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;’s - and unobserved data - cluster probabilities) is much easier to write down and estimate than the likelihood of the observed data only (&lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt;’s and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt;’s). Think of the first plot above with the structure given by the colors compared to the second plot in grey without the structure. The first seems so much more manageable than the second - if only we knew the underlying structure defined by the clusters. The EM algorithm builds the underlying structure so that the maximum likelihood estimation problem becomes much easier.&lt;/p&gt;
+&lt;p&gt;Here is a little more detail on what the EM algorithm is estimating in our application. (See &lt;a href=&#34;https://cran.r-project.org/web/packages/flexmix/vignettes/flexmix-intro.pdf&#34;&gt;this&lt;/a&gt; for the much more detail.) First, we estimate the probability of membership in cluster &lt;span class=&#34;math inline&#34;&gt;\(j\)&lt;/span&gt; for our linear regression model with three clusters:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[P_i(j|x_i, y_i, \mathbf{\pi}, \mathbf{\alpha_0}, \mathbf{\alpha_1}, \mathbf{\sigma}) = p_{ij}= \frac{\pi_jf(y_i|x_i,  \mathbf{\alpha_0}, \mathbf{\alpha_1}, \mathbf{\sigma})}{\sum_{k=1}^3 \pi_k f(y_i|x_i,  \mathbf{\alpha_0}, \mathbf{\alpha_1}, \mathbf{\sigma})},\]&lt;/span&gt; where &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{\alpha_0}\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{\alpha_1}\)&lt;/span&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(\mathbf{\sigma}\)&lt;/span&gt; are the vectors of intercepts, slopes, and standard deviations for the three clusters. &lt;span class=&#34;math inline&#34;&gt;\(\pi\)&lt;/span&gt; is the vector of probabilities that any individual is in the respective clusters, and each &lt;span class=&#34;math inline&#34;&gt;\(\pi_j\)&lt;/span&gt; is estimated by averaging the &lt;span class=&#34;math inline&#34;&gt;\(p_{ij}\)&lt;/span&gt;’s across all individuals. Finally, &lt;span class=&#34;math inline&#34;&gt;\(f(.|.)\)&lt;/span&gt; is the density from the normal distribution &lt;span class=&#34;math inline&#34;&gt;\(N(\alpha_{j0} + \alpha_{j1}x, \sigma_j^2)\)&lt;/span&gt;, with cluster-specific parameters.&lt;/p&gt;
+&lt;p&gt;Second, we maximize each of the three cluster-specific log-likelihoods, where each individual is weighted by its probability of cluster membership (which is &lt;span class=&#34;math inline&#34;&gt;\(P_i(j)\)&lt;/span&gt;, estimated in the &lt;em&gt;E-step&lt;/em&gt;). In particular, we are maximizing the cluster-specific likelihood with respect to the three unknown parameters &lt;span class=&#34;math inline&#34;&gt;\(\alpha_{j0}\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\alpha_{j1}\)&lt;/span&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(\sigma_j\)&lt;/span&gt;:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\sum_{n=1}^N \hat{p}_{nk} \text{log} (f(y_n|x_n,\alpha_{j0},\alpha_{j1},\sigma_j)\]&lt;/span&gt; In &lt;code&gt;R&lt;/code&gt;, the &lt;code&gt;flexmix&lt;/code&gt; package has implemented an EM algorithm to estimate latent class regression models. The package documentation provides a really nice, accessible &lt;a href=&#34;https://cran.r-project.org/web/packages/flexmix/vignettes/flexmix-intro.pdf&#34;&gt;description&lt;/a&gt; of the two-step procedure, with much more detail than I have provided here. I encourage you to check it out.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;iterating-slowly-through-the-em-algorithm&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Iterating slowly through the EM algorithm&lt;/h3&gt;
+&lt;p&gt;Here is a slow-motion version of the EM estimation process. I show the parameter estimates (visually) at the early stages of estimation, checking in after every three steps. In addition, I highlight two individuals and show the estimated probabilities of cluster membership. At the beginning, there is little differentiation between the regression lines for each cluster. However, by the 10th iteration the parameter estimates for the regression lines are looking pretty similar to the original plot.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(flexmix)
+
+selectIDs &amp;lt;- c(508, 775) # select two individuals
+
+ps &amp;lt;- list()
+count &amp;lt;- 0
+p.ij &amp;lt;- data.table()  # keep track of estimated probs
+pi.j &amp;lt;- data.table()  # keep track of average probs
+
+for (i in seq(1,10, by=3)) {
+  
+  count &amp;lt;- count + 1
+  set.seed(5)
+  
+  # fit model up to &amp;quot;i&amp;quot; iterations - either 1, 4, 7, or 10
+  
+  exMax &amp;lt;- flexmix(y ~ x,
+                   data = dt, k = 3,
+                   control = list(iter.max = i)
+  )
+          
+  p.ij &amp;lt;- rbind(p.ij,
+                data.table(i, selectIDs, posterior(exMax)[selectIDs,]))
+  pi.j &amp;lt;- rbind(pi.j,
+                data.table(i, t(apply(posterior(exMax), 2, mean))))
+  
+  dp &amp;lt;- as.data.table(t(parameters(exMax)))
+  setnames(dp, c(&amp;quot;int&amp;quot;,&amp;quot;slope&amp;quot;, &amp;quot;sigma&amp;quot;))
+  
+  # flexmix rearranges columns/clusters
+  
+  dp[, grp := c(3, 1, 2)]
+  setkey(dp, grp)
+  
+  # create plot for each iteration
+  
+  ps[[count]] &amp;lt;- rawp + 
+    geom_abline(data = dp, aes(intercept = int, slope = slope,  
+                               color=factor(grp)), size = 1) +
+    geom_point(data = dt[id %in% selectIDs], color = &amp;quot;black&amp;quot;) +
+    scale_color_manual(values = mycolors)  +
+    ggtitle(paste(&amp;quot;Iteration&amp;quot;, i)) +
+    theme(legend.position = &amp;quot;none&amp;quot;,
+          plot.title = element_text(size = 9))
+
+  
+}&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(gridExtra)
+
+grid.arrange(ps[[1]], ps[[2]], ps[[3]], ps[[4]], nrow = 1)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-20-simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class_files/figure-html/unnamed-chunk-7-1.png&#34; width=&#34;864&#34; style=&#34;display: block; margin: auto;&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;For the two individuals, we can see the probabilities converging to a level of certainty/uncertainty. The individual with ID #775 lies right on the regression line for cluster 3, far from the other lines, and the algorithm quickly assigns a probability of 100% to cluster 3 (its actual cluster). The cluster assignment is less certain for ID #508, which lies between the two regression lines for clusters 1 and 2.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# actual cluster membership
+
+dt[id %in% selectIDs, .(id, fgroup)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     id fgroup
+## 1: 508      2
+## 2: 775      3&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;setkey(p.ij, selectIDs, i)
+p.ij[, .(selectIDs, i, C1 = round(V2, 2), C2 = round(V3,2), C3 = round(V1,2))]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    selectIDs  i   C1   C2   C3
+## 1:       508  1 0.32 0.36 0.32
+## 2:       508  4 0.29 0.44 0.27
+## 3:       508  7 0.25 0.65 0.10
+## 4:       508 10 0.24 0.76 0.00
+## 5:       775  1 0.35 0.28 0.37
+## 6:       775  4 0.33 0.14 0.53
+## 7:       775  7 0.11 0.01 0.88
+## 8:       775 10 0.00 0.00 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In addition, we can see how the estimate of overall group membership (for all individuals) changes through the iterations. The algorithm starts by assigning equal probability to each cluster (1/3) and slowly moves towards the actual distribution used to generate the data (20%, 50%, and 30%).&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;pi.j[, .(i, C1 = round(V2, 2), C2 = round(V3,2), C3 = round(V1,2))]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##     i   C1   C2   C3
+## 1:  1 0.33 0.34 0.33
+## 2:  4 0.31 0.34 0.35
+## 3:  7 0.25 0.39 0.36
+## 4: 10 0.23 0.44 0.33&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;final-estimation-of-linear-models&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Final estimation of linear models&lt;/h3&gt;
+&lt;p&gt;The final estimation is shown below, and we can see that the parameters have largely converged to the values used to generate the data.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Estimation until convergence
+
+set.seed(5)
+ex1 &amp;lt;- flexmix(y ~ x, data = dt, k = 3)
+
+# paramter estimates
+
+data.table(parameters(ex1))[, .(param = c(&amp;quot;int&amp;quot;, &amp;quot;slope&amp;quot;, &amp;quot;sd&amp;quot;), 
+                                C1 = round(Comp.2, 2), 
+                                C2 = round(Comp.3, 2),
+                                C3 = round(Comp.1, 2))]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    param   C1    C2    C3
+## 1:   int 5.18  3.94  3.00
+## 2: slope 1.97 -0.03 -1.99
+## 3:    sd 2.07  1.83  1.55&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# estimates of cluster probabilities
+
+round(apply(posterior(ex1), 2, mean), 2)[c(2,3,1)]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.19 0.51 0.30&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# estimates of individual probabilities
+
+data.table(posterior(exMax)[selectIDs,])[,.(selectIDs,
+                                            C1 = round(V2, 2), 
+                                            C2 = round(V3, 2), 
+                                            C3 = round(V1, 2))]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    selectIDs   C1   C2 C3
+## 1:       508 0.24 0.76  0
+## 2:       775 0.00 0.00  1&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;how-do-we-know-the-relationship-is-linear&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;How do we know the relationship is linear?&lt;/h3&gt;
+&lt;p&gt;In reality, there is no reason to assume that the relationship between &lt;span class=&#34;math inline&#34;&gt;\(x\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt; is simply linear. We might want to look at other possibilities, such as a quadratic relationship. So, we use flexmix to estimate an expanded model, and then we plot the fitted lines on the original data:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ex2 &amp;lt;- flexmix(y ~ x + I(x^2), data = dt, k = 3)
+dp &amp;lt;- as.data.table(t(parameters(ex2)))
+setnames(dp, c(&amp;quot;int&amp;quot;,&amp;quot;slope&amp;quot;, &amp;quot;slope2&amp;quot;, &amp;quot;sigma&amp;quot;))
+
+dp[, grp := c(1,2,3)]
+
+x &amp;lt;- c(seq(-10,10, by =.1))
+
+dp1 &amp;lt;- data.table(grp = 1, x, dp[1, int + slope*x + slope2*(x^2)])
+dp2 &amp;lt;- data.table(grp = 2, x, dp[2, int + slope*x + slope2*(x^2)])
+dp3 &amp;lt;- data.table(grp = 3, x, dp[3, int + slope*x + slope2*(x^2)])
+
+dp &amp;lt;- rbind(dp1, dp2, dp3)
+
+rawp + 
+  geom_line(data=dp, aes(x=x, y=V3, group = grp, color = factor(grp)), 
+            size = 1) +
+  scale_color_manual(values = mycolors)  +
+  theme(legend.position = &amp;quot;none&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-20-simstudy-update-provides-an-excuse-to-talk-a-little-bit-about-the-em-algorithm-and-latent-class_files/figure-html/unnamed-chunk-11-1.png&#34; width=&#34;576&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;And even though the parameter estimates appear to be reasonable, we would want to compare the simple linear model with the quadratic model, which we can use with something like the BIC. We see that the linear model is a better fit (lower BIC value) - not surprising since this is how we generated the data.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;summary(refit(ex2))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## $Comp.1
+##              Estimate Std. Error  z value  Pr(&amp;gt;|z|)    
+## (Intercept)  1.440736   0.309576   4.6539 3.257e-06 ***
+## x           -0.405118   0.048808  -8.3003 &amp;lt; 2.2e-16 ***
+## I(x^2)      -0.246075   0.012162 -20.2337 &amp;lt; 2.2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## $Comp.2
+##             Estimate Std. Error z value  Pr(&amp;gt;|z|)    
+## (Intercept) 6.955542   0.289914 23.9918 &amp;lt; 2.2e-16 ***
+## x           0.305995   0.049584  6.1712 6.777e-10 ***
+## I(x^2)      0.263160   0.014150 18.5983 &amp;lt; 2.2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## $Comp.3
+##               Estimate Std. Error z value Pr(&amp;gt;|z|)    
+## (Intercept)  3.9061090  0.1489738 26.2201  &amp;lt; 2e-16 ***
+## x           -0.0681887  0.0277366 -2.4584  0.01395 *  
+## I(x^2)       0.0113305  0.0060884  1.8610  0.06274 .  
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Comparison of the two models
+
+BIC(ex1)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 5187.862&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;BIC(ex2)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 5316.034&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Complier average causal effect? Exploring what we learn from an RCT with participants who don&#39;t do what they are told</title>
+      <link>/post/cace-explored/</link>
+      <pubDate>Tue, 12 Sep 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/cace-explored/</guid>
+      <description>&lt;p&gt;Inspired by a free online &lt;a href=&#34;https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/&#34;&gt;course&lt;/a&gt; titled &lt;em&gt;Complier Average Causal Effects (CACE) Analysis&lt;/em&gt; and taught by Booil Jo and Elizabeth Stuart (through Johns Hopkins University), I’ve decided to explore the topic a little bit. My goal here isn’t to explain CACE analysis in extensive detail (you should definitely go take the course for that), but to describe the problem generally and then (of course) simulate some data. A plot of the simulated data gives a sense of what we are estimating and assuming. And I end by describing two simple methods to estimate the CACE, which we can compare to the truth (since this is a simulation); next time, I will describe a third way.&lt;/p&gt;
+&lt;div id=&#34;non-compliance-in-randomized-trials&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Non-compliance in randomized trials&lt;/h3&gt;
+&lt;p&gt;Here’s the problem. In a randomized trial, investigators control the randomization process; they determine if an individual is assigned to the treatment group or control group (I am talking about randomized trials here, but many of these issues can apply in the context of observed or quasi-experimental settings, but require more data and assumptions). However, those investigators may not have as much control over the actual treatments that study participants receive. For example, an individual randomized to some type of behavioral intervention may opt not to take advantage of the intervention. Likewise, someone assigned to control may, under some circumstances, figure out a way to get services that are quite similar to the intervention. In all cases, the investigator is able to collect outcome data on all of these patients, regardless of whether or not they followed directions. (This is different from drop-out or loss-to-followup, where outcome data may be missing.)&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;cace&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;CACE&lt;/h3&gt;
+&lt;p&gt;Typically, studies analyze data based on treatment &lt;em&gt;assignment&lt;/em&gt; rather than treatment &lt;em&gt;received&lt;/em&gt;. This focus on assignment is called an intention-to-treat (ITT) analysis. In a policy environment, the ITT may make a lot of sense; we are answering this specific question: “What is the overall effect in the real world where the intervention is made available yet some people take advantage of it while others do not?” Alternatively, researchers may be interested in different question: “What is the causal effect of actually receiving the treatment?”&lt;/p&gt;
+&lt;p&gt;Now, to answer the second question, there are numerous subtle issues that you need to wrestle with (again, go take the &lt;a href=&#34;https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/&#34;&gt;course&lt;/a&gt;). But, long story short, we need to (1) identify the folks in the &lt;em&gt;intervention&lt;/em&gt; group who actually do what they have been encouraged to do (receive the intervention) but only because they were encouraged, and not because they would have received the intervention anyways had they not been randomized, and compare their outcomes with (2) the folks in the control group who did not seek out the intervention on their own initiative but would have received the intervention had they been encouraged. These two groups are considered to be &lt;em&gt;compliers&lt;/em&gt; - they would always do what they are told in the context of the study. And the effect of the intervention that is based on outcomes from this type of patient is called the &lt;em&gt;complier average causal effect&lt;/em&gt; (CACE).&lt;/p&gt;
+&lt;p&gt;The biggest challenge in estimating the CACE is that we cannot actually identify if people are compliers or not. Some of those receiving the treatment in the intervention group are &lt;em&gt;compliers&lt;/em&gt;, but the rest are &lt;em&gt;always-takers&lt;/em&gt;. Some of those not receiving the treatment in the control arm are also &lt;em&gt;compliers&lt;/em&gt;, but the others are &lt;em&gt;never-takers&lt;/em&gt;. There are several methods available to overcome this challenge, two of which I will briefly mention here: method of moments and instrumental variables.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;using-potential-outcomes-to-define-cace&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Using potential outcomes to define CACE&lt;/h3&gt;
+&lt;p&gt;In an earlier &lt;a href=&#34;https://www.rdatagen.net/post/be-careful/&#34;&gt;post&lt;/a&gt;, I briefly introduced the idea of potential outcomes. Since we are talking about causal relationships, they are useful here. If &lt;span class=&#34;math inline&#34;&gt;\(Z\)&lt;/span&gt; is the randomization indicator, &lt;span class=&#34;math inline&#34;&gt;\(Z=1\)&lt;/span&gt; for those randomized to the intervention, &lt;span class=&#34;math inline&#34;&gt;\(Z=0\)&lt;/span&gt; for those in control. &lt;span class=&#34;math inline&#34;&gt;\(M\)&lt;/span&gt; is the indicator of whether or not the individual received the intervention. Since &lt;span class=&#34;math inline&#34;&gt;\(M\)&lt;/span&gt; is an outcome, we can imagine the potential outcomes &lt;span class=&#34;math inline&#34;&gt;\(M_{0i}\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(M_{1i}\)&lt;/span&gt;, or what the value of &lt;span class=&#34;math inline&#34;&gt;\(M_i\)&lt;/span&gt; would be for an individual if &lt;span class=&#34;math inline&#34;&gt;\(Z_i=0\)&lt;/span&gt; or &lt;span class=&#34;math inline&#34;&gt;\(Z_i=1\)&lt;/span&gt;, respectively. And let us say &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; is the outcome, so we have potential outcomes that can be written as &lt;span class=&#34;math inline&#34;&gt;\(Y_{0,M_0}\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(Y_{1,M_1}\)&lt;/span&gt;. Think about that for a bit.&lt;/p&gt;
+&lt;p&gt;Using these potential outcomes, we can define the compliers and the CACE. Compliers are people for whom &lt;span class=&#34;math inline&#34;&gt;\(M_0 = 0\)&lt;/span&gt; &lt;em&gt;and&lt;/em&gt; &lt;span class=&#34;math inline&#34;&gt;\(M_1 = 1\)&lt;/span&gt;. (Never-takers look like this: &lt;span class=&#34;math inline&#34;&gt;\(M_0 = 0\)&lt;/span&gt; &lt;em&gt;and&lt;/em&gt; &lt;span class=&#34;math inline&#34;&gt;\(M_1 = 0\)&lt;/span&gt;. Always-takers: &lt;span class=&#34;math inline&#34;&gt;\(M_0 = 1\)&lt;/span&gt; &lt;em&gt;and&lt;/em&gt; &lt;span class=&#34;math inline&#34;&gt;\(M_1 = 1\)&lt;/span&gt;). Now, the average causal effect is the average difference between potential outcomes. In this case, the CACE is &lt;span class=&#34;math inline&#34;&gt;\(E[Y_{1,M_1} - Y_{0,M_0}|M_0 = 0 \ \&amp;amp; \ M_1 = 1]\)&lt;/span&gt;. The patients for whom &lt;span class=&#34;math inline&#34;&gt;\(M_0 = 0\)&lt;/span&gt; &lt;em&gt;and&lt;/em&gt; &lt;span class=&#34;math inline&#34;&gt;\(M_1 = 1\)&lt;/span&gt; are the compliers.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;simulating-data&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Simulating data&lt;/h3&gt;
+&lt;p&gt;The data simulation will be based on generating potential outcomes. Observed outcomes will be a function of randomization group and complier status.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;options(digits = 3)
+
+library(data.table)
+library(simstudy)
+library(ggplot2)
+
+# Status :
+
+# 1 = A(lways taker)
+# 2 = N(ever taker)
+# 3 = C(omplier)
+
+def &amp;lt;- defDataAdd(varname = &amp;quot;Status&amp;quot;, 
+               formula = &amp;quot;0.20; 0.40; 0.40&amp;quot;, dist = &amp;quot;categorical&amp;quot;)
+
+# potential outcomes (PO) for intervention 
+
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;M0&amp;quot;, 
+               formula = &amp;quot;(Status == 1) * 1&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;M1&amp;quot;, 
+               formula = &amp;quot;(Status != 2) * 1&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+
+# observed intervention status based on randomization and PO
+
+def &amp;lt;- defDataAdd(def, varname = &amp;quot;m&amp;quot;, 
+               formula = &amp;quot;(z==0) * M0 + (z==1) * M1&amp;quot;, dist = &amp;quot;nonrandom&amp;quot;)
+
+# potential outcome for Y (depends on potential outcome for M)
+
+set.seed(888)
+
+dt &amp;lt;- genData(2000)
+dt &amp;lt;- trtAssign(dt, n=2, grpName = &amp;quot;z&amp;quot;)
+
+dt &amp;lt;- addColumns(def, dt)
+
+# using data functions here, not simstudy - I need add
+# this functionality to simstudy
+
+dt[, AStatus := factor(Status, 
+          labels = c(&amp;quot;Always-taker&amp;quot;,&amp;quot;Never-taker&amp;quot;, &amp;quot;Complier&amp;quot;))]
+
+# potential outcomes depend on group status - A, N, or C
+
+dt[Status == 1, Y0 := rnorm(.N, 1.0, sqrt(0.25))]
+dt[Status == 2, Y0 := rnorm(.N, 0.0, sqrt(0.36))]
+dt[Status == 3, Y0 := rnorm(.N, 0.1, sqrt(0.16))]
+  
+dt[Status == 1, Y1 := rnorm(.N, 1.0, sqrt(0.25))]
+dt[Status == 2, Y1 := rnorm(.N, 0.0, sqrt(0.36))]
+dt[Status == 3, Y1 := rnorm(.N, 0.9, sqrt(0.49))]
+
+# observed outcome function of actual treatment
+
+dt[, y := (m == 0) * Y0 + (m == 1) * Y1]
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id z Status M0 M1 m      AStatus      Y0    Y1       y
+##    1:    1 1      3  0  1 1     Complier  0.5088 0.650  0.6500
+##    2:    2 1      3  0  1 1     Complier  0.1503 0.729  0.7292
+##    3:    3 1      2  0  0 0  Never-taker  1.4277 0.454  1.4277
+##    4:    4 0      3  0  1 0     Complier  0.6393 0.998  0.6393
+##    5:    5 0      1  1  1 1 Always-taker  0.6506 1.927  1.9267
+##   ---                                                         
+## 1996: 1996 0      3  0  1 0     Complier -0.9554 0.114 -0.9554
+## 1997: 1997 0      3  0  1 0     Complier  0.0366 0.903  0.0366
+## 1998: 1998 1      3  0  1 1     Complier  0.3606 1.098  1.0982
+## 1999: 1999 1      3  0  1 1     Complier  0.6651 1.708  1.7082
+## 2000: 2000 0      3  0  1 0     Complier  0.2207 0.531  0.2207&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The plot shows outcomes &lt;span class=&#34;math inline&#34;&gt;\(y\)&lt;/span&gt; for the two randomization groups. The ITT estimate would be based on an average of all the points in group, regardless of color or shape. The difference between the average of the black circles in the two groups represents the CACE.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ggplot(data=dt, aes(y=y, x = factor(z, labels = c(&amp;quot;Assigned to control&amp;quot;,
+                                                  &amp;quot;Assigned to treatment&amp;quot;)))) +
+  geom_jitter(aes(shape=factor(m, labels = c(&amp;quot;No treatment&amp;quot;, &amp;quot;Treatment&amp;quot;)),
+                  color=AStatus),
+              width = 0.35) +
+  scale_shape_manual(values = c(1,19)) +
+  scale_color_manual(values = c(&amp;quot;#e1d07d&amp;quot;, &amp;quot;#7d8ee1&amp;quot;,  &amp;quot;grey25&amp;quot;)) +
+  scale_y_continuous(breaks = seq(-3, 3, 1), labels = seq(-3, 3, 1)) +
+  theme(legend.title = element_blank(),
+        axis.title.x = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        panel.grid.major.x = element_blank())&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-08-iv-em-two-important-ideas-explored_files/figure-html/unnamed-chunk-2-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;In the real world, we cannot see the colors, yet we need to estimate as if we do, or at least use a method to bypasses that need:&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-08-iv-em-two-important-ideas-explored_files/figure-html/unnamed-chunk-3-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;estimating-cace-using-observed-data&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Estimating CACE using observed data&lt;/h3&gt;
+&lt;p&gt;The challenge is to estimate the CACE using &lt;em&gt;observed&lt;/em&gt; data only, since that is all we have (along with a couple of key assumptions). We start of by claiming that the average causal effect of treatment &lt;strong&gt;assignment&lt;/strong&gt; (&lt;span class=&#34;math inline&#34;&gt;\(ACE\)&lt;/span&gt;) is a weighted average of the three sub-populations of &lt;em&gt;compliers&lt;/em&gt;, &lt;em&gt;never-takers&lt;/em&gt;, and &lt;em&gt;always-takers&lt;/em&gt;:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ ACE = \pi_C \times CACE + \pi_N \times NACE + \pi_A \times AACE, \]&lt;/span&gt; where &lt;span class=&#34;math inline&#34;&gt;\(CACE\)&lt;/span&gt; is the average causal effect of treatment assignment for the subset of those in the sample who are &lt;em&gt;compliers&lt;/em&gt;, &lt;span class=&#34;math inline&#34;&gt;\(NACE\)&lt;/span&gt; is the average causal effect of treatment assignment for the subset who are &lt;em&gt;never-takers&lt;/em&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(AACE\)&lt;/span&gt; is the average causal effect for those who are &lt;em&gt;always-takers&lt;/em&gt;. &lt;span class=&#34;math inline&#34;&gt;\(\pi_C\)&lt;/span&gt;, &lt;span class=&#34;math inline&#34;&gt;\(\pi_N\)&lt;/span&gt;, and &lt;span class=&#34;math inline&#34;&gt;\(\pi_A\)&lt;/span&gt; represent the sample proportions of compliers, never-takers, and always-takers, respectively.&lt;/p&gt;
+&lt;p&gt;A key assumption often made to estimate &lt;span class=&#34;math inline&#34;&gt;\(CACE\)&lt;/span&gt; is known as the &lt;em&gt;exclusion restriction&lt;/em&gt;: treatment assignment has an effect on the outcome &lt;em&gt;only&lt;/em&gt; if it changes the actual treatment taken. (A second key assumption is that there are no &lt;em&gt;deniers&lt;/em&gt;, or folks who do the opposite of what they are told. This is called the monotonicity assumption.) This &lt;em&gt;exclusion restriction&lt;/em&gt; implies that both &lt;span class=&#34;math inline&#34;&gt;\(NACE=0\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(AACE=0\)&lt;/span&gt;, since in both cases the treatment &lt;em&gt;received&lt;/em&gt; is the same regardless of treatment assignment. In that case, we can re-write the equality as&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ ACE = \pi_C \times CACE,\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;and finally with a little re-arranging,&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ CACE = \frac{ACE}{\pi_C}. \]&lt;/span&gt; So, in order estimate &lt;span class=&#34;math inline&#34;&gt;\(CACE\)&lt;/span&gt;, we need to be able to estimate &lt;span class=&#34;math inline&#34;&gt;\(ACE\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(\pi_C\)&lt;/span&gt;. Fortunately, we are in a position to do this. Since this is a randomized trial, the average causal effect of treatment assignment is just the difference in observed outcomes for the two treatment assignment groups:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ ACE = E[Y | Z = 1] - E[Y | Z = 0] \]&lt;/span&gt; This also happens to be the &lt;em&gt;intention-to-treat&lt;/em&gt; ) (&lt;span class=&#34;math inline&#34;&gt;\(ITT\)&lt;/span&gt;) estimate.&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math inline&#34;&gt;\(\pi_C\)&lt;/span&gt; is a little harder, but in this simplified scenario, not that hard. We just need to follow a little logic: for the control group, we can identify the &lt;em&gt;always-takers&lt;/em&gt; (they’re the ones who actually receive the treatment), so we know &lt;span class=&#34;math inline&#34;&gt;\(\pi_A\)&lt;/span&gt; for the the control group. This can be estimated as &lt;span class=&#34;math inline&#34;&gt;\(P(M=1|Z=0)\)&lt;/span&gt;. And, since the study was randomized, the distribution of &lt;em&gt;always-takers&lt;/em&gt; in the treatment group must be the same. So, we can use &lt;span class=&#34;math inline&#34;&gt;\(\pi_A\)&lt;/span&gt; estimated from the control group as an estimate for the treatment group.&lt;/p&gt;
+&lt;p&gt;For the treatment group, we know that &lt;span class=&#34;math inline&#34;&gt;\(\pi_C + \pi_A = P(M = 1 | Z = 1)\)&lt;/span&gt;. That is everyone who receives treatment in the treatment group is either a complier or always-taker. With this, we can say&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\pi_C  = P(M=1 | Z = 1) - \pi_A.\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;But, of course, we argued above that we can estimate &lt;span class=&#34;math inline&#34;&gt;\(\pi_A\)&lt;/span&gt; as &lt;span class=&#34;math inline&#34;&gt;\(P(M=1|Z=0)\)&lt;/span&gt;. So, finally, we have&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\pi_C  = P(M=1 | Z = 1) - P(M=1|Z=0).\]&lt;/span&gt; This gives us a method of moments estimator for &lt;span class=&#34;math inline&#34;&gt;\(CACE\)&lt;/span&gt; from observed data:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[ CACE = \frac{ACE}{\pi_C} = \frac{E[Y | Z = 1] - E[Y | Z = 0]}{P(M=1 | Z = 1) - P(M=1|Z=0)}. \]&lt;/span&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-simulated-estimate&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;The simulated estimate&lt;/h2&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ACE &amp;lt;- dt[z==1, mean(y)] - dt[z==0, mean(y)]   # Also ITT
+ACE&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.307&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;pi_C &amp;lt;- dt[z==1, mean(m)] - dt[z==0, mean(m)]  # strength of instrument
+pi_C&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.372&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;truth &amp;lt;- dt[AStatus == &amp;quot;Complier&amp;quot;, mean(Y1 - Y0)]
+truth&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.81&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;ACE/pi_C&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.826&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;A method quite commonly used to analyze non-compliance is the instrumental variable model estimated with two-staged least squares regression. The R package &lt;code&gt;ivpack&lt;/code&gt; is one of several that facilitates this type of analysis. A discussio of this methodology far exceeds the scope of this post. In any case, we can see that in this simple example, the IV estimate is the same as the method of moments estimator (by looking at the coefficient estimate of &lt;code&gt;m&lt;/code&gt;).&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(ivpack)
+
+ivmodel &amp;lt;- ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+summary(ivmodel)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## 
+## Call:
+## ivreg(formula = y ~ m | z, data = dt, x = TRUE)
+## 
+## Residuals:
+##      Min       1Q   Median       3Q      Max 
+## -2.19539 -0.36249  0.00248  0.35859  2.27902 
+## 
+## Coefficients:
+##             Estimate Std. Error t value Pr(&amp;gt;|t|)    
+## (Intercept)   0.0932     0.0302    3.09    0.002 ** 
+## m             0.8262     0.0684   12.08   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Residual standard error: 0.569 on 1998 degrees of freedom
+## Multiple R-Squared: 0.383,   Adjusted R-squared: 0.383 
+## Wald test:  146 on 1 and 1998 DF,  p-value: &amp;lt;2e-16&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;So, again, if I have piqued your interest of this very rich and interesting topic, or if I have totally confused you, go check out the &lt;a href=&#34;https://courseplus.jhu.edu/core/index.cfm/go/course.home/coid/8155/&#34;&gt;course&lt;/a&gt;. In my next post, I will describe a simple latent variable model using a maximum likelihood EM (expectation-maximization) algorithm that arrives at an estimate by predicting complier status.&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>Further considerations of a hidden process underlying categorical responses</title>
+      <link>/post/a-hidden-process-part-2-of-2/</link>
+      <pubDate>Tue, 05 Sep 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/a-hidden-process-part-2-of-2/</guid>
+      <description>&lt;p&gt;In my &lt;a href=&#34;https://www.rdatagen.net/post/ordinal-regression/&#34;&gt;previous post&lt;/a&gt;, I described a continuous data generating process that can be used to generate discrete, categorical outcomes. In that post, I focused largely on binary outcomes and simple logistic regression just because things are always easier to follow when there are fewer moving parts. Here, I am going to focus on a situation where we have &lt;em&gt;multiple&lt;/em&gt; outcomes, but with a slight twist - these groups of interest can be interpreted in an ordered way. This conceptual latent process can provide another perspective on the models that are typically applied to analyze these types of outcomes.&lt;/p&gt;
+&lt;div id=&#34;categorical-outcomes-generally&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Categorical outcomes, generally&lt;/h3&gt;
+&lt;p&gt;Certainly, group membership is not necessarily intrinsically ordered. In a general categorical or multinomial outcome, a group does not necessarily have any quantitative relationship vis a vis the other groups. For example, if we were interested in primary type of meat consumption, individuals might be grouped into those favoring (1) chicken, (2) beef, (3) pork, or (4) no meat. We might be interested in estimating the different distributions across the four groups for males and females. However, since there is no natural ranking or ordering of these meat groups (though maybe I am just not creative enough), we are limited to comparing the odds of being in one group relative to another for two exposure groups A and B, such as&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\small{\frac{P(Beef|Group = A)}{P(Chicken|Group = A)} \ vs. \frac{P(Beef|Group = B)}{P(Chicken|Group = B)}}\]&lt;/span&gt;.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;ordinal-outcomes&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Ordinal outcomes&lt;/h3&gt;
+&lt;p&gt;Order becomes relevant when the categories take on meanings related strength of opinion or agreement (as in a Likert-type response) or frequency. In the motivating example I described in the initial post, the response of interest was the frequency meat consumption in a month, so the response categories could be (1) none, (2) 1-3 times per month, (3) once per week, (4) 2-6 times per week, (5) 1 or more times per day. Individuals in group 2 consume meat more frequently than group 1, individuals in group 3 consume meat more frequently than those both groups 1 &amp;amp; 2, and so on. There is a natural quantitative relationship between the groups.&lt;/p&gt;
+&lt;p&gt;Once we have thrown ordering into the mix, we can expand our possible interpretations of the data. In particular it is quite common to summarize the data by looking at &lt;em&gt;cumulative&lt;/em&gt; probabilities, odds, or log-odds. Comparisons of different exposures or individual characteristics typically look at how these cumulative measures vary across the different exposures or characteristics. So, if we were interested in cumulative odds, we would compare &lt;span class=&#34;math display&#34;&gt;\[\small{\frac{P(Response = 1|Group = A)}{P(Response &amp;gt; 1|Group = A)} \ \ vs. \ \frac{P(Response = 1|Group = B)}{P(Response &amp;gt; 1|Group = B)}},\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\small{\frac{P(Response \leq 2|Group = A)}{P(Response &amp;gt; 2|Group = A)} \ \ vs. \ \frac{P(Response \leq 2|Group = B)}{P(Response &amp;gt; 2|Group = B)}},\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;and continue until the last (in this case, fourth) comparison&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\small{\frac{P(Response \leq 4|Group = A)}{P(Response = 5|Group = A)} \ \  vs. \ \frac{P(Response \leq 4|Group = B)}{P(Response = 5|Group = B)}}.\]&lt;/span&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;multiple-responses-multiple-thresholds&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Multiple responses, multiple thresholds&lt;/h3&gt;
+&lt;p&gt;The latent process that was described for the binary outcome is extended to the multinomial outcome by the addition of more thresholds. These thresholds define the portions of the density that define the probability of each possible response. If there are &lt;span class=&#34;math inline&#34;&gt;\(k\)&lt;/span&gt; possible responses (in the meat example, we have 5), then there will be &lt;span class=&#34;math inline&#34;&gt;\(k-1\)&lt;/span&gt; thresholds. The area under the logistic density curve of each of the regions defined by those thresholds (there will be &lt;span class=&#34;math inline&#34;&gt;\(k\)&lt;/span&gt; distinct regions) represents the probability of each possible response tied to that region. In the example here, we define five regions of a logistic density by setting the four thresholds. We can say that this underlying continuous distribution represents the probability distribution of categorical responses for a specific population, which we are calling &lt;em&gt;Group A&lt;/em&gt;.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# preliminary libraries and plotting defaults
+
+library(ggplot2)
+library(data.table)
+
+my_theme &amp;lt;- function() {
+  theme(panel.background = element_rect(fill = &amp;quot;grey90&amp;quot;), 
+        panel.grid = element_blank(), 
+        axis.ticks = element_line(colour = &amp;quot;black&amp;quot;), 
+        panel.spacing = unit(0.25, &amp;quot;lines&amp;quot;), 
+        plot.title = element_text(size = 12, vjust = 0.5, hjust = 0), 
+        panel.border = element_rect(fill = NA, colour = &amp;quot;gray90&amp;quot;))
+}
+
+# create data points density curve 
+
+x &amp;lt;- seq(-6, 6, length = 1000)
+pdf &amp;lt;- dlogis(x, location = 0, scale = 1)
+dt &amp;lt;- data.table(x, pdf)
+
+# set thresholds for Group A
+
+thresholdA &amp;lt;- c(-2.1, -0.3, 1.4, 3.6)
+
+pdf &amp;lt;- dlogis(thresholdA)
+grpA &amp;lt;- data.table(threshold = thresholdA, pdf)
+aBreaks &amp;lt;- c(-6, grpA$threshold, 6)
+
+# plot density with cutpoints
+
+dt[, grpA := cut(x, breaks = aBreaks, labels = F, include.lowest = TRUE)]
+
+p1 &amp;lt;- ggplot(data = dt, aes(x = x, y = pdf)) +
+  geom_line() +
+  geom_area(aes(x = x, y = pdf, group = grpA, fill = factor(grpA))) +
+  geom_hline(yintercept = 0, color = &amp;quot;grey50&amp;quot;) +
+  annotate(&amp;quot;text&amp;quot;, x = -5, y = .28, label = &amp;quot;Group A&amp;quot;, size = 5) +
+  scale_fill_manual(values = c(&amp;quot;#d0d7d1&amp;quot;, &amp;quot;#bbc5bc&amp;quot;, &amp;quot;#a6b3a7&amp;quot;, &amp;quot;#91a192&amp;quot;, &amp;quot;#7c8f7d&amp;quot;),
+                    labels = c(&amp;quot;None&amp;quot;, &amp;quot;1-3/month&amp;quot;, &amp;quot;1/week&amp;quot;, &amp;quot;2-6/week&amp;quot;, &amp;quot;1+/day&amp;quot;),
+                    name = &amp;quot;Frequency&amp;quot;) +
+  scale_x_continuous(breaks = thresholdA) +
+  scale_y_continuous(limits = c(0, 0.3), name = &amp;quot;Density&amp;quot;) +
+  my_theme() +
+  theme(legend.position = c(.85, .7),
+        legend.background = element_rect(fill = &amp;quot;grey90&amp;quot;),
+        legend.key = element_rect(color = &amp;quot;grey90&amp;quot;))
+
+p1&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-04-a-hidden-process-part-2-of-2_files/figure-html/threshold-1.png&#34; width=&#34;480&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;The area for each of the five regions can easily be calculated, where each area represents the probability of each response:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;pA= plogis(c(thresholdA, Inf)) - plogis(c(-Inf, thresholdA))
+probs &amp;lt;- data.frame(pA)
+rownames(probs) &amp;lt;- c(&amp;quot;P(Resp = 1)&amp;quot;, &amp;quot;P(Resp = 2)&amp;quot;, 
+                     &amp;quot;P(Resp = 3)&amp;quot;, &amp;quot;P(Resp = 4)&amp;quot;, &amp;quot;P(Resp = 5)&amp;quot;)
+probs&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##                pA
+## P(Resp = 1) 0.109
+## P(Resp = 2) 0.316
+## P(Resp = 3) 0.377
+## P(Resp = 4) 0.171
+## P(Resp = 5) 0.027&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;As I’ve already mentioned, when we characterize a multinomial response, we typically do so in terms of cumulative probabilities. I’ve calculated several quantities below, and we can see that the logs of the cumulative odds for this particular group are indeed the threshold values that we used to define the sub-regions.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# cumulative probabilities defined by the threshold
+
+probA &amp;lt;- data.frame(
+           cprob = plogis(thresholdA), 
+           codds = plogis(thresholdA)/(1-plogis(thresholdA)),
+           lcodds = log(plogis(thresholdA)/(1-plogis(thresholdA)))
+)
+rownames(probA) &amp;lt;- c(&amp;quot;P(Grp &amp;lt; 2)&amp;quot;, &amp;quot;P(Grp &amp;lt; 3)&amp;quot;, &amp;quot;P(Grp &amp;lt; 4)&amp;quot;, &amp;quot;P(Grp &amp;lt; 5)&amp;quot;)
+probA&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##            cprob codds lcodds
+## P(Grp &amp;lt; 2)  0.11  0.12   -2.1
+## P(Grp &amp;lt; 3)  0.43  0.74   -0.3
+## P(Grp &amp;lt; 4)  0.80  4.06    1.4
+## P(Grp &amp;lt; 5)  0.97 36.60    3.6&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The last column of the table below matches the thresholds defined in vector &lt;code&gt;thresholdA&lt;/code&gt;.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;thresholdA&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] -2.1 -0.3  1.4  3.6&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;comparing-response-distributions-of-different-populations&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Comparing response distributions of different populations&lt;/h3&gt;
+&lt;p&gt;In the cumulative logit model, the underlying assumption is that the odds ratio of one population relative to another is constant across all the possible responses. This means that all of the cumulative odds ratios are equal:&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[\small{\frac{codds(P(Resp = 1 | A))}{codds(P(Resp = 1 | B))} = \frac{codds(P(Resp \leq 2 | A))}{codds(P(Resp \leq 2 | B))} = \ ... \ = \frac{codds(P(Resp \leq 4 | A))}{codds(P(Resp \leq 4 | B))}}\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;In terms of the underlying process, this means that each of the thresholds shifts the same amount, as shown below, where we add 1.1 units to each threshold that was set Group A:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Group B threshold is an additive shift to the right
+
+thresholdB &amp;lt;- thresholdA + 1.1
+
+pdf &amp;lt;- dlogis(thresholdB)
+grpB &amp;lt;- data.table(threshold = thresholdB, pdf)
+bBreaks &amp;lt;- c(-6, grpB$threshold, 6)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Based on this shift, we can see that the probability distribution for Group B is quite different:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;pB = plogis(c(thresholdB, Inf)) - plogis(c(-Inf, thresholdB))
+probs &amp;lt;- data.frame(pA, pB)
+rownames(probs) &amp;lt;- c(&amp;quot;P(Resp = 1)&amp;quot;, &amp;quot;P(Resp = 2)&amp;quot;, 
+                     &amp;quot;P(Resp = 3)&amp;quot;, &amp;quot;P(Resp = 4)&amp;quot;, &amp;quot;P(Resp = 5)&amp;quot;)
+probs&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##                pA    pB
+## P(Resp = 1) 0.109 0.269
+## P(Resp = 2) 0.316 0.421
+## P(Resp = 3) 0.377 0.234
+## P(Resp = 4) 0.171 0.067
+## P(Resp = 5) 0.027 0.009&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Plotting Group B along with Group A, we can see visually how that shift affects the sizes of the five regions (I’ve left the thresholds of Group A in the Group B plot so you can see clearly the shift).&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# Plot density for group B
+
+dt[, grpB := cut(x, breaks = bBreaks, labels = F, include.lowest = TRUE)]
+
+p2 &amp;lt;- ggplot(data = dt, aes(x = x, y = pdf)) +
+  geom_line() +
+  geom_area(aes(x = x, y = pdf, group = grpB, fill = factor(grpB))) +
+  geom_hline(yintercept = 0, color = &amp;quot;grey5&amp;quot;) +
+  geom_segment(data=grpA, 
+               aes(x=threshold, xend = threshold, y=0, yend=pdf), 
+               size = 0.3, lty = 2, color = &amp;quot;#857284&amp;quot;) +
+  annotate(&amp;quot;text&amp;quot;, x = -5, y = .28, label = &amp;quot;Group B&amp;quot;, size = 5) +
+  scale_fill_manual(values = c(&amp;quot;#d0d7d1&amp;quot;, &amp;quot;#bbc5bc&amp;quot;, &amp;quot;#a6b3a7&amp;quot;, &amp;quot;#91a192&amp;quot;, &amp;quot;#7c8f7d&amp;quot;),
+                    labels = c(&amp;quot;None&amp;quot;, &amp;quot;1-3/month&amp;quot;, &amp;quot;1/week&amp;quot;, &amp;quot;2-6/week&amp;quot;, &amp;quot;1+/day&amp;quot;),
+                    name = &amp;quot;Frequency&amp;quot;) +
+  scale_x_continuous(breaks = thresholdB) +
+  scale_y_continuous(limits = c(0.0, 0.3), name = &amp;quot;Density&amp;quot;) +
+  my_theme() +
+  theme(legend.position = &amp;quot;none&amp;quot;)
+
+library(gridExtra)
+grid.arrange(p1, p2, nrow = 2 )&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-09-04-a-hidden-process-part-2-of-2_files/figure-html/plotB-1.png&#34; width=&#34;480&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;When we look at the cumulative odds ratio comparing the odds of Group B to Group A for each response category, we see a constant ratio. And, of course, a constant log odds ratio, which also reflects the size of the shift from Group A to Group B.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# cumulative probabilities defined by the threshold
+
+probB &amp;lt;- data.frame(
+           cprob = plogis(thresholdB),
+           codds = plogis(thresholdB)/(1-plogis(thresholdB)), 
+           lcodds = log(plogis(thresholdB)/(1-plogis(thresholdB)))
+)
+
+oddsratio &amp;lt;- data.frame(coddsA = probA$codds, 
+                        coddsB = probB$codds,
+                        cOR = probB$codds / probA$codds,
+                        logcOR = log(probB$codds / probA$codds)
+)
+
+rownames(oddsratio) &amp;lt;- c(&amp;quot;P(Grp &amp;lt; 2)&amp;quot;, &amp;quot;P(Grp &amp;lt; 3)&amp;quot;, &amp;quot;P(Grp &amp;lt; 4)&amp;quot;, &amp;quot;P(Grp &amp;lt; 5)&amp;quot;)
+
+oddsratio&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##            coddsA coddsB cOR logcOR
+## P(Grp &amp;lt; 2)   0.12   0.37   3    1.1
+## P(Grp &amp;lt; 3)   0.74   2.23   3    1.1
+## P(Grp &amp;lt; 4)   4.06  12.18   3    1.1
+## P(Grp &amp;lt; 5)  36.60 109.95   3    1.1&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-cumulative-proportional-odds-model&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The cumulative proportional odds model&lt;/h3&gt;
+&lt;p&gt;In the &lt;code&gt;R&lt;/code&gt; package &lt;code&gt;ordinal&lt;/code&gt;, the model is fit using function &lt;code&gt;clm&lt;/code&gt;. The model that is being estimated has the form&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[log \left( \frac{P(Resp \leq  i)}{P(Resp &amp;gt; i)} | Group \right) = \alpha_i - \beta*I(Group=B) \  \ , \ i \in \{1, 2, 3, 4\}\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;The model specifies that the cumulative log-odds for a particular category is a function of two parameters, &lt;span class=&#34;math inline&#34;&gt;\(\alpha_i\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(\beta\)&lt;/span&gt;. (Note that in this parameterization and the model fit, &lt;span class=&#34;math inline&#34;&gt;\(-\beta\)&lt;/span&gt; is used.) &lt;span class=&#34;math inline&#34;&gt;\(\alpha_i\)&lt;/span&gt; represents the cumulative log odds of being in category &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt; or lower for those in the reference exposure group, which in our example is Group A. &lt;em&gt;&lt;span class=&#34;math inline&#34;&gt;\(\alpha_i\)&lt;/span&gt; also represents the threshold of the latent continuous (logistic) data generating process.&lt;/em&gt; &lt;span class=&#34;math inline&#34;&gt;\(\beta\)&lt;/span&gt; is the cumulative log-odds ratio for the category &lt;span class=&#34;math inline&#34;&gt;\(i\)&lt;/span&gt; comparing Group B to reference Group A. &lt;em&gt;&lt;span class=&#34;math inline&#34;&gt;\(\beta\)&lt;/span&gt; also represents the shift of the threshold on the latent continuous process for Group B relative to Group A&lt;/em&gt;. The proportionality assumption implies that the shift of the threshold for each of the categories is identical. This is what I illustrated above.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;simulation-and-model-fit&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Simulation and model fit&lt;/h3&gt;
+&lt;p&gt;To show how this process might actually work, I am simulating data from the standardized logistic distribution and applying the thresholds defined above based on the group status. In practice, each individual could have her own set of thresholds, depending on her characteristics (gender, age, etc.). In this case, group membership is the only characteristic I am using, so all individuals in a particular group share the same set of thresholds. (We could even have random effects, where subgroups have random shifts that are subgroup specific. In the addendum, following the main part of the post, I provide code to generate data from a mixed effects model with group level random effects plus fixed effects for exposure, gender, and a continuous outcome.)&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;set.seed(123)
+n = 1000
+x.A &amp;lt;- rlogis(n)
+acuts &amp;lt;- c(-Inf, thresholdA, Inf)
+
+catA &amp;lt;- cut(x.A, breaks = acuts, label = F)
+dtA &amp;lt;- data.table(id = 1:n, grp = &amp;quot;A&amp;quot;, cat = catA)&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Not surprisingly (since we are using a generous sample size of 1000), the simulated proportions are quite close to the hypothetical proportions established by the thresholds:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;cumsum(prop.table(table(catA)))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    1    2    3    4    5 
+## 0.11 0.44 0.81 0.97 1.00&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;probA$cprob&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.11 0.43 0.80 0.97&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Now we generate a sample from Group B and combine them into a single data set:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;x.B &amp;lt;- rlogis(n)
+bcuts &amp;lt;- c(-Inf, thresholdA + 1.1, Inf)
+
+catB &amp;lt;- cut(x.B, breaks = bcuts, label = F)
+dtB &amp;lt;- data.table(id = (n+1):(2*n), grp = &amp;quot;B&amp;quot;, cat=catB)
+
+dt &amp;lt;- rbind(dtA, dtB)
+dt[, cat := factor(cat, labels = c(&amp;quot;None&amp;quot;, &amp;quot;1-3/month&amp;quot;, &amp;quot;1/week&amp;quot;, &amp;quot;2-6/week&amp;quot;, &amp;quot;1+/day&amp;quot;))]
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id grp       cat
+##    1:    1   A 1-3/month
+##    2:    2   A    1/week
+##    3:    3   A 1-3/month
+##    4:    4   A  2-6/week
+##    5:    5   A  2-6/week
+##   ---                   
+## 1996: 1996   B    1/week
+## 1997: 1997   B 1-3/month
+## 1998: 1998   B    1/week
+## 1999: 1999   B 1-3/month
+## 2000: 2000   B 1-3/month&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Finally, we estimate the parameters of the model using function &lt;code&gt;clm&lt;/code&gt; and we see that we recover the original parameters quite well.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(ordinal)
+clmFit &amp;lt;- clm(cat ~ grp, data = dt)
+summary(clmFit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## formula: cat ~ grp
+## data:    dt
+## 
+##  link  threshold nobs logLik   AIC     niter max.grad cond.H 
+##  logit flexible  2000 -2655.03 5320.05 6(0)  1.19e-11 2.3e+01
+## 
+## Coefficients:
+##      Estimate Std. Error z value Pr(&amp;gt;|z|)    
+## grpB  -1.0745     0.0848   -12.7   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Threshold coefficients:
+##                  Estimate Std. Error z value
+## None|1-3/month    -2.0912     0.0784  -26.68
+## 1-3/month|1/week  -0.2465     0.0612   -4.02
+## 1/week|2-6/week    1.4212     0.0728   19.51
+## 2-6/week|1+/day    3.5150     0.1643   21.39&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;In the model output, the &lt;code&gt;grpB&lt;/code&gt; coefficient of -1.07 is the estimate of &lt;span class=&#34;math inline&#34;&gt;\(-\beta\)&lt;/span&gt;, which was set to 1.1 in the simulation. The threshold coefficients are the estimates of the &lt;span class=&#34;math inline&#34;&gt;\(\alpha_i\)&lt;/span&gt;’s in the model, and we can see the estimates are not too bad by looking at the initial thresholds:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;coeffit &amp;lt;- coef(clmFit)[1:4]
+names(coeffit) &amp;lt;- c(1:4)
+
+rbind( thresholdA, coeffit)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##               1     2   3   4
+## thresholdA -2.1 -0.30 1.4 3.6
+## coeffit    -2.1 -0.25 1.4 3.5&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;This was a relatively simple simulation. However it highlights how it would be possible to generate more complex scenarios of multinomial response data to more fully explore other types of models. These more flexible models might be able to handle situations where the possibly restrictive assumptions of this model (particularly the proportional odds assumption) do not hold.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;addendum-1&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Addendum 1&lt;/h2&gt;
+&lt;p&gt;Here is code to generate cluster-randomized data with an ordinal outcome that is a function of treatment assignment, gender, and a continuous status measure at the individual level. There is also a group level random effect. Once the data are generated, I fit a mixed cumulative logit model.&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(simstudy)
+
+# define data
+
+defSchool &amp;lt;- defData(varname = &amp;quot;reS&amp;quot;, formula = 0, 
+                     variance = 0.10, id = &amp;quot;idS&amp;quot;)
+defSchool &amp;lt;- defData(defSchool, varname = &amp;quot;n&amp;quot;, 
+                     formula = 250, dist = &amp;quot;noZeroPoisson&amp;quot;)
+
+defInd &amp;lt;- defDataAdd(varname = &amp;quot;male&amp;quot;, formula = 0.45, dist = &amp;quot;binary&amp;quot;)
+defInd &amp;lt;- defDataAdd(defInd, varname = &amp;quot;status&amp;quot;, 
+                     formula = 0, variance = 1, dist = &amp;quot;normal&amp;quot;)
+defInd &amp;lt;- defDataAdd(defInd, 
+                varname = &amp;quot;z&amp;quot;, 
+                formula = &amp;quot;0.8 * grp + 0.3 * male - 0.2 * status + reS&amp;quot;, 
+                dist = &amp;quot;nonrandom&amp;quot;)
+
+# generate data
+
+dtS &amp;lt;- genData(100, defSchool)
+dtS &amp;lt;- trtAssign(dtS, grpName = &amp;quot;grp&amp;quot;)
+
+dt &amp;lt;- genCluster(dtS, &amp;quot;idS&amp;quot;, &amp;quot;n&amp;quot;, &amp;quot;id&amp;quot;)
+dt &amp;lt;- addColumns(defInd, dt)
+
+# set reference probabilities for 4-category outcome
+
+probs &amp;lt;- c(0.35, 0.30, 0.25, 0.10)
+cprop &amp;lt;- cumsum(probs)
+
+# map cumulative probs to thresholds for reference group
+
+gamma.c &amp;lt;- qlogis(cprop)
+matlp &amp;lt;- matrix(rep(gamma.c, nrow(dt)), 
+                ncol = length(cprop), 
+                byrow = TRUE
+)
+
+head(matlp)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##       [,1] [,2] [,3] [,4]
+## [1,] -0.62 0.62  2.2  Inf
+## [2,] -0.62 0.62  2.2  Inf
+## [3,] -0.62 0.62  2.2  Inf
+## [4,] -0.62 0.62  2.2  Inf
+## [5,] -0.62 0.62  2.2  Inf
+## [6,] -0.62 0.62  2.2  Inf&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# set individual thresholds based on covariates,
+# which is an additive shift from the reference group
+# based on z
+
+matlpInd &amp;lt;- matlp - dt[, z]
+head(matlpInd)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##       [,1]  [,2] [,3] [,4]
+## [1,] -1.52 -0.28  1.3  Inf
+## [2,] -1.58 -0.34  1.2  Inf
+## [3,] -0.95  0.29  1.9  Inf
+## [4,] -1.53 -0.29  1.3  Inf
+## [5,] -1.49 -0.25  1.3  Inf
+## [6,] -1.13  0.11  1.7  Inf&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# convert log odds to cumulative probabability
+
+matcump &amp;lt;- 1 / (1 + exp(-matlpInd))
+matcump &amp;lt;- cbind(0, matcump)
+head(matcump)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4] [,5]
+## [1,]    0 0.18 0.43 0.78    1
+## [2,]    0 0.17 0.42 0.78    1
+## [3,]    0 0.28 0.57 0.87    1
+## [4,]    0 0.18 0.43 0.78    1
+## [5,]    0 0.18 0.44 0.79    1
+## [6,]    0 0.24 0.53 0.84    1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# convert cumulative probs to category probs:
+# originally, I used a loop to do this, but
+# thought it would be better to vectorize.
+# see 2nd addendum for time comparison - not
+# much difference
+
+p &amp;lt;- t(t(matcump)[-1,] - t(matcump)[-5,])
+
+# show some indvidual level probabilities
+
+head(p)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4]
+## [1,] 0.18 0.25 0.36 0.22
+## [2,] 0.17 0.24 0.36 0.22
+## [3,] 0.28 0.29 0.29 0.13
+## [4,] 0.18 0.25 0.36 0.22
+## [5,] 0.18 0.25 0.35 0.21
+## [6,] 0.24 0.28 0.32 0.16&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;apply(head(p), 1, sum)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 1 1 1 1 1 1&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;# generate indvidual level category outcomes based on p
+
+cat &amp;lt;- simstudy:::matMultinom(p)
+catF &amp;lt;- ordered(cat)
+dt[, cat := catF]&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;When we fit the mixed effects model, it is not surprising that we recover the parameters used to generate the data, which were based on the model. The fixed effects were specified as “0.8 * grp + 0.3 * male - 0.2 * status”, the variance of the random group effect was 0.10, and the latent thresholds based on the category probabilities were {-0.62, 0.62, 2.20}:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;fmm &amp;lt;- clmm(cat ~ grp + male + status + (1|idS), data=dt)
+summary(fmm)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## Cumulative Link Mixed Model fitted with the Laplace approximation
+## 
+## formula: cat ~ grp + male + status + (1 | idS)
+## data:    dt
+## 
+##  link  threshold nobs  logLik    AIC      niter     max.grad cond.H 
+##  logit flexible  24990 -33096.42 66206.85 705(2118) 2.37e-02 1.3e+02
+## 
+## Random effects:
+##  Groups Name        Variance Std.Dev.
+##  idS    (Intercept) 0.109    0.331   
+## Number of groups:  idS 100 
+## 
+## Coefficients:
+##        Estimate Std. Error z value Pr(&amp;gt;|z|)    
+## grp      0.8117     0.0702    11.6   &amp;lt;2e-16 ***
+## male     0.3163     0.0232    13.7   &amp;lt;2e-16 ***
+## status  -0.1959     0.0116   -16.9   &amp;lt;2e-16 ***
+## ---
+## Signif. codes:  0 &amp;#39;***&amp;#39; 0.001 &amp;#39;**&amp;#39; 0.01 &amp;#39;*&amp;#39; 0.05 &amp;#39;.&amp;#39; 0.1 &amp;#39; &amp;#39; 1
+## 
+## Threshold coefficients:
+##     Estimate Std. Error z value
+## 1|2  -0.6478     0.0511   -12.7
+## 2|3   0.6135     0.0511    12.0
+## 3|4   2.1789     0.0529    41.2&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;addendum-2---vector-vs-loop&#34; class=&#34;section level2&#34;&gt;
+&lt;h2&gt;Addendum 2 - vector vs loop&lt;/h2&gt;
+&lt;p&gt;In case any one is obsessed with vectorization in &lt;code&gt;R&lt;/code&gt;, here is a comparison of two different functions that convert cumulative probabilities into probabilities. One method uses a loop, the other uses matrix operations. In this case, it actually appears that my non-loop approach is slower - maybe there is a faster way? Maybe not, since the loop is actually quite short - determined by the number of possible responses in the categorical measure…&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(microbenchmark)
+
+loopdif &amp;lt;- function(mat) {
+  
+  ncols &amp;lt;- ncol(mat)
+  p &amp;lt;- matrix(0, nrow = nrow(mat), ncol = ( ncols - 1 ))
+  for (i in 1 : ( ncol(mat) - 1 )) {
+    p[,i] &amp;lt;- mat[, i+1] - mat[, i]
+  }
+  return(p)
+  
+}
+
+vecdif &amp;lt;- function(mat) {
+  
+  ncols &amp;lt;- ncol(mat)
+  p &amp;lt;- t(t(mat)[-1,] - t(mat)[-ncols,])
+  return(p)
+  
+}
+
+head(loopdif(matcump))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4]
+## [1,] 0.18 0.25 0.36 0.22
+## [2,] 0.17 0.24 0.36 0.22
+## [3,] 0.28 0.29 0.29 0.13
+## [4,] 0.18 0.25 0.36 0.22
+## [5,] 0.18 0.25 0.35 0.21
+## [6,] 0.24 0.28 0.32 0.16&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;head(vecdif(matcump))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##      [,1] [,2] [,3] [,4]
+## [1,] 0.18 0.25 0.36 0.22
+## [2,] 0.17 0.24 0.36 0.22
+## [3,] 0.28 0.29 0.29 0.13
+## [4,] 0.18 0.25 0.36 0.22
+## [5,] 0.18 0.25 0.35 0.21
+## [6,] 0.24 0.28 0.32 0.16&lt;/code&gt;&lt;/pre&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;microbenchmark(loopdif(matcump), vecdif(matcump), 
+               times = 1000L, unit = &amp;quot;ms&amp;quot;)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## Unit: milliseconds
+##              expr  min  lq mean median  uq max neval
+##  loopdif(matcump) 0.96 1.4  1.9    1.7 1.9 112  1000
+##   vecdif(matcump) 0.92 1.7  3.1    2.3 2.7 115  1000&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+</description>
+    </item>
+    
+    <item>
+      <title>A hidden process behind binary or other categorical outcomes?</title>
+      <link>/post/ordinal-regression/</link>
+      <pubDate>Mon, 28 Aug 2017 00:00:00 +0000</pubDate>
+      <author>keith.goldfeld@nyumc.org (Keith Goldfeld)</author>
+      <guid>/post/ordinal-regression/</guid>
+      <description>&lt;p&gt;I was thinking a lot about proportional-odds cumulative logit models last fall while designing a study to evaluate an intervention’s effect on meat consumption. After a fairly extensive pilot study, we had determined that participants can have quite a difficult time recalling precise quantities of meat consumption, so we were forced to move to a categorical response. (This was somewhat unfortunate, because we would not have continuous or even count outcomes, and as a result, might not be able to pick up small changes in behavior.) We opted for a question that was based on 30-day meat consumption: none, 1-3 times per month, 1 time per week, etc. - six groups in total. The question was how best to evaluate effectiveness of the intervention?&lt;/p&gt;
+&lt;p&gt;Since the outcome was categorical &lt;em&gt;and&lt;/em&gt; ordinal - that is category 1 implied less meat consumption that category 2, category 2 implied less consumption that category 3, and so on - a model that estimates the cumulative probability of ordinal outcomes seemed like a possible way to proceed. Cumulative logit models estimate a number of parameters that represent the cumulative log-odds of an outcome; the parameters are the log-odds of categories 2 through 6 versus category 1, categories 3 through 6 versus 1 &amp;amp; 2, etc. Maybe not the most intuitive way to interpret the data, but seems to plausibly fit the data generating process.&lt;/p&gt;
+&lt;p&gt;I was concerned about the proportionality assumption of the cumulative logit model, particularly when we started to consider adjusting for baseline characteristics (more on that in the next post). I looked more closely at the data generating assumptions of the cumulative logit model, which are quite frequently framed in the context of a continuous latent measure that follows a logistic distribution. I thought I’d describe that data generating process here to give an alternative view of discrete data models.&lt;/p&gt;
+&lt;p&gt;I know I have been describing a context that includes an outcome with multiple categories, but in this post I will focus on regular logistic regression with a binary outcome. This will hopefully allow me to establish the idea of a latent threshold. I think it will be useful to explain this simpler case first before moving on to the more involved case of an ordinal response variable, which I plan to tackle in the near future.&lt;/p&gt;
+&lt;div id=&#34;a-latent-continuous-process-underlies-the-observed-binary-process&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;A latent continuous process underlies the observed binary process&lt;/h3&gt;
+&lt;p&gt;For an event with a binary outcome (true or false, A or B, 0 or 1), the observed outcome may, at least in some cases, be conceived as the manifestation of an unseen, latent continuous outcome. In this conception, the observed (binary) outcome merely reflects whether or not the unseen continuous outcome has exceeded a specified threshold. Think of this threshold as a tipping point, above which the observable characteristic takes on one value (say false), below which it takes on a second value (say true).&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-logistic-distribution&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The logistic distribution&lt;/h3&gt;
+&lt;p&gt;Logistic regression models are used to estimate relationships of individual characteristics with categorical outcomes. The name of this regression model arises from the logistic distribution, which is a symmetrical continuous distribution. In a latent (or hidden) variable framework, the underlying, unobserved continuous measure is drawn from this logistic distribution. More specifically, the standard logistic distribution is typically assumed, with a location parameter of 0, and a scale parameter of 1. (The mean of this distribution is 0 and variance is approximately 3.29.)&lt;/p&gt;
+&lt;p&gt;Here is a plot of a logistic pdf, shown in relation to a standard normal pdf (with mean 0 and variance 1):&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(ggplot2)
+library(data.table)
+
+my_theme &amp;lt;- function() {
+  theme(panel.background = element_rect(fill = &amp;quot;grey90&amp;quot;), 
+        panel.grid = element_blank(), 
+        axis.ticks = element_line(colour = &amp;quot;black&amp;quot;), 
+        panel.spacing = unit(0.25, &amp;quot;lines&amp;quot;), 
+        plot.title = element_text(size = 12, vjust = 0.5, hjust = 0), 
+        panel.border = element_rect(fill = NA, colour = &amp;quot;gray90&amp;quot;))
+}
+
+x &amp;lt;- seq(-6, 6, length = 1000)
+yNorm &amp;lt;- dnorm(x, 0, 1) 
+yLogis &amp;lt;- dlogis(x, location = 0, scale = 1)
+
+dt &amp;lt;- data.table(x, yNorm, yLogis)
+dtm &amp;lt;- melt(dt, id.vars = &amp;quot;x&amp;quot;, value.name = &amp;quot;Density&amp;quot;)
+
+ggplot(data = dtm) +
+  geom_line(aes(x = x, y = Density, color = variable)) +
+  geom_hline(yintercept = 0, color = &amp;quot;grey50&amp;quot;) +
+  my_theme() +
+  scale_color_manual(values = c(&amp;quot;red&amp;quot;, &amp;quot;black&amp;quot;), 
+                     labels=c(&amp;quot;Normal&amp;quot;, &amp;quot;Logistic&amp;quot;)) +
+  theme(legend.position = c(0.8, 0.6),
+        legend.title = element_blank())&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-08-23-ordinal-regression_files/figure-html/unnamed-chunk-1-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-threshold-defines-the-probability&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The threshold defines the probability&lt;/h3&gt;
+&lt;p&gt;Below, I have plotted the standardized logistic pdf with a threshold that defines a tipping point for a particular Group A. In this case the threshold is 1.5, so for everyone with a unseen value of &lt;span class=&#34;math inline&#34;&gt;\(X &amp;lt; 1.5\)&lt;/span&gt;, the observed binary outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; will be 1. For those where &lt;span class=&#34;math inline&#34;&gt;\(X \geq 1.5\)&lt;/span&gt;, the observed binary outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; will be 0:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;xGrpA &amp;lt;- 1.5
+
+ggplot(data = dtm[variable == &amp;quot;yLogis&amp;quot;], aes(x = x, y = Density)) +
+  geom_line() +
+  geom_segment(x = xGrpA, y = 0, xend = xGrpA, yend = dlogis(xGrpA), lty = 2) +
+  geom_area(mapping = aes(ifelse(x &amp;lt; xGrpA, x, xGrpA)), fill = &amp;quot;white&amp;quot;) +
+  geom_hline(yintercept = 0, color = &amp;quot;grey50&amp;quot;) +
+  ylim(0, 0.3) +
+  my_theme() +
+  scale_x_continuous(breaks = c(-6, -3, 0, xGrpA, 3, 6))&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-08-23-ordinal-regression_files/figure-html/unnamed-chunk-2-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;Since we have plot a probability density (pdf), the area under the entire curve is equal to 1. We are interested in the binary outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt; defined by the threshold, so we can say that the area below the curve to the left of threshold (filled in white) represents &lt;span class=&#34;math inline&#34;&gt;\(P(Y = 1|Group=A)\)&lt;/span&gt;. The remaining area represents &lt;span class=&#34;math inline&#34;&gt;\(P(Y = 0|Group=A)\)&lt;/span&gt;. The area to the left of the threshold can be calculated in &lt;code&gt;R&lt;/code&gt; using the &lt;code&gt;plogis&lt;/code&gt; function:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;(p_A &amp;lt;- plogis(xGrpA))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.8175745&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Here is the plot for a second group that has a threshold of 2.2:&lt;/p&gt;
+&lt;p&gt;&lt;img src=&#34;/post/2017-08-23-ordinal-regression_files/figure-html/unnamed-chunk-4-1.png&#34; width=&#34;672&#34; /&gt;&lt;/p&gt;
+&lt;p&gt;The area under the curve to the left of the threshold is &lt;span class=&#34;math inline&#34;&gt;\(P(X &amp;lt; 2.2)\)&lt;/span&gt;, which is also &lt;span class=&#34;math inline&#34;&gt;\(P(Y = 1 | Group=B)\)&lt;/span&gt;:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;(p_B &amp;lt;- plogis(xGrpB))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 0.9002495&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;
+&lt;div id=&#34;log-odds-and-probability&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Log-odds and probability&lt;/h3&gt;
+&lt;p&gt;In logistic regression, we are actually estimating the log-odds of an outcome, which can be written as&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[log \left[ \frac{P(Y=1)}{P(Y=0)} \right]\]&lt;/span&gt;.&lt;/p&gt;
+&lt;p&gt;In the case of Group A, log-odds of Y being equal to 1 is&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;(logodds_A &amp;lt;- log(p_A / (1 - p_A) ))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 1.5&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;And for Group B,&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;(logodds_B &amp;lt;- log(p_B / (1 - p_B) ))&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;## [1] 2.2&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;As you may have noticed, we’ve recovered the thresholds that we used to define the probabilities for the two groups. The threshold is actually the log-odds for a particular group.&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;logistic-regression&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;Logistic regression&lt;/h3&gt;
+&lt;p&gt;The logistic regression model that estimates the log-odds for each group can be written as&lt;/p&gt;
+&lt;p&gt;&lt;span class=&#34;math display&#34;&gt;\[log \left[ \frac{P(Y=1)}{P(Y=0)} \right] = B_0 + B_1 * I(Grp = B) \quad ,\]&lt;/span&gt;&lt;/p&gt;
+&lt;p&gt;where &lt;span class=&#34;math inline&#34;&gt;\(B_0\)&lt;/span&gt; represents the threshold for Group A and &lt;span class=&#34;math inline&#34;&gt;\(B_1\)&lt;/span&gt; represents the shift in the threshold for Group B. In our example, the threshold for Group B is 0.7 units (2.2 - 1.5) to the right of the threshold for Group A. If we generate data for both groups, our estimates for &lt;span class=&#34;math inline&#34;&gt;\(B_0\)&lt;/span&gt; and &lt;span class=&#34;math inline&#34;&gt;\(B_1\)&lt;/span&gt; should be close to 1.5 and 0.7, respectively&lt;/p&gt;
+&lt;/div&gt;
+&lt;div id=&#34;the-process-in-action&#34; class=&#34;section level3&#34;&gt;
+&lt;h3&gt;The process in action&lt;/h3&gt;
+&lt;p&gt;To put this all together in a simulated data generating process, we can see the direct link with the logistic distribution, the binary outcomes, and an interpretation of estimates from a logistic model. The only stochastic part of this simulation is the generation of continuous outcomes from a logistic distribution. Everything else follows from the pre-defined group assignments and the group-specific thresholds:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;n = 5000
+set.seed(999)
+
+# Stochastic step
+
+xlatent &amp;lt;- rlogis(n, location = 0, scale = 1)
+
+# Deterministic part
+
+grp &amp;lt;- rep(c(&amp;quot;A&amp;quot;,&amp;quot;B&amp;quot;), each = n / 2)
+
+dt &amp;lt;- data.table(id = 1:n, grp, xlatent, y = 0)
+dt[grp == &amp;quot;A&amp;quot; &amp;amp; xlatent &amp;lt;= xGrpA, y := 1]
+dt[grp == &amp;quot;B&amp;quot; &amp;amp; xlatent &amp;lt;= xGrpB, y := 1]
+
+# Look at the data
+
+dt&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##         id grp    xlatent y
+##    1:    1   A -0.4512173 1
+##    2:    2   A  0.3353507 1
+##    3:    3   A -2.2579527 1
+##    4:    4   A  1.7553890 0
+##    5:    5   A  1.3054260 1
+##   ---                      
+## 4996: 4996   B -0.2574943 1
+## 4997: 4997   B -0.9928283 1
+## 4998: 4998   B -0.7297179 1
+## 4999: 4999   B -1.6430344 1
+## 5000: 5000   B  3.1379593 0&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The probability of a “successful” outcome (i.e &lt;span class=&#34;math inline&#34;&gt;\(P(Y = 1\)&lt;/span&gt;)) for each group based on this data generating process is pretty much equal to the areas under the respective densities to the left of threshold used to define success:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;dt[, round(mean(y), 2), keyby = grp]&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##    grp   V1
+## 1:   A 0.82
+## 2:   B 0.90&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;Now let’s estimate a logistic regression model:&lt;/p&gt;
+&lt;pre class=&#34;r&#34;&gt;&lt;code&gt;library(broom)
+glmfit &amp;lt;- glm(y ~ grp, data = dt, family = &amp;quot;binomial&amp;quot;)
+tidy(glmfit, quick = TRUE)&lt;/code&gt;&lt;/pre&gt;
+&lt;pre&gt;&lt;code&gt;##          term  estimate
+## 1 (Intercept) 1.5217770
+## 2        grpB 0.6888526&lt;/code&gt;&lt;/pre&gt;
+&lt;p&gt;The estimates from the model recover the logistic distribution thresholds for each group. The Group A threshold is estimated to be 1.52 (the intercept) and the Group B threshold is estimated to be 2.21 (intercept + grpB parameter). These estimates can be interpreted as the log-odds of success for each group, but also &lt;em&gt;as the threshold for the underlying continuous data generating process that determines the binary outcome &lt;span class=&#34;math inline&#34;&gt;\(Y\)&lt;/span&gt;&lt;/em&gt;. And we can interpret the parameter for &lt;code&gt;grpB&lt;/code&gt; in the traditional way as the log-odds ratio comparing the log-odds of success for Group B with the log-odds of success for Group A, or &lt;em&gt;as the shift in the logistic threshold for Group A to the logistic threshold for Group B&lt;/em&gt;.&lt;/p&gt;
+&lt;p&gt;In the next week or so, I will extend this to a discussion of an ordinal categorical outcome. I think the idea of shifting the thresholds underscores the proportionality assumption I alluded to earlier …&lt;/p&gt;
+&lt;/div&gt;
+</description>
+    </item>
     
     <item>
       <title>Be careful not to control for a post-exposure covariate</title>
