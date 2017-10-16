@@ -1,0 +1,208 @@
+---
+title: Can we use B-splines to generate non-linear data?
+author: ''
+date: '2017-10-16'
+slug: generating-non-linear-data-using-b-splines
+categories: []
+tags: [R]
+---
+
+
+
+<p>I’m exploring the idea of adding a function or set of functions to the <code>simstudy</code> package that would make it possible to easily generate non-linear data. One way to do this would be using B-splines. Typically, one uses splines to fit a curve to data, but I thought it might be useful to switch things around a bit to use the underlying splines to generate data. This would facilitate exploring models where we know the assumption of linearity is violated. It would also make it easy to explore spline methods, because as with any other simulated data set, we would know the underlying data generating process.</p>
+<div id="b-splines" class="section level3">
+<h3>B-splines</h3>
+<p>A B-spline is a linear combination of a set of basis functions that are determined by the number and location of specified knots or cut-points, as well as the (polynomial) degree of curvature. A degree of one implies a set of straight lines, degree of two implies a quadratic curve, three a cubic curve, etc. This <a href="https://cran.r-project.org/web/packages/crs/vignettes/spline_primer.pdf">nice quick intro</a> provides much more insight into issues B-splines than I can provide here. Or if you want even more detail, check out this <a href="http://www.springer.com/us/book/9780387953663">book</a>. It is a very rich topic.</p>
+<p>Within a cut-point region, the sum of the basis functions always equals 1. This is easy to see by looking at a plot of basis functions, several of which are provided below. The definition and shape of the basis functions do not in any way depend on the data, only on the degree and cut-points. Of course, these functions can be added together in infinitely different ways using weights. If one is trying to fit a B-spline line to data, those weights can be estimated using regression models.</p>
+</div>
+<div id="splines-in-r" class="section level2">
+<h2>Splines in R</h2>
+<p>The <code>bs</code> function in the <code>splines</code> package, returns values from these basis functions based on the specification of knots and degree of curvature. I wrote a wrapper function that uses the <code>bs</code> function to generate the basis function, and then I do a linear transformation of these functions by multiplying the vector parameter <em>theta</em>, which is just a vector of coefficients. The linear combination at each value of <span class="math inline">\(x\)</span> (the support of the basis functions) generates a value (which I call <span class="math inline">\(y.spline\)</span>) on the desired curve. The wrapper returns a list of objects, including a data.table that includes <span class="math inline">\(x\)</span> and <span class="math inline">\(y.spline\)</span>, as well as the basis functions, and knots.</p>
+<pre class="r"><code>library(splines)
+library(data.table)
+library(ggplot2)
+library(broom)
+
+genSpline &lt;- function(x, knots, degree, theta) {
+
+  basis &lt;- bs(x = x, knots = knots, degree = degree,
+              Boundary.knots = c(0,1), intercept = TRUE)
+
+  y.spline &lt;- basis %*% theta
+
+  dt &lt;- data.table(x, y.spline = as.vector(y.spline))
+
+  return(list(dt = dt, basis = basis, knots = knots))
+
+}</code></pre>
+<p>I’ve also written two functions that make it easy to print the basis function and the spline curve. This will enable us to look at a variety of splines.</p>
+<pre class="r"><code>plot.basis &lt;- function(basisdata) {
+  
+  dtbasis &lt;- as.data.table(basisdata$basis)
+  dtbasis[, x := seq(0, 1, length.out = .N)]
+  dtmelt &lt;- melt(data = dtbasis, id = &quot;x&quot;, 
+                 variable.name = &quot;basis&quot;, variable.factor = TRUE)
+
+  ggplot(data=dtmelt, aes(x=x, y=value, group = basis)) +
+      geom_line(aes(color=basis), size = 1) +
+      theme(legend.position = &quot;none&quot;) +
+      scale_x_continuous(limits = c(0, 1), 
+                         breaks = c(0, basisdata$knots, 1)) +
+      theme(panel.grid.minor = element_blank())
+}</code></pre>
+<pre class="r"><code>plot.spline &lt;- function(basisdata, points = FALSE) {
+
+    p &lt;- ggplot(data = basisdata$dt)
+    
+    if (points) p &lt;- p + geom_point(aes(x=x, y = y), color = &quot;grey75&quot;)  
+      
+    p &lt;- p + 
+      geom_line(aes(x = x, y = y.spline), color = &quot;red&quot;, size = 1) +
+      scale_y_continuous(limits = c(0, 1)) +
+      scale_x_continuous(limits = c(0, 1), breaks = knots) +
+      theme(panel.grid.minor = element_blank())
+       
+   return(p)
+  
+}</code></pre>
+<div id="linear-spline-with-quartile-cut-points" class="section level3">
+<h3>Linear spline with quartile cut-points</h3>
+<p>Here is a simple linear spline that has four regions defined by three cut-points, and the slope of the line in each region varies. The first value of <em>theta</em> is essentially the intercept. When you look at the basis plot, you will see that any single region has two “active” basis functions (represented by two colors), the other functions are all 0 in that region. The slope of the line in each is determined by the relevant values of theta. It is probably just easier to take a look:</p>
+<pre class="r"><code>x &lt;- seq(0, 1, length.out = 1000)
+
+knots &lt;- c(0.25, 0.5, 0.75)
+theta = c(0.6, 0.1, 0.3, 0.2, 0.9)
+
+sdata &lt;- genSpline(x, knots, 1, theta)</code></pre>
+<p>For this example, I am printing out the basis function for the first few values of <span class="math inline">\(x\)</span>.</p>
+<pre class="r"><code>round( head(cbind(x = sdata$dt$x, sdata$basis)), 4 )</code></pre>
+<pre><code>##          x     1     2 3 4 5
+## [1,] 0.000 1.000 0.000 0 0 0
+## [2,] 0.001 0.996 0.004 0 0 0
+## [3,] 0.002 0.992 0.008 0 0 0
+## [4,] 0.003 0.988 0.012 0 0 0
+## [5,] 0.004 0.984 0.016 0 0 0
+## [6,] 0.005 0.980 0.020 0 0 0</code></pre>
+<pre class="r"><code>plot.basis(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<pre class="r"><code>plot.spline(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-5-2.png" width="672" /></p>
+</div>
+<div id="same-knots-cut-points-but-different-theta-coefficients" class="section level3">
+<h3>Same knots (cut-points) but different theta (coefficients)</h3>
+<p>If use the same knot and degree specification, but change the vector <span class="math inline">\(theta\)</span>, we change the slope of the lines in each of the four regions:</p>
+<pre class="r"><code>theta = c(0.2, 0.3, 0.8, 0.2, 0.1)
+sdata &lt;- genSpline(x, knots, 1, theta)
+
+plot.basis(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<pre class="r"><code>plot.spline(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-6-2.png" width="672" /></p>
+</div>
+<div id="quadratic-spline-with-quartile-cut-points" class="section level3">
+<h3>Quadratic spline with quartile cut-points</h3>
+<p>The basis functions get a little more elaborate with a quadratic spline. With this added degree, we get an additional basis function in each region, so you should see 3 colors instead of 2. The resulting spline is parabolic in each region, but with a different shape, each of which is determined by <em>theta</em>.</p>
+<pre class="r"><code>knots &lt;- c(0.25, 0.5, 0.75)
+theta = c(0.6, 0.1, 0.5, 0.2, 0.8, 0.3)
+
+sdata &lt;- genSpline(x, knots, 2, theta)
+
+plot.basis(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<pre class="r"><code>plot.spline(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-7-2.png" width="672" /></p>
+</div>
+<div id="quadratic-spline-with-two-cut-points-three-regions" class="section level3">
+<h3>Quadratic spline with two cut-points (three regions)</h3>
+<pre class="r"><code>knots &lt;- c(0.333, 0.666)
+theta = c(0.2, 0.4, 0.1, 0.9, 0.6)
+
+sdata &lt;- genSpline(x, knots, 2, theta)
+plot.basis(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<pre class="r"><code>plot.spline(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-8-2.png" width="672" /></p>
+</div>
+<div id="cubic-spline-with-two-cut-points-three-regions" class="section level3">
+<h3>Cubic spline with two cut-points (three regions)</h3>
+<p>And in this last example, we generate basis functions for a cubic spline the differs in three regions. The added curvature is apparent:</p>
+<pre class="r"><code>knots &lt;- c(0.333, 0.666)
+theta = c(0.2, 0.6, 0.1, 0.9, 0.2, 0.8)
+
+sdata &lt;- genSpline(x, knots, 3, theta)
+plot.basis(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<pre class="r"><code>plot.spline(sdata)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-9-2.png" width="672" /></p>
+</div>
+<div id="generating-new-data-from-the-underlying-spline" class="section level3">
+<h3>Generating new data from the underlying spline</h3>
+<p>It is a simple step to generate data from the spline. Each value on the line is treated as the mean, and “observed” data can be generated by adding variation. In this case, I use the normal distribution, but there is no reason other distributions can’t be used. I’m generating data based on the the parameters in the previous example. And this time, the spline plot includes the randomly generated data:</p>
+<pre class="r"><code>set.seed(5)
+x &lt;- runif(250)
+sdata &lt;- genSpline(x, knots, 3, theta)
+
+sdata$dt[,  y := rnorm(.N, y.spline, 0.1)]
+
+plot.spline(sdata, points = TRUE)</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Now that we have generated new data, why don’t we go ahead and fit a model to see if we can recover the coefficients specified in <em>theta</em>? We are interested in the relationship of <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span>, but the relationship is not linear and changes across <span class="math inline">\(x\)</span>. To estimate a model, we regress the outcome data <span class="math inline">\(y\)</span> on the values of the basis function that correspond to each value of <span class="math inline">\(x\)</span>:</p>
+<pre class="r"><code>dxbasis &lt;- as.data.table(sdata$basis)
+setnames(dxbasis, paste0(&quot;x&quot;, names(dxbasis)))
+
+dxbasis[, y := sdata$dt$y]
+
+round(dxbasis, 3)</code></pre>
+<pre><code>##         x1    x2    x3    x4    x5    x6     y
+##   1: 0.063 0.557 0.343 0.036 0.000 0.000 0.443
+##   2: 0.000 0.000 0.140 0.565 0.295 0.000 0.542
+##   3: 0.000 0.000 0.003 0.079 0.495 0.424 0.634
+##   4: 0.003 0.370 0.523 0.104 0.000 0.000 0.232
+##   5: 0.322 0.553 0.120 0.005 0.000 0.000 0.269
+##  ---                                          
+## 246: 0.000 0.023 0.442 0.494 0.041 0.000 0.520
+## 247: 0.613 0.356 0.031 0.001 0.000 0.000 0.440
+## 248: 0.246 0.584 0.161 0.009 0.000 0.000 0.236
+## 249: 0.000 0.000 0.014 0.207 0.597 0.182 0.505
+## 250: 0.002 0.344 0.539 0.115 0.000 0.000 0.313</code></pre>
+<pre class="r"><code># fit the model - explicitly exclude intercept since x1 is intercept
+
+lmfit &lt;- lm(y ~ x1 + x2 + x3 + x4 + x5 + x6 - 1, data = dxbasis)
+cbind(tidy(lmfit)[,1:3], true = theta)</code></pre>
+<pre><code>##   term   estimate  std.error true
+## 1   x1 0.16465186 0.03619581  0.2
+## 2   x2 0.57855125 0.03996219  0.6
+## 3   x3 0.09093425 0.04267027  0.1
+## 4   x4 0.94938718 0.04395370  0.9
+## 5   x5 0.13579559 0.03805510  0.2
+## 6   x6 0.85867619 0.03346704  0.8</code></pre>
+<p>Using the parameter estimates (estimated here using OLS), we can get predicted values and plot them to see how well we did:</p>
+<pre class="r"><code># get the predicted values so we can plot
+
+dxbasis[ , y.pred := predict(object = lmfit)]
+dxbasis[ , x := x]
+
+# blue line represents predicted values
+
+plot.spline(sdata, points = TRUE) + 
+  geom_line(data=dxbasis, aes(x=x, y=y.pred), color = &quot;blue&quot;, size = 1 )</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>The model did quite a good job, because we happened to assume the correct underlying assumptions of the spline. However, let’s say we suspected that the data were generated by a quadratic spline. We need to get the basis function assuming the same cut-points for the knots but now using a degree equal to two. Since a reduction in curvature reduces the number of basis functions by one, the linear model changes slightly. (Note that this model is not quite nested in the previous (cubic) model, because the values of the basis functions are different.)</p>
+<pre class="r"><code>xdata &lt;- genSpline(x, knots, 2, theta = rep(1,5))
+dxbasis &lt;- as.data.table(xdata$basis)
+setnames(dxbasis, paste0(&quot;x&quot;, names(dxbasis)))
+
+dxbasis[, y := sdata$dt$y]
+
+lmfit &lt;- lm(y ~ x1 + x2 + x3 + x4 + x5 - 1, data = dxbasis)
+
+dxbasis[ , y.pred := predict(object = lmfit)]
+dxbasis[ , x := x]
+
+plot.spline(sdata, points = TRUE) + 
+  geom_line(data=dxbasis, aes(x=x, y=y.pred), 
+            color = &quot;forestgreen&quot;, size = 1 )</code></pre>
+<p><img src="/post/2017-10-16-generating-non-linear-data-using-b-splines_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>If we compare the two models in terms of model fit, the cubic model only does slightly better in term of <span class="math inline">\(R^2\)</span>: 0.96 vs. 0.94. In this case, it probably wouldn’t be so obvious which model to use.</p>
+</div>
+</div>
