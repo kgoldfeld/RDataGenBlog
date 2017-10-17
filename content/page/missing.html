@@ -6,7 +6,7 @@ comments: FALSE
 
 <div id="missing-data" class="section level2">
 <h2>Missing data</h2>
-<p>After generating a complete data set, it is possible to generate missing data. <code>defMiss</code> defines the parameters of missingness. <code>genMiss</code> generates a missing data matrix of indicators for each field. Indicators are set to 1 if the data are missing for a subject, 0 otherwise. <code>genObs</code> creates a data set that reflects what would have been observed had data been missing; this is a replicate of the orginal data set with “NAs” replacing values where missing data has been generated.</p>
+<p>After generating a complete data set, it is possible to generate missing data. <code>defMiss</code> defines the parameters of missingness. <code>genMiss</code> generates a missing data matrix of indicators for each field. Indicators are set to 1 if the data are missing for a subject, 0 otherwise. <code>genObs</code> creates a data set that reflects what would have been observed had data been missing; this is a replicate of the original data set with “NAs” replacing values where missing data has been generated.</p>
 <p>By controlling the parameters of missingness, it is possible to represent different missing data mechanisms: (1) <em>missing completely at random</em> (MCAR), where the probability missing data is independent of any covariates, measured or unmeasured, that are associated with the measure, (2) <em>missing at random</em> (MAR), where the probability of subject missing data is a function only of observed covariates that are associated with the measure, and (3) <em>not missing at random</em> (NMAR), where the probability of missing data is related to unmeasured covariates that are associated with measure.</p>
 <p>These possibilities are illustrated with an example. A data set of 1000 observations with three “outcome” measures&quot; <code>x1</code>, <code>x2</code>, and <code>x3</code> is defined. This data set also includes two independent predictors, <code>m</code> and <code>u</code> that largely determine the value of each outcome (subject to random noise).</p>
 <pre class="r"><code>def1 &lt;- defData(varname = &quot;m&quot;, dist = &quot;binary&quot;, formula = 0.5)
@@ -26,30 +26,30 @@ missMat &lt;- genMiss(dtAct, defM, idvars = &quot;id&quot;)
 dtObs &lt;- genObs(dtAct, missMat, idvars = &quot;id&quot;)</code></pre>
 <pre class="r"><code>missMat</code></pre>
 <pre><code>##         id x1 x2 x3 u m
-##    1:    1  0  1  0 1 0
-##    2:    2  0  0  0 1 0
-##    3:    3  0  1  0 1 0
-##    4:    4  1  0  0 1 0
-##    5:    5  0  0  0 1 0
+##    1:    1  1  0  0 1 0
+##    2:    2  0  1  0 1 0
+##    3:    3  0  0  0 1 0
+##    4:    4  0  0  0 1 0
+##    5:    5  0  1  1 1 0
 ##   ---                  
-##  996:  996  1  0  1 1 0
+##  996:  996  0  0  0 1 0
 ##  997:  997  0  0  1 1 0
-##  998:  998  0  0  0 1 0
-##  999:  999  0  1  0 1 0
-## 1000: 1000  0  0  0 1 0</code></pre>
+##  998:  998  0  1  0 1 0
+##  999:  999  0  0  0 1 0
+## 1000: 1000  0  0  1 1 0</code></pre>
 <pre class="r"><code>dtObs</code></pre>
-<pre><code>##         id m  u       x1       x2       x3
-##    1:    1 1 NA 38.15202       NA 42.04077
-##    2:    2 0 NA 17.54314 20.66449 22.92991
-##    3:    3 1 NA 19.29560       NA 20.08308
-##    4:    4 1 NA       NA 39.55953 39.36842
-##    5:    5 0 NA 19.38124 18.98206 20.39490
-##   ---                                     
-##  996:  996 0 NA       NA 20.17655       NA
-##  997:  997 1 NA 37.37646 40.79057       NA
-##  998:  998 1 NA 20.74872 17.06081 18.25915
-##  999:  999 1 NA 21.31908       NA 18.51244
-## 1000: 1000 1 NA 21.38929 17.46122 18.73815</code></pre>
+<pre><code>##         id m  u       x1         x2        x3
+##    1:    1 0 NA       NA  0.6590805 -1.169202
+##    2:    2 1 NA 38.70711         NA 40.311065
+##    3:    3 1 NA 19.06413 19.9981987 22.187977
+##    4:    4 0 NA 22.71964 20.7525990 18.714869
+##    5:    5 1 NA 41.82288         NA        NA
+##   ---                                        
+##  996:  996 0 NA 20.03208 20.6907266 18.293667
+##  997:  997 0 NA 21.57096 20.4470133        NA
+##  998:  998 1 NA 17.41586         NA 20.668810
+##  999:  999 0 NA 19.68123 18.2006626 19.858793
+## 1000: 1000 0 NA 20.19783 22.0045577        NA</code></pre>
 <p>The impacts of the various data mechanisms on estimation can be seen with a simple calculation of means using both the “true” data set without missing data as a comparison for the “observed” data set. Since <code>x1</code> is MCAR, the averages for both data sets are roughly equivalent. However, we can see below that estimates for <code>x2</code> and <code>x3</code> are biased, as the difference between observed and actual is not close to 0:</p>
 <pre class="r"><code># Two functions to calculate means and compare them
 
@@ -70,9 +70,9 @@ meanObs &lt;- dtObs[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3))]
 
 showDif(meanAct, meanObs)</code></pre>
 <pre><code>##              x1   x2   x3
-## Actual     20.9 20.9 20.8
-## Observed   20.9 19.3 19.2
-## Difference  0.0  1.6  1.6</code></pre>
+## Actual     20.6 20.7 20.7
+## Observed   20.9 19.0 19.0
+## Difference -0.3  1.7  1.7</code></pre>
 <p>After adjusting for the measured covariate <code>m</code>, the bias for the estimate of the mean of <code>x2</code> is mitigated, but not for <code>x3</code>, since <code>u</code> is not observed:</p>
 <pre class="r"><code>meanActm &lt;- dtAct[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3)), keyby = m]
 meanObsm &lt;- dtObs[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3)), keyby = m]</code></pre>
@@ -80,20 +80,20 @@ meanObsm &lt;- dtObs[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3)), keyby 
 
 showDif(meanActm[m == 0, .(x1, x2, x3)], meanObsm[m == 0, .(x1, x2, x3)])</code></pre>
 <pre><code>##              x1   x2   x3
-## Actual     10.5 10.5 10.6
-## Observed   10.3 10.5  9.1
-## Difference  0.2  0.0  1.5</code></pre>
+## Actual     10.8 10.8 10.7
+## Observed   10.8 10.8  9.5
+## Difference  0.0  0.0  1.2</code></pre>
 <pre class="r"><code># compare observed and actual when m = 1
 
 showDif(meanActm[m == 1, .(x1, x2, x3)], meanObsm[m == 1, .(x1, x2, x3)])</code></pre>
 <pre><code>##              x1   x2   x3
-## Actual     29.9 30.0 29.7
-## Observed   30.0 30.3 28.1
-## Difference -0.1 -0.3  1.6</code></pre>
+## Actual     30.6 30.6 30.7
+## Observed   30.8 30.4 29.0
+## Difference -0.2  0.2  1.7</code></pre>
 </div>
 <div id="longitudinal-data-with-missingness" class="section level2">
 <h2>Longitudinal data with missingness</h2>
-<p>Missingness can occur, of course, in the context of longitudinal data. <code>missDef</code> provides two additional arguments that are relevant for these types of datas: <code>baseline</code> and <code>monotonic</code>. In the case of variables that are measured at baseline only, a missing value would be reflected throughout the course of the study. In the case where a variable is time-dependent (i.e it is measured at each time point), it is possible to declare missingness to be <em>monotonic</em>. This means that if a value for this field is missing at time <code>t</code>, then values will also be missing at all times <code>T &gt; t</code> as well. The call to <code>genMiss</code> must set <code>repeated</code> to TRUE.</p>
+<p>Missingness can occur, of course, in the context of longitudinal data. <code>missDef</code> provides two additional arguments that are relevant for these types of data: <code>baseline</code> and <code>monotonic</code>. In the case of variables that are measured at baseline only, a missing value would be reflected throughout the course of the study. In the case where a variable is time-dependent (i.e it is measured at each time point), it is possible to declare missingness to be <em>monotonic</em>. This means that if a value for this field is missing at time <code>t</code>, then values will also be missing at all times <code>T &gt; t</code> as well. The call to <code>genMiss</code> must set <code>repeated</code> to TRUE.</p>
 <p>The following two examples describe an outcome variable <code>y</code> that is measured over time, whose value is a function of time and an observed exposure:</p>
 <pre class="r"><code># use baseline definitions from previous example
 
