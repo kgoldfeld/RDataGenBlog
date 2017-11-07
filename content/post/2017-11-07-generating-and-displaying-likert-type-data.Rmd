@@ -1,0 +1,111 @@
+---
+title: A simstudy update provides an excuse to generate and display Likert-type data
+author: ''
+date: '2017-11-07'
+slug: generating-and-displaying-likert-type-data
+categories: []
+tags:
+  - R
+---
+
+I just updated `simstudy` to version 0.1.7. It is available on CRAN.
+
+To mark the occasion, I wanted to highlight a new function, `genOrdCat`, which puts into practice some code that I presented a little while back as part of a discussion of [ordinal logistic regression](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/). The new function was motivated by a reader/researcher who came across my blog in while wrestling with a simulation study. After a little back and forth about how to generate ordinal categorical data, I ended up with a function that might be useful. Here's a little example that uses the `likert` package, which makes plotting Likert-type easy and attractive.
+
+### Defining the data
+
+The proportional odds model assumes a baseline distribution of probabilities. In the case of a survey item, this baseline is the probability of responding at a particular level - in this example I assume a range of 1 (strongly disagree) to 4 (strongly agree) - given a value of zero for all of the covariates. In this example, there is a single predictor $x$ that ranges from -0.5 to 0.5. The baseline probabilities of the response variable $r$ will apply in cases where $x = 0$. In the proportional odds data generating process, the covariates "influence" the response through an additive shift (either positive or negative) on the logistic scale. (If this makes no sense at all, maybe check out my [earlier post](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/) for a little explanation.) Here, this additive shift is represented by the variable $z$, which is a function of $x$.
+
+```{r, message = FALSE}
+library(simstudy)
+
+baseprobs<-c(0.40, 0.25, 0.15, 0.20)
+
+def <- defData(varname="x", formula="-0.5;0.5", dist = "uniform")
+def <- defData(def, varname = "z", formula = "2*x", dist = "nonrandom")
+```
+
+### Generate data
+
+The ordinal data is generated after a data set has been created with an adjustment variable. We have to provide the data.table name, the name of the adjustment variable, and the base probabilities. That's really it.
+
+```{r}
+
+set.seed(2017)
+
+dx <- genData(2500, def)
+dx <- genOrdCat(dx, adjVar = "z", baseprobs, catVar = "r")
+dx <- genFactor(dx, "r", c("Strongly disagree", "Disagree", 
+                           "Agree", "Strongly agree"))
+print(dx)
+```
+
+The expected cumulative log odds when $x=0$ can be calculated from the base probabilities:
+
+```{r}
+dp <- data.table(baseprobs,
+           cumProb = cumsum(baseprobs),
+           cumOdds = cumsum(baseprobs)/(1 - cumsum(baseprobs))
+)
+
+dp[, cumLogOdds := log(cumOdds)]
+dp
+```
+
+If we fit a cumulative odds model (using package `ordinal`), we recover those cumulative log odds (see the output under the section labeled "Threshold coefficients"). Also, we get an estimate for the coefficient of $x$ (where the true value used to generate the data was 2.00):
+
+```{r}
+library(ordinal)
+model.fit <- clm(fr ~ x, data = dx, link = "logit")
+
+summary(model.fit)
+```
+
+### Looking at the data
+
+Below is a plot of the response as a function of the predictor $x$. I "jitter" the data prior to plotting; otherwise, individual responses would overlap and obscure each other.
+
+```{r, fig.width = 7, fig.height = 3}
+library(ggplot2)
+
+dx[, rjitter := jitter(as.numeric(r), factor = 0.5)]
+
+ggplot(data = dx, aes(x = x, y = rjitter)) +
+  geom_point(color = "forestgreen", size = 0.5) +
+  scale_y_continuous(breaks = c(1:4),
+                     labels = c("Strongly disagree", "Disagree",
+                                "Agree", "Strongly Agree")) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.title.y = element_blank())
+```
+
+You can see that when $x$ is smaller (closer to -0.5), a response of "Strongly disagree" is more likely. Conversely, when $x$ is closer to +0.5, the proportion of folks responding with "Strongly agree" increases. 
+
+If we "bin" the individual responses by ranges of $x$, say grouping by tenths, -0.5 to -0.4, -0.4 to -0.3, all the way to 0.4 to 0.5, we can get another view of how the probabilities shift with respect to $x$. 
+
+The `likert` package requires very little data manipulation, and once the data are set, it is easy to look at the data in a number of different ways, a couple of which I plot here. I encourage you to look at the [website](http://jason.bryer.org/likert/) for many more examples and instructions on how to download the latest version from github.
+
+```{r, message = FALSE}
+library(likert)
+
+bins <- cut(dx$x, breaks = seq(-.5, .5, .1), include.lowest = TRUE)
+dx[ , xbin := bins]
+
+item <- data.frame(dx[, fr])
+names(item) <- "r"
+bin.grp <- factor(dx[, xbin])
+likert.bin <- likert(item, grouping = bin.grp)
+likert.bin
+```
+
+
+```{r, fig.height = 4, fig.width = 7}
+plot(likert.bin)
+```
+
+```{r, fig.height = 4, fig.width = 7}
+plot(likert.bin, centered = FALSE)
+```
+
+These plots show what data look like when the cumulative log odds are proportional as we move across different levels of a covariate. (Note that the two center groups should be closest to the baseline probabilities that were used to generate the data.) If you have real data, obviously it is useful to look at it first to see if this type of pattern emerges from the data. When we have more than one or two covariates, the pictures are not as useful, but then it also is probably harder to justify the proportional odds assumption.
