@@ -1,0 +1,260 @@
+---
+title: Visualizing how confounding biases estimates of population-wide (or marginal) average causal effects
+author: ''
+date: '2017-11-16'
+slug: potential-outcomes-confounding
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>When we are trying to assess the effect of an exposure or intervention on an outcome, confounding is an ever-present threat to our ability to draw the proper conclusions. My goal (starting here and continuing in upcoming posts) is to think a bit about how to characterize confounding in a way that makes it possible to literally see why improperly estimating intervention effects might lead to bias.</p>
+<div id="confounding-potential-outcomes-and-causal-effects" class="section level3">
+<h3>Confounding, potential outcomes, and causal effects</h3>
+<p>Typically, we think of a confounder as a factor that influences <em>both</em> exposure <em>and</em> outcome. If we ignore the confounding factor in estimating the effect of an exposure, we can easily over- or underestimate the size of the effect due to the exposure. If sicker patients are more likely than healthier patients to take a particular drug, the relatively poor outcomes of those who took the drug may be due to the initial health status rather than the drug.</p>
+<p>A slightly different view of confounding is tied to the more conceptual framework of potential outcomes, which I <a href="https://www.rdatagen.net/post/be-careful/">wrote</a> a bit about earlier. A potential outcome is the outcome we <em>would</em> observe <em>if</em> an individual were subjected to a particular exposure. We may or may not observe the potential outcome - this depends on the actual exposure. (To simplify things here, I will assume we are interested only in two different exposures.) <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span> represent the potential outcomes for an individual with and without exposure, respectively. We observe <span class="math inline">\(Y_0\)</span> if the individual is not exposed, and <span class="math inline">\(Y_1\)</span> if she is.</p>
+<p>The causal effect of the exposure for the individual <span class="math inline">\(i\)</span> can be defined as <span class="math inline">\(Y_{1i} - Y_{0i}\)</span>. If we can observe each individual in both states (with and without the exposure) long enough to measure the outcome <span class="math inline">\(Y\)</span>, we are observing both potential outcomes and can measure the causal effect for each individual. Averaging across all individuals in the sample provides an estimate the population average causal effect. (Think of a crossover or N-of-1 study.)</p>
+<p>Unfortunately, in the real world, it is rarely feasible to expose an individual to multiple conditions. Instead, we use one group as a proxy for the other. For example, the control group represents what would have happened to the exposed group had the exposed group not been exposed. This approach only makes sense if the control group is identical in every way to the exposure group (except for the exposure, of course.)</p>
+<p>Our goal is to compare the distribution of outcomes for the control group with the exposed group. We often simplify this comparison by looking at the means of each distribution. The average causal effect (across all individuals) can be written as <span class="math inline">\(E(Y_1 - Y_0)\)</span>, where <span class="math inline">\(E()\)</span> is the expectation or average. In reality, we cannot directly measure this since only one potential outcome is observed for each individual.</p>
+<p>Using the following logic, we might be able to convince ourselves that we can use <em>observed</em> measurements to estimate unobservable average causal effects. First, we can say <span class="math inline">\(E(Y_1 - Y_0) = E(Y_1) - E(Y_0)\)</span>, because expectation is linear. Next, it seems fairly reasonable to say that <span class="math inline">\(E(Y_1 | A = 1) = E(Y | A = 1)\)</span>, where <span class="math inline">\(A=1\)</span> for exposure, <span class="math inline">\(A=0\)</span> for control. In words, this states that the average <strong>potential outcome of exposure</strong> for the <strong><em>exposed group</em></strong> is the same as what we actually <strong>observe</strong> for the <strong><em>exposed group</em></strong> (this is the consistency assumption in causal inference theory). Along the same lines, <span class="math inline">\(E(Y_0 | A = 0) = E(Y | A = 0)\)</span>. Finally, <em>if</em> we can say that <span class="math inline">\(E(Y_1) = E(Y_1 | A = 1)\)</span> - the potential outcome of exposure for <strong><em>everyone</em></strong> is equal to the potential outcome of exposure for those <strong><em>exposed</em></strong> - then we can say that <span class="math inline">\(E(Y_1) = E(Y | A = 1)\)</span> (the potential outcome with exposure for <strong><em>everyone</em></strong> is the same as the observed outcome for <strong><em>the exposed</em></strong>. Similarly, we can make the same argument to conclude that <span class="math inline">\(E(Y_0) = E(Y | A = 0)\)</span>. At the end of this train of logic, we conclude that we can estimate <span class="math inline">\(E(Y_1 - Y_0)\)</span> using observed data only: <span class="math inline">\(E(Y | A = 1) - E(Y | A = 0)\)</span>.</p>
+<p>This nice logic fails if <span class="math inline">\(E(Y_1) \ne E(Y | A = 1)\)</span> and/or <span class="math inline">\(E(Y_0) \ne E(Y | A = 0)\)</span>. That is, this nice logic fails when there is confounding.</p>
+<p>This is all a very long-winded way of saying that confounding arises when the distributions of potential outcomes <strong><em>for the population</em></strong> are different from those distributions for <strong><em>the subgroups</em></strong> we are using for analysis. For example, if the potential outcome under exposure for the population as a whole (<span class="math inline">\(Y_1\)</span>) differs from the observed outcome for the subgroup that was exposed (<span class="math inline">\(Y|A=1\)</span>), or the potential outcome without exposure for the entire population (<span class="math inline">\(Y_0\)</span>) differs from the observed outcome for the subgroup that was not exposed (<span class="math inline">\(Y|A=0\)</span>), any estimates of population level causal effects using observed data will be biased.</p>
+<p>However, if we can find a factor <span class="math inline">\(L\)</span> (or factors) where</p>
+<p><span class="math display">\[ \begin{aligned}
+P(Y_1 | L=l) &amp;= P(Y | A = 1 \text{ and } L=l) \\
+P(Y_0 | L=l) &amp;= P(Y | A = 0 \text{ and } L=l)
+ \end{aligned}
+\]</span> both hold for all levels or values of <span class="math inline">\(L\)</span>, we can remove confounding (and get unbiased estimates of the causal effect) by “controlling” for <span class="math inline">\(L\)</span>. In some cases, the causal effect we measure will be conditional on <span class="math inline">\(L\)</span>, sometimes it will be a population-wide average (or marginal) causal effect, and sometimes it will be both.</p>
+</div>
+<div id="what-confounding-looks-like" class="section level3">
+<h3>What confounding looks like …</h3>
+<p>The easiest way to illustrate the population/subgroup contrast is to generate data from a process that includes confounding. In this first example, the outcome is continuous, and is a function of both the exposure (<span class="math inline">\(A\)</span>) and a covariate (<span class="math inline">\(L\)</span>). For each individual, we can generate both potential outcomes <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span>. (Note that both potential outcomes share the same individual level noise term <span class="math inline">\(e\)</span> - this is not a necessary assumption.) This way, we can “know” the true population, or marginal causal effect of exposure. The observed outcome <span class="math inline">\(Y\)</span> is determined by the exposure status. For the purposes of plotting a smooth density curve, we generate a very large sample - 2 million.</p>
+<pre class="r"><code>library(simstudy)
+
+defC &lt;- defData(varname = &quot;e&quot;, formula = 0, variance = 2, 
+                dist = &quot;normal&quot;)
+defC &lt;- defData(defC, varname = &quot;L&quot;, formula = 0.4, 
+                dist = &quot;binary&quot;)
+defC &lt;- defData(defC, varname = &quot;Y0&quot;, formula = &quot;1 + 4*L + e&quot;, 
+                dist = &quot;nonrandom&quot;)
+defC &lt;- defData(defC, varname = &quot;Y1&quot;, formula = &quot;5 + 4*L + e&quot;, 
+                dist = &quot;nonrandom&quot;)
+defC &lt;- defData(defC, varname = &quot;A&quot;, formula = &quot;0.3 + 0.3 * L&quot;, 
+                dist = &quot;binary&quot;)
+defC &lt;- defData(defC, varname = &quot;Y&quot;, formula = &quot;1 + 4*A + 4*L + e&quot;, 
+                dist = &quot;nonrandom&quot;)
+
+set.seed(2017)
+dtC &lt;- genData(n = 2000000, defC)
+dtC[1:5]</code></pre>
+<pre><code>##    id           e L        Y0        Y1 A          Y
+## 1:  1  2.02826718 1 7.0282672 11.028267 1 11.0282672
+## 2:  2 -0.10930734 0 0.8906927  4.890693 0  0.8906927
+## 3:  3  1.04529790 0 2.0452979  6.045298 0  2.0452979
+## 4:  4 -2.48704266 1 2.5129573  6.512957 1  6.5129573
+## 5:  5 -0.09874778 0 0.9012522  4.901252 0  0.9012522</code></pre>
+<p>Feel free to skip over this code - I am just including in case anyone finds it useful to see how I generated the following series of annotated density curves:</p>
+<pre class="r"><code>library(ggplot2)
+
+getDensity &lt;- function(vector, weights = NULL) {
+  
+  if (!is.vector(vector)) stop(&quot;Not a vector!&quot;)
+  
+  if (is.null(weights)) {
+    avg &lt;- mean(vector)
+  } else {
+    avg &lt;- weighted.mean(vector, weights)
+  }
+  
+  close &lt;- min(which(avg &lt; density(vector)$x))
+  x &lt;- density(vector)$x[close]
+  if (is.null(weights)) {
+    y = density(vector)$y[close]
+  } else {
+    y = density(vector, weights = weights)$y[close]
+  }
+  return(data.table(x = x, y = y))
+  
+}
+
+plotDens &lt;- function(dtx, var, xPrefix, title, textL = NULL, weighted = FALSE) {
+  
+  dt &lt;- copy(dtx)
+  
+  if (weighted) {
+    dt[, nIPW := IPW/sum(IPW)]
+    dMarginal &lt;- getDensity(dt[, get(var)], weights = dt$nIPW)
+  } else {
+    dMarginal &lt;- getDensity(dt[, get(var)])
+  }
+  
+  d0 &lt;- getDensity(dt[L==0, get(var)])
+  d1 &lt;- getDensity(dt[L==1, get(var)])
+
+  dline &lt;- rbind(d0, dMarginal, d1)
+  
+  brk &lt;- round(dline$x, 1)
+  
+  p &lt;- ggplot(aes(x=get(var)), data=dt) +
+    geom_density(data=dt[L==0], fill = &quot;#ce682f&quot;, alpha = .4) +
+    geom_density(data=dt[L==1], fill = &quot;#96ce2f&quot;, alpha = .4)
+  
+  if (weighted) {
+    p &lt;- p + geom_density(aes(weight = nIPW),
+                              fill = &quot;#2f46ce&quot;, alpha = .8)
+  } else p &lt;- p + geom_density(fill = &quot;#2f46ce&quot;, alpha = .8)
+  
+  p &lt;- p +  geom_segment(data = dline, aes(x = x, xend = x, 
+                                   y = 0, yend = y), 
+                 size = .7, color =  &quot;white&quot;, lty=3) +
+            annotate(geom=&quot;text&quot;, x = 12.5, y = .24, 
+             label = title, size = 5, fontface = 2) +
+            scale_x_continuous(limits = c(-2, 15), 
+                       breaks = brk,
+                       name = paste(xPrefix, var)) +
+            theme(panel.grid = element_blank(),
+                  axis.text.x = element_text(size = 12),
+                  axis.title.x = element_text(size = 13)
+    )
+
+    if (!is.null(textL))  {
+      p &lt;- p + 
+        annotate(geom = &quot;text&quot;, x = textL[1], y = textL[2], 
+                 label = &quot;L=0&quot;, size = 4, fontface = 2) +
+        annotate(geom = &quot;text&quot;, x = textL[3], y = textL[4], 
+                 label=&quot;L=1&quot;, size = 4, fontface = 2) +
+        annotate(geom = &quot;text&quot;, x = textL[5], y = textL[6], 
+                 label=&quot;Population distribution&quot;, size = 4, fontface = 2)
+    } 
+    
+    return(p)
+}</code></pre>
+<pre class="r"><code>library(gridExtra)
+
+grid.arrange(plotDens(dtC, &quot;Y0&quot;, &quot;Potential outcome&quot;, &quot;Full\npopulation&quot;, 
+                         c(1, .24, 5, .22, 2.6, .06)),
+             plotDens(dtC[A==0], &quot;Y&quot;, &quot;Observed&quot;, &quot;Unexposed\nonly&quot;),
+             plotDens(dtC, &quot;Y1&quot;, &quot;Potential outcome&quot;, &quot;Full\npopulation&quot;),
+             plotDens(dtC[A==1], &quot;Y&quot;, &quot;Observed&quot;, &quot;Exposed\nonly&quot;),
+             nrow = 2
+)</code></pre>
+<p><img src="/post/2017-11-16-potential-outcomes-confounding_files/figure-html/unnamed-chunk-3-1.png" width="1152" /></p>
+<p>Looking at the various plots, we can see a few interesting things. The density curves on the left represent the entire population. The conditional distributions of the potential outcomes at the population level are all normally distributed, with means that depend on the exposure and covariate <span class="math inline">\(L\)</span>. We can also see that the population-wide distribution of <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span> (in blue) are non-symmetrically shaped, because they are a mixture of the conditional normal distributions, weighted by the proportion of each level of <span class="math inline">\(L\)</span>. Since the proportions for the top and bottom plots are in fact the population proportion, the population-level density curves for <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span> are similarly shaped, with less mass on the higher end, because individuals are less likely to have an <span class="math inline">\(L\)</span> value of 1:</p>
+<pre class="r"><code>dtC[, .(propLis1 = mean(L))]</code></pre>
+<pre><code>##    propLis1
+## 1: 0.399822</code></pre>
+<p>The shape of the marginal distribution of <span class="math inline">\(Y_1\)</span> is identical to <span class="math inline">\(Y_0\)</span> (in this case, because that is the way I generated the data), but shifted to the right by an amount equal to the causal effect. The conditional effect sizes are 4, as is the population or marginal effect size.</p>
+<p>The subgroup plots on the right are a different story. In this case, the distributions of <span class="math inline">\(L\)</span> vary across the exposed and unexposed groups:</p>
+<pre class="r"><code>dtC[, .(propLis1 = mean(L)), keyby = A]</code></pre>
+<pre><code>##    A  propLis1
+## 1: 0 0.2757937
+## 2: 1 0.5711685</code></pre>
+<p>So, even though the distributions of (observed) <span class="math inline">\(Y\)</span> conditional on <span class="math inline">\(L\)</span> are identical to their potential outcome counterparts in the whole population - for example, <span class="math inline">\(P(Y | A=0 \text{ and } L = 1) = P(Y_0 | L = 1)\)</span> - the marginal distributions of <span class="math inline">\(Y\)</span> are quite different for the exposed and unexposed. For example, <span class="math inline">\(P(Y | A = 0) \ne P(Y_0)\)</span>. This is directly due to the fact that the mixing weights (the proportions of <span class="math inline">\(L\)</span>) are different for each of the groups. In the unexposed group, about 28% have <span class="math inline">\(L=1\)</span>, but for the exposed group, about 57% do. Using the subgroup data only, the conditional effect sizes are still 4 (comparing mean outcomes <span class="math inline">\(Y\)</span> within each level of <span class="math inline">\(L\)</span>). However the difference in means between the marginal distributions of each subgroup is about 5.2 (calculated by 7.3 - 2.1). This is confounding.</p>
+</div>
+<div id="no-confounding" class="section level3">
+<h3>No confounding</h3>
+<p>Just so we can see that when the covariate <span class="math inline">\(L\)</span> has nothing to do with the probability of exposure, the marginal distributions of the subgroups do in fact look like their population-level potential outcome marginal distributions:</p>
+<pre class="r"><code>defC &lt;- updateDef(defC, &quot;A&quot;, newformula = 0.5) # change data generation
+dtC &lt;- genData(n = 2000000, defC)
+
+dtC[, .(propLis1 = mean(L)), keyby = A] # subgroup proportions</code></pre>
+<pre><code>##    A  propLis1
+## 1: 0 0.4006499
+## 2: 1 0.3987437</code></pre>
+<pre class="r"><code>dtC[, .(propLis1 = mean(L))]            # population/marginal props</code></pre>
+<pre><code>##     propLis1
+## 1: 0.3996975</code></pre>
+<pre class="r"><code>grid.arrange(plotDens(dtC, &quot;Y0&quot;, &quot;Potential outcome&quot;, &quot;Population&quot;, 
+                         c(1, .24, 5, .22, 2.6, .06)),
+             plotDens(dtC[A==0], &quot;Y&quot;, &quot;Observed&quot;, &quot;Unexposed&quot;),
+             plotDens(dtC, &quot;Y1&quot;, &quot;Potential outcome&quot;, &quot;Population&quot;),
+             plotDens(dtC[A==1], &quot;Y&quot;, &quot;Observed&quot;, &quot;Exposed&quot;),
+             nrow = 2
+)</code></pre>
+<p><img src="/post/2017-11-16-potential-outcomes-confounding_files/figure-html/unnamed-chunk-6-1.png" width="1152" /></p>
+</div>
+<div id="estimation-of-causal-effects-now-with-confounding" class="section level3">
+<h3>Estimation of causal effects (now with confounding)</h3>
+<p>Generating a smaller data set, we estimate the causal effects using simple calculations and linear regression:</p>
+<pre class="r"><code>library(broom)
+
+# change back to confounding
+defC &lt;- updateDef(defC, &quot;A&quot;, newformula = &quot;.3 + .3 * L&quot;)
+dtC &lt;- genData(2500, defC)</code></pre>
+<p>The true average (marginal) causal effect from the average difference in potential outcomes for the entire population:</p>
+<pre class="r"><code>dtC[, mean(Y1 - Y0)]</code></pre>
+<pre><code>## [1] 4</code></pre>
+<p>And the true average causal effects conditional on the covariate <span class="math inline">\(L\)</span>:</p>
+<pre class="r"><code>dtC[, mean(Y1 - Y0), keyby = L]</code></pre>
+<pre><code>##    L V1
+## 1: 0  4
+## 2: 1  4</code></pre>
+<p>If we try to estimate the marginal causal effect by using a regression model that does not include <span class="math inline">\(L\)</span>, we run into problems. The estimate of 5.2 we see below is the same biased estimate we saw in the plot above. This model is reporting the differences of the means (across both levels of <span class="math inline">\(L\)</span>) for the two subgroups, which we know (because we saw) are not the same as the potential outcome distributions in the population due to different proportions of <span class="math inline">\(L\)</span> in each subgroup:</p>
+<pre class="r"><code>tidy(lm(Y ~ A, data = dtC))</code></pre>
+<pre><code>##          term estimate  std.error statistic       p.value
+## 1 (Intercept) 2.027132 0.06012997  33.71251 1.116211e-205
+## 2           A 5.241004 0.09386145  55.83766  0.000000e+00</code></pre>
+<p>If we estimate a model that conditions on <span class="math inline">\(L\)</span>, the estimates are on target because in the context of normal linear regression without interaction terms, conditional effects are the same as marginal effects (when confounding has been removed, or think of the comparisons being made within the orange groups and green groups in the fist set of plots above, not within the purple groups):</p>
+<pre class="r"><code>tidy(lm(Y ~ A + L , data = dtC))</code></pre>
+<pre><code>##          term  estimate  std.error statistic       p.value
+## 1 (Intercept) 0.9178849 0.03936553  23.31697 5.809202e-109
+## 2           A 4.0968358 0.05835709  70.20288  0.000000e+00
+## 3           L 3.9589109 0.05862583  67.52844  0.000000e+00</code></pre>
+</div>
+<div id="inverse-probability-weighting-ipw" class="section level3">
+<h3>Inverse probability weighting (IPW)</h3>
+<p>What follows briefly here is just a sneak preview of IPW (without any real explanation), which is one way to recover the marginal mean using observed data with confounding. For now, I am ignoring the question of why you might be interested in knowing the marginal effect when the conditional effect estimate provides the same information. Suffice it to say that the conditional effect is <em>not</em> always the same as the marginal effect (think of data generating processes that include interactions or non-linear relationships), and sometimes the marginal effect estimate may the best that we can do, or at least that we can do easily.</p>
+<p>If we weight each individual observation by the inverse probability of exposure, we can remove confounding and estimate the <em>marginal</em> effect of exposure on the outcome. Here is a quick simulation example.</p>
+<p>After generating the dataset (the same large one we started out with so you can compare) we estimate the probability of exposure <span class="math inline">\(P(A=1 | L)\)</span>, assuming that we know the correct exposure model. This is definitely a questionable assumption, but in this case, we actually do. Once the model has been fit, we assign the predicted probability to each individual based on her value of <span class="math inline">\(L\)</span>.</p>
+<pre class="r"><code>set.seed(2017)
+dtC &lt;- genData(2000000, defC)
+
+exposureModel &lt;- glm(A ~ L, data = dtC, family = &quot;binomial&quot;)
+tidy(exposureModel)</code></pre>
+<pre><code>##          term  estimate   std.error statistic p.value
+## 1 (Intercept) -0.847190 0.001991708 -425.3584       0
+## 2           L  1.252043 0.003029343  413.3053       0</code></pre>
+<pre class="r"><code>dtC[, pA := predict(exposureModel, type = &quot;response&quot;)]</code></pre>
+<p>The IPW is <em>not</em> based exactly on <span class="math inline">\(P(A=1 | L)\)</span> (which is commonly used in propensity score analysis), but rather, the probability of the actual exposure at each level of <span class="math inline">\(L\)</span>: <span class="math inline">\(P(A=a | L)\)</span>, where <span class="math inline">\(a\in(0,1)\)</span>:</p>
+<pre class="r"><code># Define two new columns
+defC2 &lt;- defDataAdd(varname = &quot;pA_actual&quot;, 
+                    formula = &quot;A * pA + (1-A) * (1-pA)&quot;, 
+                    dist = &quot;nonrandom&quot;)
+defC2 &lt;- defDataAdd(defC2, varname = &quot;IPW&quot;, 
+                    formula = &quot;1/pA_actual&quot;, 
+                    dist = &quot;nonrandom&quot;)
+
+# Add weights
+dtC &lt;- addColumns(defC2, dtC)
+round(dtC[1:5], 2)</code></pre>
+<pre><code>##    id     e L   Y0    Y1 A     Y  pA pA_actual  IPW
+## 1:  1  2.03 1 7.03 11.03 1 11.03 0.6       0.6 1.67
+## 2:  2 -0.11 0 0.89  4.89 0  0.89 0.3       0.7 1.43
+## 3:  3  1.05 0 2.05  6.05 0  2.05 0.3       0.7 1.43
+## 4:  4 -2.49 1 2.51  6.51 1  6.51 0.6       0.6 1.67
+## 5:  5 -0.10 0 0.90  4.90 0  0.90 0.3       0.7 1.43</code></pre>
+<p>To estimate the marginal effect on the log-odds scale, we use function <code>lm</code> again, but with weights specified by IPW. The true value of the marginal effect of exposure (based on the population-wide potential outcomes) was 4.0. I know I am repeating myself here, but first I am providing the biased estimate that we get when we ignore covariate <span class="math inline">\(L\)</span> to convince you that the relationship between exposure and outcome is indeed confounded:</p>
+<pre class="r"><code>tidy(lm(Y ~ A , data = dtC)) </code></pre>
+<pre><code>##          term estimate   std.error statistic p.value
+## 1 (Intercept) 2.101021 0.002176711  965.2275       0
+## 2           A 5.184133 0.003359132 1543.2956       0</code></pre>
+<p>And now, with the simple addition of the weights but still <em>not</em> including <span class="math inline">\(L\)</span> in the model, our weighted estimate of the marginal effect is spot on (but with such a large sample size, this is not so surprising):</p>
+<pre class="r"><code>tidy(lm(Y ~ A , data = dtC, weights = IPW)) </code></pre>
+<pre><code>##          term estimate   std.error statistic p.value
+## 1 (Intercept) 2.596769 0.002416072  1074.789       0
+## 2           A 4.003122 0.003416842  1171.585       0</code></pre>
+<p>And finally, here is a plot of the IPW-adjusted density. You might think I am just showing you the plots for the unconfounded data again, but you can see from the code (and I haven’t hidden anything) that I am still using the data set with confounding. In particular, you can see that I am calling the routine <code>plotDens</code> with weights.</p>
+<pre class="r"><code>grid.arrange(plotDens(dtC, &quot;Y0&quot;, &quot;Potential outcome&quot;, &quot;Population&quot;, 
+                         c(1, .24, 5, .22, 2.6, .06)),
+             plotDens(dtC[A==0], &quot;Y&quot;, &quot;Observed&quot;, &quot;Unexposed&quot;, 
+                      weighted = TRUE),
+             plotDens(dtC, &quot;Y1&quot;, &quot;Potential outcome&quot;, &quot;Population&quot;),
+             plotDens(dtC[A==1], &quot;Y&quot;, &quot;Observed&quot;, &quot;Exposed&quot;, 
+                      weighted = TRUE),
+             nrow = 2
+)</code></pre>
+<p><img src="/post/2017-11-16-potential-outcomes-confounding_files/figure-html/unnamed-chunk-16-1.png" width="1152" /></p>
+<p>As I mentioned, I hope to write more on <em>IPW</em>, and <em>marginal structural models</em>, which make good use of this methodology to estimate effects that can be challenging to get a handle on.</p>
+</div>
