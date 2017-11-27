@@ -1,0 +1,257 @@
+---
+title: Characterizing the variance for clustered data that are Gamma distributed
+author: ''
+date: '2017-11-27'
+slug: icc-for-gamma-distribution
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Way back when I was studying algebra and wrestling with one word problem after another (I think now they call them story problems), I complained to my father. He laughed and told me to get used to it. “Life is one big word problem,” is how he put it. Well, maybe one could say any statistical analysis is really just some form of multilevel data analysis, whether we treat it that way or not.</p>
+<p>A key feature of the multilevel model is the ability to explicitly untangle the variation that occurs at different levels. Variation of individuals within a sub-group, variation across sub-groups, variation across groups of sub-groups, and so on. The intra-class coefficient (ICC) is one summarizing statistic that attempts to characterize the <em>relative</em> variability across the different levels.</p>
+<p>The amount of clustering as measured by the ICC has implications for study design, because it communicates how much information is available at different levels of the hierarchy. We may have thousands of individuals that fall into ten or twenty clusters, and think we have a lot of information. But if most of the variation is at the cluster/group level (and not across individuals within a cluster), we don’t have thousands of observations, but more like ten or twenty. This has important implications for our measures of uncertainty.</p>
+<p>Recently, a researcher was trying to use <code>simstudy</code> to generate cost and quality-of-life measurements to simulate clustered data for a cost-effectiveness analysis. (They wanted the cost and quality measurements to correlate within individuals, but I am going to ignore that aspect here.) Cost data are typically <em>right skewed</em> with most values falling on the lower end, but with some extremely high values on the upper end. (These dollar values cannot be negative.)</p>
+<p>Because of this characteristic shape, cost data are often modeled using a Gamma distribution. The challenge here was that in simulating the data, the researcher wanted to control the group level variation relative to the individual-level variation. If the data were normally distributed, it would be natural to talk about that control in terms of the ICC. But, with the Gamma distribution, it is not as obvious how to partition the variation.</p>
+<p>As most of my posts do, this one provides simulation and plots to illuminate some of these issues.</p>
+<div id="gamma-distribtution" class="section level3">
+<h3>Gamma distribtution</h3>
+<p>The Gamma distribution is a continuous probability distribution that includes all non-negative numbers. The probability density function is typically written as a function of two parameters - the shape <span class="math inline">\(\alpha\)</span> and the rate <span class="math inline">\(\beta\)</span>:</p>
+<p><span class="math display">\[f(x) = \frac{\beta ^ \alpha}{\Gamma(\alpha)} x^{\alpha - 1} e^{-\beta x},\]</span></p>
+<p>with <span class="math inline">\(\text{E}(x) = \alpha / \beta\)</span>, and <span class="math inline">\(\text{Var}(x)=\alpha / \beta^2\)</span>. <span class="math inline">\(\Gamma(.)\)</span> is the continuous Gamma function, which lends its name to the distribution. (When <span class="math inline">\(\alpha\)</span> is a positive integer, <span class="math inline">\(\Gamma(\alpha)=(\alpha - 1 )!\)</span>) In <code>simstudy</code>, I decided to parameterize the pdf using <span class="math inline">\(\mu\)</span> to represent the mean and a dispersion parameter <span class="math inline">\(\nu\)</span>, where <span class="math inline">\(\text{Var}(x) = \nu\mu^2\)</span>. In this parameterization, shape <span class="math inline">\(\alpha = \frac{1}{\nu}\)</span> and rate <span class="math inline">\(\beta = \frac{1}{\nu\mu}\)</span>. (There is a simstudy function <code>gammaGetShapeRate</code> that maps <span class="math inline">\(\mu\)</span> and <span class="math inline">\(\nu\)</span> to <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta\)</span>.) With this parameterization, it is clear that the variance of a Gamma distributed random variable is a function of the (square) of the mean.</p>
+<p>Simulating data gives a sense of the shape of the distribution and also makes clear that the variance depends on the mean (which is not the case for the normal distribution):</p>
+<pre class="r"><code>mu &lt;- 20
+nu &lt;- 1.2
+
+# theoretical mean and variance
+c(mean = mu, variance = mu^2 * nu) </code></pre>
+<pre><code>##     mean variance 
+##       20      480</code></pre>
+<pre class="r"><code>library(simstudy)
+(ab &lt;- gammaGetShapeRate(mu, nu))</code></pre>
+<pre><code>## $shape
+## [1] 0.8333333
+## 
+## $rate
+## [1] 0.04166667</code></pre>
+<pre class="r"><code># simulate data using R function
+
+set.seed(1)
+g.rfunc &lt;- rgamma(100000, ab$shape, ab$rate)
+round(c(mean(g.rfunc), var(g.rfunc)), 2)</code></pre>
+<pre><code>## [1]  19.97 479.52</code></pre>
+<pre class="r"><code># simulate data using simstudy function - no difference
+
+set.seed(1)
+defg &lt;- defData(varname = &quot;g.sim&quot;, formula = mu, variance = nu, 
+                dist = &quot;gamma&quot;)
+dt.g1 &lt;- genData(100000, defg)
+dt.g1[, .(round(mean(g.sim),2), round(var(g.sim),2))]</code></pre>
+<pre><code>##       V1     V2
+## 1: 19.97 479.52</code></pre>
+<pre class="r"><code># doubling dispersion factor
+
+defg &lt;- updateDef(defg, changevar = &quot;g.sim&quot;, newvariance = nu * 2)
+dt.g0 &lt;- genData(100000, defg)
+dt.g0[, .(round(mean(g.sim),2), round(var(g.sim),2))]</code></pre>
+<pre><code>##       V1     V2
+## 1: 20.09 983.01</code></pre>
+<pre class="r"><code># halving dispersion factor
+
+defg &lt;- updateDef(defg, changevar = &quot;g.sim&quot;, newvariance = nu * 0.5)
+dt.g2 &lt;- genData(100000, defg)
+dt.g2[, .(round(mean(g.sim),2), round(var(g.sim),2))]</code></pre>
+<pre><code>##       V1     V2
+## 1: 19.98 240.16</code></pre>
+<p>Generating data sets with the same mean but decreasing levels of dispersion makes it appear as if the distribution is “moving” to the right: the peak shifts to the right and variance decreases …</p>
+<pre class="r"><code>library(ggplot2)
+
+dt.g0[, nugrp := 0]
+dt.g1[, nugrp := 1]
+dt.g2[, nugrp := 2]
+
+dt.g &lt;- rbind(dt.g0, dt.g1, dt.g2)
+
+ggplot(data = dt.g, aes(x=g.sim), group = nugrp) +
+  geom_density(aes(fill=factor(nugrp)), alpha = .5) +
+  scale_fill_manual(values = c(&quot;#226ab2&quot;,&quot;#b22222&quot;,&quot;#22b26a&quot;),
+                    labels = c(nu*2, nu, nu*0.5),
+                    name =  bquote(nu)) +
+  scale_y_continuous(limits = c(0, 0.10)) +
+  scale_x_continuous(limits = c(0, 100)) +
+  theme(panel.grid.minor = element_blank()) +
+  ggtitle(paste0(&quot;Varying dispersion with mean = &quot;, mu))</code></pre>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>Conversely, generating data with constant dispersion but increasing the mean does not shift the location but makes the distribution appear less “peaked”. In this case, variance increases with higher means (we can see that longer tails are associated with higher means) …</p>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="icc-for-clustered-data-where-within-group-observations-have-a-gaussian-normal-distribution" class="section level3">
+<h3>ICC for clustered data where within-group observations have a Gaussian (normal) distribution</h3>
+<p>In a 2-level world, with multiple groups each containing individuals, a normally distributed continuous outcome can be described by this simple model: <span class="math display">\[Y_{ij} = \mu + a_j + e_{ij},\]</span> where <span class="math inline">\(Y_{ij}\)</span> is the outcome for individual <span class="math inline">\(i\)</span> who is a member of group <span class="math inline">\(j\)</span>. <span class="math inline">\(\mu\)</span> is the average across all groups and individuals. <span class="math inline">\(a_j\)</span> is the group level effect and is typically assumed to be normally distributed as <span class="math inline">\(N(0, \sigma^2_a)\)</span>, and <span class="math inline">\(e_{ij}\)</span> is the individual level effect that is <span class="math inline">\(N(0, \sigma^2_e)\)</span>. The variance of <span class="math inline">\(Y_{ij}\)</span> is <span class="math inline">\(\text{Var}(a_j + e_{ij}) = \text{Var}(a_j) + \text{Var}(e_{ij}) = \sigma^2_a + \sigma^2_e\)</span>. The ICC is the proportion of total variation of <span class="math inline">\(Y\)</span> explained by the group variation: <span class="math display">\[ICC = \frac{\sigma^2_a}{\sigma^2_a+\sigma^2_e}\]</span> If individual level variation is relatively low or variation across groups is relatively high, then the ICC will be higher. Conversely, higher individual variation or lower variation between groups implies a smaller ICC.</p>
+<p>Here is a simulation of data for 50 groups, where each group has 250 individuals. The ICC is 0.10:</p>
+<pre class="r"><code># define the group level data
+
+defgrp &lt;- defData(varname = &quot;a&quot;, formula = 0, 
+               variance = 2.8, dist = &quot;normal&quot;, id = &quot;cid&quot;)
+defgrp &lt;- defData(defgrp, varname = &quot;n&quot;, formula = 250, 
+               dist = &quot;nonrandom&quot;)
+
+# define the individual level data
+
+defind &lt;- defDataAdd(varname = &quot;ynorm&quot;, formula = &quot;30 + a&quot;, 
+                   variance = 25.2, dist = &quot;normal&quot;)
+
+# generate the group and individual level data
+
+set.seed(3017)
+
+dt &lt;- genData(50, defgrp)
+dc &lt;- genCluster(dt, &quot;cid&quot;, &quot;n&quot;, &quot;id&quot;)
+dc &lt;- addColumns(defind, dc)
+dc</code></pre>
+<pre><code>##        cid         a   n    id    ynorm
+##     1:   1 -2.133488 250     1 30.78689
+##     2:   1 -2.133488 250     2 25.48245
+##     3:   1 -2.133488 250     3 22.48975
+##     4:   1 -2.133488 250     4 30.61370
+##     5:   1 -2.133488 250     5 22.51571
+##    ---                                 
+## 12496:  50 -1.294690 250 12496 25.26879
+## 12497:  50 -1.294690 250 12497 27.12190
+## 12498:  50 -1.294690 250 12498 34.82744
+## 12499:  50 -1.294690 250 12499 27.93607
+## 12500:  50 -1.294690 250 12500 32.33438</code></pre>
+<pre class="r"><code># mean Y by group
+davg &lt;- dc[, .(avgy = mean(ynorm)), keyby = cid] 
+
+# variance of group means
+(between.var &lt;- davg[, var(avgy)])</code></pre>
+<pre><code>## [1] 2.70381</code></pre>
+<pre class="r"><code># overall (marginal) mean and var of Y
+gavg &lt;- dc[, mean(ynorm)]
+gvar &lt;- dc[, var(ynorm)]
+
+# individual variance within each group
+dvar &lt;- dc[, .(vary = var(ynorm)), keyby =  cid]
+(within.var &lt;- dvar[, mean(vary)])</code></pre>
+<pre><code>## [1] 25.08481</code></pre>
+<pre class="r"><code># estimate of ICC
+(ICCest &lt;- between.var/(between.var + within.var))</code></pre>
+<pre><code>## [1] 0.09729918</code></pre>
+<pre class="r"><code>ggplot(data=dc, aes(y = ynorm, x = factor(cid))) +
+  geom_jitter(size = .5, color = &quot;grey50&quot;, width = 0.2) +
+  geom_point(data = davg, aes(y = avgy, x = factor(cid)), 
+             shape = 21, fill = &quot;firebrick3&quot;, size = 3) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        axis.text.y = element_text(size = 12),
+        axis.title = element_text(size = 14)
+  ) +
+  xlab(&quot;Group&quot;) +
+  scale_y_continuous(limits = c(0, 60), name = &quot;Measure&quot;) +
+  ggtitle(bquote(&quot;ICC:&quot; ~ .(round(ICCest, 2)) ~ 
+                 (sigma[a]^2 == .(round(between.var, 1)) ~ &quot;,&quot; ~ 
+                  sigma[e]^2 == .(round(within.var, 1)))
+                 )) </code></pre>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-4-1.png" width="960" /></p>
+<p>Here is a plot of data generated using the same overall variance of 28, but based on a much higher ICC of 0.80. Almost all of the variation in the data is driven by the clusters rather than the individuals. This has implications for a study, because (in contrast to the first data set generated above) the individual-level data is not providing as much information or insight into the variation of <span class="math inline">\(Y\)</span>. The most useful information (from this extreme example) can be derived from the difference between the groups (so we really have more like 50 data points rather than 125K).</p>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-6-1.png" width="960" /></p>
+<p>Of course, if we look at the individual-level data for each of the two data sets while ignoring the group membership, the two data sets are indistinguishable. That is, the marginal (or population level) distributions are both normally distributed with mean 30 and variance 28:</p>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="icc-for-clustered-data-with-gamma-distribution" class="section level3">
+<h3>ICC for clustered data with Gamma distribution</h3>
+<p>Now, back to the original question … how do we think about the ICC with clustered data that is Gamma distributed? The model (and data generating process) for these type of data can be described as:</p>
+<p><span class="math display">\[Y_{ij} \sim \text{gamma}(\mu_{j}, \nu),\]</span> where <span class="math inline">\(\text{E}(Y_{j}) = \mu_j\)</span> and <span class="math inline">\(\text{Var}(Y_j) = \nu\mu_j^2\)</span>. In addition, the mean of each group is often modeled as:</p>
+<p><span class="math display">\[\text{log}(\mu_j) = \beta + a_j,\]</span> where <span class="math inline">\(\beta\)</span> is log of the mean for the group whose group effect is 0, and <span class="math inline">\(a_j \sim N(0, \sigma^2_a)\)</span>. So, the group means are normally distributed on the log scale (or are lognormal) with variance <span class="math inline">\(\sigma^2_a\)</span>. (Although the individual observations within each cluster are Gamma-distributed, the means of the groups are not themselves Gamma-distributed.)</p>
+<p>But what is the within group (individual) variation, which <em>is</em> Gamma-distributed? It is not so clear, as the variance within each group depends on both the group mean <span class="math inline">\(\mu_j\)</span> and the dispersion factor <span class="math inline">\(\nu\)</span>. A <a href="https://www.biorxiv.org/content/early/2016/12/21/095851">paper</a> by Nakagawa <em>et al</em> shows that <span class="math inline">\(\sigma^2_e\)</span> on the log scale is also lognormal and can be estimated using the trigamma function (the 2nd derivative of the gamma function) of the dispersion factor. So, the ICC of clustered Gamma observations can be defined on the the log scale:</p>
+<p><span class="math display">\[\text{ICC}_\text{gamma-log} = \frac{\sigma^2_a}{\sigma^2_a + \psi_1 \left( \frac{1}{\nu}\right)}\]</span> <span class="math inline">\(\psi_1\)</span> is the <em>trigamma</em> function. I’m quoting from the paper here: “the variance of a gamma-distributed variable on the log scale is equal to <span class="math inline">\(\psi_1 (\frac{1}{\nu})\)</span>, where <span class="math inline">\(\frac{1}{\nu}\)</span> is the shape parameter of the gamma distribution and hence <span class="math inline">\(\sigma^2_e\)</span> is <span class="math inline">\(\psi_1 (\frac{1}{\nu})\)</span>.” (The formula I have written here is slightly different, as I define the dispersion factor as the reciprocal of the the dispersion factor used in the paper.)</p>
+<pre class="r"><code>sigma2a &lt;- 0.8
+nuval &lt;- 2.5
+
+(sigma2e &lt;- trigamma(1/nuval))</code></pre>
+<pre><code>## [1] 7.275357</code></pre>
+<pre class="r"><code># Theoretical ICC on log scale
+
+(ICC &lt;- sigma2a/(sigma2a + sigma2e))</code></pre>
+<pre><code>## [1] 0.09906683</code></pre>
+<pre class="r"><code># generate clustered gamma data
+
+def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = sigma2a, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;n&quot;, formula = 250, dist = &quot;nonrandom&quot;)
+
+defc &lt;- defDataAdd(varname = &quot;g&quot;, formula = &quot;2 + a&quot;, 
+                   variance = nuval, dist = &quot;gamma&quot;, link = &quot;log&quot;)
+
+dt &lt;- genData(1000, def)
+dc &lt;- genCluster(dt, &quot;id&quot;, &quot;n&quot;, &quot;id1&quot;)
+dc &lt;- addColumns(defc, dc)
+dc</code></pre>
+<pre><code>##           id          a   n    id1           g
+##      1:    1 -0.5127477 250      1  0.21708707
+##      2:    1 -0.5127477 250      2  2.28008091
+##      3:    1 -0.5127477 250      3  3.00000226
+##      4:    1 -0.5127477 250      4  0.01637102
+##      5:    1 -0.5127477 250      5  0.92374322
+##     ---                                       
+## 249996: 1000  1.6738901 250 249996  0.10547825
+## 249997: 1000  1.6738901 250 249997  0.08740397
+## 249998: 1000  1.6738901 250 249998  1.24423215
+## 249999: 1000  1.6738901 250 249999 41.52665306
+## 250000: 1000  1.6738901 250 250000 89.10427825</code></pre>
+<p>Here is an estimation of the ICC on the log scale using the raw data …</p>
+<pre class="r"><code>dc[, lg := log(g)]
+
+davg &lt;- dc[, .(avgg = mean(lg)), keyby = id]
+(between &lt;- davg[, var(avgg)])</code></pre>
+<pre><code>## [1] 0.8581585</code></pre>
+<pre class="r"><code>dvar &lt;- dc[, .(varg = var(lg)), keyby = id]
+(within &lt;- dvar[, mean(varg)])</code></pre>
+<pre><code>## [1] 7.202411</code></pre>
+<pre class="r"><code>(ICCest &lt;- between/(between + within))</code></pre>
+<pre><code>## [1] 0.1064638</code></pre>
+<p>Here is an estimation of the ICC (on the log scale) based on the estimated variance of the random effects using a generalized mixed effects model. The between-group variance is a ratio of the intercept variance and the residual variance. An estimate of <span class="math inline">\(\nu\)</span> is just the residual variance …</p>
+<pre class="r"><code>library(lme4)
+
+glmerfit &lt;- glmer(g ~ 1 + (1|id), 
+              family = Gamma(link=&quot;log&quot;), data= dc)
+
+summary(glmerfit)</code></pre>
+<pre><code>## Generalized linear mixed model fit by maximum likelihood (Laplace
+##   Approximation) [glmerMod]
+##  Family: Gamma  ( log )
+## Formula: g ~ 1 + (1 | id)
+##    Data: dc
+## 
+##       AIC       BIC    logLik  deviance  df.resid 
+## 1317249.8 1317281.1 -658621.9 1317243.8    249997 
+## 
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -0.6392 -0.6008 -0.4058  0.1744 13.9665 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  id       (Intercept) 2.001    1.414   
+##  Residual             2.448    1.564   
+## Number of obs: 250000, groups:  id, 1000
+## 
+## Fixed effects:
+##             Estimate Std. Error t value Pr(&gt;|z|)    
+## (Intercept)   2.0099     0.0287   70.03   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1</code></pre>
+<pre class="r"><code>estnu &lt;- as.data.table(VarCorr(glmerfit))[2,4]
+estsig &lt;- as.data.table(VarCorr(glmerfit))[1,4] / estnu 
+
+estsig/(estsig + trigamma(1/estnu))</code></pre>
+<pre><code>##         vcov
+## 1: 0.1044648</code></pre>
+<p>Finally, here are some plots of the generated observations and the group means on the log scale. The plots in each row have the same ICC but different underlying mean and dispersion parameters. I find these plots interesting because looking across the columns or up and down the two rows, they provide some insight to the interplay of group means and dispersion on the ICC …</p>
+<p><img src="/post/2017-11-27-icc-for-clustered-data-that-happen-to-have-a-gamma-distribution_files/figure-html/unnamed-chunk-12-1.png" width="960" /></p>
+</div>
