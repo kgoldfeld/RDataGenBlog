@@ -1,0 +1,142 @@
+---
+title: When you use inverse probability weighting for estimation, what are the weights actually doing?
+author: ''
+date: '2017-12-04'
+slug: inverse-probability-weighting-when-the-outcome-is-binary
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Towards the end of <a href="https://www.rdatagen.net/post/potential-outcomes-confounding/">Part 1</a> of this short series on confounding, IPW, and (hopefully) marginal structural models, I talked a little bit about the fact that inverse probability weighting (IPW) can provide unbiased estimates of marginal causal effects in the context of confounding just as more traditional regression models like OLS can. I used an example based on a normally distributed outcome. Now, that example wasn’t super interesting, because in the case of a linear model with homogeneous treatment effects (i.e. no interaction), the marginal causal effect is the same as the conditional effect (that is, conditional on the confounders.) There was no real reason to use IPW in that example - I just wanted to illustrate that the estimates looked reasonable.</p>
+<p>But in many cases, the conditional effect <em>is</em> different from the marginal effect. (And in other cases, there may not even be an obvious way to estimate the conditional effect - that will be the topic for the last post in this series). When the outcome is binary, the notion that conditional effects are equal to marginal effects is no longer the case. (I’ve touched on this <a href="https://www.rdatagen.net/post/marginal-v-conditional/">before</a>.) What this means, is that we can recover the true conditional effects using logistic regression, but we cannot estimate the marginal effect. This is directly related to the fact that logistic regression is linear on the logit (or log-odds) scale, not on the probability scale. The issue here is collapsibility, or rather, non-collapsibility.</p>
+<div id="a-simulation" class="section level3">
+<h3>A simulation</h3>
+<p>Because binary outcomes are less amenable to visual illustration, I am going to stick with model estimation to see how this plays out:</p>
+<pre class="r"><code>library(simstudy)
+
+# define the data
+
+defB &lt;- defData(varname = &quot;L&quot;, formula =0.27, 
+                dist = &quot;binary&quot;)
+defB &lt;- defData(defB, varname = &quot;Y0&quot;, formula = &quot;-2.5 + 1.75*L&quot;, 
+                dist = &quot;binary&quot;, link = &quot;logit&quot;)
+defB &lt;- defData(defB, varname = &quot;Y1&quot;, formula = &quot;-1.5 + 1.75*L&quot;, 
+                dist = &quot;binary&quot;, link = &quot;logit&quot;)
+defB &lt;- defData(defB, varname = &quot;A&quot;, formula = &quot;0.315 + 0.352 * L&quot;, 
+                dist = &quot;binary&quot;)
+defB &lt;- defData(defB, varname = &quot;Y&quot;, formula = &quot;Y0 + A * (Y1 - Y0)&quot;, 
+                dist = &quot;nonrandom&quot;)
+
+# generate the data
+
+set.seed(2002)
+dtB &lt;- genData(200000, defB)
+dtB[1:6]</code></pre>
+<pre><code>##    id L Y0 Y1 A Y
+## 1:  1 0  0  0 0 0
+## 2:  2 0  0  0 0 0
+## 3:  3 1  0  1 1 1
+## 4:  4 0  1  1 1 1
+## 5:  5 1  0  0 1 0
+## 6:  6 1  0  0 0 0</code></pre>
+<p>We can look directly at the potential outcomes to see the true causal effect, measured as a log odds ratio (LOR):</p>
+<pre class="r"><code>odds &lt;- function (p) {
+    return((p/(1 - p)))
+}
+
+# log odds ratio for entire sample (marginal LOR)
+
+dtB[, log( odds( mean(Y1) ) / odds( mean(Y0) ) )]</code></pre>
+<pre><code>## [1] 0.8651611</code></pre>
+<p>In the linear regression context, the conditional effect measured using observed data from the exposed and unexposed subgroups was in fact a good estimate of the marginal effect in the population. Not the case here, as the conditional causal effect (LOR) of A is 1.0, which is greater than the true marginal effect of 0.86:</p>
+<pre class="r"><code>library(broom)
+tidy(glm(Y ~ A + L , data = dtB, family=&quot;binomial&quot;)) </code></pre>
+<pre><code>##          term   estimate  std.error  statistic p.value
+## 1 (Intercept) -2.4895846 0.01053398 -236.33836       0
+## 2           A  0.9947154 0.01268904   78.39167       0
+## 3           L  1.7411358 0.01249180  139.38225       0</code></pre>
+<p>This regression estimate for the coefficient of <span class="math inline">\(A\)</span> <em>is</em> a good estimate of the conditional effect in the population (based on the potential outcomes at each level of <span class="math inline">\(L\)</span>):</p>
+<pre class="r"><code>dtB[, .(LOR = log( odds( mean(Y1) ) / odds( mean(Y0) ) ) ), keyby = L]</code></pre>
+<pre><code>##    L       LOR
+## 1: 0 0.9842565
+## 2: 1 0.9865561</code></pre>
+<p>Of course, ignoring the confounder <span class="math inline">\(L\)</span> is not very useful if we are interested in recovering the marginal effect. The estimate of 1.4 is biased for <em>both</em> the conditional effect <em>and</em> the marginal effect - it is not really useful for anything:</p>
+<pre class="r"><code>tidy(glm(Y ~ A , data = dtB, family=&quot;binomial&quot;))</code></pre>
+<pre><code>##          term  estimate   std.error statistic p.value
+## 1 (Intercept) -2.049994 0.009164085 -223.6987       0
+## 2           A  1.433094 0.011723767  122.2384       0</code></pre>
+</div>
+<div id="how-weighting-reshapes-the-data" class="section level3">
+<h3>How weighting reshapes the data …</h3>
+<p>Here is a simple tree graph that shows the potential outcomes for 1000 individuals (based on the same distributions we’ve been using in our simulation). For 27% of the individuals, <span class="math inline">\(L=1\)</span>, for 73% <span class="math inline">\(L=0\)</span>. Each individual has a potential outcome under each level of treatment <span class="math inline">\(A\)</span>. So, that is why there are 730 individuals with <span class="math inline">\(L=0\)</span> who are both with and without treatment. Likewise each treatment arm for those with <span class="math inline">\(L=0\)</span> has 270 individuals. We are not double counting.</p>
+<div class="figure">
+<img src="/img/post-ipw/PO_flow_large.png" />
+
+</div>
+<p>Both the marginal and conditional estimates that we estimated before using the simulated data can be calculated directly using information from this tree. The conditional effects on the log-odds scale can be calculated as …</p>
+<p><span class="math display">\[LOR_{A=1 \textbf{ vs  } A=0|L = 0} = log \left (\frac{0.182/0.818}{0.076/0.924} \right)=log(2.705) = 0.995\]</span></p>
+<p>and</p>
+<p><span class="math display">\[LOR_{A=1 \textbf{ vs  } A=0|L = 1} = log \left (\frac{0.562/0.438}{0.324/0.676} \right)=log(2.677) = 0.984\]</span></p>
+<p>The marginal effect on the log odds scale is estimated marginal probabilities: <span class="math inline">\(P(Y=1|A=0)\)</span> and <span class="math inline">\(P(Y=1|A=1)\)</span>. Again, we can take this right from the tree …</p>
+<p><span class="math display">\[P(Y=1|A=0) = 0.73\times0.076 + 0.27\times0.324 = 0.143\]</span> and</p>
+<p><span class="math display">\[P(Y=1|A=1) = 0.73\times0.182 + 0.27\times0.562 = 0.285\]</span></p>
+<p>Based on these average outcomes (probabilities) by exposure, the marginal log-odds for the sample is:</p>
+<p><span class="math display">\[LOR_{A=1 \textbf{ vs  } A=0} = log \left (\frac{0.285/0.715}{0.143/0.857} \right)=log(2.389) = 0.871\]</span></p>
+<p>Back in the real world of observed data, this is what the tree diagram looks like:</p>
+<div class="figure">
+<img src="/img/post-ipw/Obs_flow_large.png" />
+
+</div>
+<p>This tree tells us that the probability of exposure <span class="math inline">\(A=1\)</span> is different depending upon that value of <span class="math inline">\(L\)</span>. For <span class="math inline">\(L=1\)</span>, <span class="math inline">\(P(A=1) = 230/730 = 0.315\)</span> and for <span class="math inline">\(L=0\)</span>, <span class="math inline">\(P(A=1) = 180/270 = 0.667\)</span>. Because of this disparity, the crude estimate of the effect (ignoring <span class="math inline">\(L\)</span>) is biased for the marginal causal effect:</p>
+<p><span class="math display">\[P(Y=1|A=0) = \frac{500\times0.076 + 90\times0.324}{500+90}=0.114\]</span></p>
+<p>and</p>
+<p><span class="math display">\[P(Y=1|A=1) = \frac{230\times0.182 + 180\times0.562}{230+180}=0.349\]</span></p>
+<p>The crude log odds ratio is</p>
+<p><span class="math display">\[LOR_{A=1 \textbf{ vs  } A=0} = log \left (\frac{0.349/0.651}{0.114/0.886} \right)=log(4.170) = 1.420\]</span></p>
+<p>As mentioned in the prior post, the IPW is based on the probability of the actual exposure at each level of <span class="math inline">\(L\)</span>: <span class="math inline">\(P(A=a | L)\)</span>, where <span class="math inline">\(a\in(0,1)\)</span> (and not on <span class="math inline">\(P(A=1|L)\)</span>, the propensity score). Here are the simple weights for each group:</p>
+<div class="figure">
+<img src="/img/post-ipw/Weights.png" />
+
+</div>
+<p>If we apply the weights to each of the respective groups, you can see that the number of individuals in each treatment arm is adjusted to the total number of individuals in the sub-group defined the level of <span class="math inline">\(L\)</span>. For example, if we apply the weight of 3.17 (730/230) to each person observed with <span class="math inline">\(L=0\)</span> and <span class="math inline">\(A=1\)</span>, we end up with <span class="math inline">\(230\times3.17=730\)</span>. Applying each of the respective weights to the subgroups of <span class="math inline">\(L\)</span> and <span class="math inline">\(A\)</span> results in a new sample of individuals that looks exactly like the one we started out with in the potential outcomes world:</p>
+<div class="figure">
+<img src="/img/post-ipw/PO_flow_large.png" />
+
+</div>
+<p>This all works only if we make these two assumptions: <span class="math display">\[P(Y=1|A=0, L=l) = P(Y_0=1 | A=1, L=l)\]</span> and <span class="math display">\[P(Y=1|A=1, L=l) = P(Y_1=1 | A=0, L=l)\]</span></p>
+<p>That is, we can make this claim <em>only under the assumption of no unmeasured confounding</em>. (This was discussed in the <a href="https://www.rdatagen.net/post/potential-outcomes-confounding/">Part 1</a> post.)</p>
+</div>
+<div id="applying-ipw-to-our-data" class="section level3">
+<h3>Applying IPW to our data</h3>
+<p>We need to estimate the weights using logistic regression (though other, more flexible methods, can also be used). First, we estimate <span class="math inline">\(P(A=1|L)\)</span> …</p>
+<pre class="r"><code>exposureModel &lt;- glm(A ~ L, data = dtB, family = &quot;binomial&quot;)
+dtB[, pA := predict(exposureModel, type = &quot;response&quot;)]</code></pre>
+<p>Now we can derive an estimate for <span class="math inline">\(P(A=a|L=l)\)</span> and get the weight itself…</p>
+<pre class="r"><code># Define two new columns
+defB2 &lt;- defDataAdd(varname = &quot;pA_actual&quot;, 
+                    formula = &quot;(A * pA) + ((1 - A) * (1 - pA))&quot;, 
+                    dist = &quot;nonrandom&quot;)
+defB2 &lt;- defDataAdd(defB2, varname = &quot;IPW&quot;, 
+                    formula = &quot;1/pA_actual&quot;, 
+                    dist = &quot;nonrandom&quot;)
+
+# Add weights
+dtB &lt;- addColumns(defB2, dtB)
+dtB[1:6]</code></pre>
+<pre><code>##    id L Y0 Y1 A Y        pA pA_actual      IPW
+## 1:  1 0  0  0 0 0 0.3146009 0.6853991 1.459004
+## 2:  2 0  0  0 0 0 0.3146009 0.6853991 1.459004
+## 3:  3 1  0  1 1 1 0.6682351 0.6682351 1.496479
+## 4:  4 0  1  1 1 1 0.3146009 0.3146009 3.178631
+## 5:  5 1  0  0 1 0 0.6682351 0.6682351 1.496479
+## 6:  6 1  0  0 0 0 0.6682351 0.3317649 3.014183</code></pre>
+<p>To estimate the marginal effect on the log-odds scale, we use the function <code>glm</code> with weights specified by IPW. The true value of marginal effect (based on the population-wide potential outcomes) was 0.87 (as we estimated from the potential outcomes directly and from the tree graph). Our estimate here is spot on (but with such a large sample size, this is not so surprising):</p>
+<pre class="r"><code>tidy(glm(Y ~ A , data = dtB, family=&quot;binomial&quot;, weights = IPW)) </code></pre>
+<pre><code>##          term   estimate   std.error statistic p.value
+## 1 (Intercept) -1.7879512 0.006381189 -280.1909       0
+## 2           A  0.8743154 0.008074115  108.2862       0</code></pre>
+<p>It may not seem like a big deal to be able to estimate the marginal effect - we may actually not be interested in it. However, in the next post, I will touch on the issue of estimating causal effects when there are repeated exposures (for example, administering a drug over time) and time dependent confounders that are both affected by prior exposures and affect future exposures <em>and</em> affect the outcome. Under this scenario, it is very difficult if not impossible to control for these confounders - the best we might be able to do is estimate a marginal, population-wide causal effect. That is where weighting will be really useful.</p>
+</div>
