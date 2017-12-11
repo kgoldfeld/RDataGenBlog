@@ -1,0 +1,348 @@
+---
+title: When there's a fork in the road, take it. Or, taking a look at marginal structural models.
+author: ''
+date: '2017-12-11'
+slug: when-a-covariate-is-a-confounder-and-a-mediator
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>I am going to cut right to the chase, since this is the third of three posts related to confounding and weighting, and it’s kind of a long one. (If you want to catch up, the first two are <a href="https://www.rdatagen.net/post/potential-outcomes-confounding/">here</a> and <a href="https://www.rdatagen.net/post/inverse-probability-weighting-when-the-outcome-is-binary/">here</a>.) My aim with these three posts is to provide a basic explanation of the <em>marginal structural model</em> (MSM) and how we should interpret the estimates. This is obviously a very rich topic with a vast literature, so if you remain interested in the topic, I recommend checking out this (as of yet unpublished) <a href="https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/">text book</a> by Hernán &amp; Robins for starters.</p>
+<p>The DAG below is a simple version of how things can get complicated very fast if we have sequential treatments or exposures that both affect and are affected by intermediate factors or conditions.</p>
+<div class="figure">
+<img src="/img/post-msm/MSM_DAG_observed.png" />
+
+</div>
+<p><span class="math inline">\(A_0\)</span> and <span class="math inline">\(A_1\)</span> represent two treatment points and <span class="math inline">\(L_0\)</span> and <span class="math inline">\(L_1\)</span> represent measurements taken before and after treatments, respectively. Both treatments and at least <span class="math inline">\(L_1\)</span> affect outcome <span class="math inline">\(Y\)</span>. (I am assuming that the <span class="math inline">\(A\)</span>’s and <span class="math inline">\(L\)</span>’s are binary and that <span class="math inline">\(Y\)</span> is continuous. <span class="math inline">\(\epsilon\)</span> is <span class="math inline">\(N(0, \sigma_\epsilon^2)\)</span>.)</p>
+<p>An example of this might be a situation where we are interested in the effect of a drug treatment on mental health well-being for patients with prehypertension or hypertension. A physician’s decision to administer the drug at each visit is influenced by the patient’s level of hypertension. In turn, the treatment <span class="math inline">\(A_0\)</span> potentially reduces the probability of hypertension - <span class="math inline">\(P(L_1=1)\)</span>. And finally, <span class="math inline">\(L_1\)</span> influences the next treatment decision and ultimately the mental health outcome <span class="math inline">\(Y\)</span>.</p>
+<p>The complicating factor is that the hypertension level following the first treatment (<span class="math inline">\(L_1\)</span>) is both a mediator the effect of treatment <span class="math inline">\(A_0\)</span> and confounder of the treatment effect <span class="math inline">\(A_1\)</span> on <span class="math inline">\(Y\)</span>. To get an unbiased estimate the effect of the combined treatment regime (<span class="math inline">\(A_0\)</span> and <span class="math inline">\(A_1\)</span>) we need to both control for <span class="math inline">\(L_1\)</span> and not control for <span class="math inline">\(L_1\)</span>. This is where MSMs and inverse probability weighting (IPW) come into play.</p>
+<p>The MSM is marginal in the sense that we’ve been talking about in this series - the estimate will be a population-wide estimate that reflects the mixture of the covariates that influence the treatments and outcomes (in this case, the <span class="math inline">\(L\)</span>’s). It is structural in the sense that we are modeling <em>potential outcomes</em>. Nothing has changed from the last <a href="https://www.rdatagen.net/post/inverse-probability-weighting-when-the-outcome-is-binary/">post</a> except for the fact that we are now defining the exposures as a sequence of different treatments (here <span class="math inline">\(A_0\)</span> and <span class="math inline">\(A_1\)</span>, but could easily extend to <span class="math inline">\(n\)</span> treatments - up to <span class="math inline">\(A_n\)</span>.)</p>
+<div id="imagine-an-experiment" class="section level3">
+<h3>Imagine an experiment …</h3>
+<p>To understand the MSM, it is actually helpful to think about how a single individual fits into the picture. The tree diagram below literally shows that. The MSM posits a weird experiment where measurements (of <span class="math inline">\(L\)</span>) are collected and treatments (<span class="math inline">\(A\)</span>) are assigned repeatedly until a final outcome is measured. In this experiment, the patient is not just assigned to one treatment arm, but to both! Impossible of course, but that is the world of potential outcomes.</p>
+<p>At the start of the experiment, a measurement of <span class="math inline">\(L_0\)</span> is collected. This sends the patient down the one of the branches of the tree. Since the patient is assigned to both <span class="math inline">\(A_0=0\)</span> and <span class="math inline">\(A_0=1\)</span>, she actually heads down two <em>different</em> branches simultaneously. Following the completion of the first treatment period <span class="math inline">\(A_0\)</span>, the second measurement (<span class="math inline">\(L_1\)</span>) is collected. But, two measurements are taken for the patient - one for each branch. The results need not be the same. In fact, if the treatment has an individual-level effect on <span class="math inline">\(L_1\)</span>, then the results will be different for this patient. In the example below, this is indeed the case. Following each of those measurements (in parallel universes), the patient is sent down the next treatment branches (<span class="math inline">\(A_1\)</span>). At this point, the patient finds herself in four branches. At the end of each, the measurement of <span class="math inline">\(Y\)</span> is taken, and we have four potential outcomes for individual {i}: <span class="math inline">\(Y^i_{00}\)</span>, <span class="math inline">\(Y^i_{10}\)</span>, <span class="math inline">\(Y^i_{01}\)</span>, and <span class="math inline">\(Y^i_{11}\)</span>.</p>
+<p>A different patient will head down different branches based on his own values of <span class="math inline">\(L_0\)</span> and <span class="math inline">\(L_1\)</span>, and will thus end up with different potential outcomes. (Note: the values represented in the figure are intended to be average values for that particular path.)</p>
+<div class="figure">
+<img src="/img/post-msm/IPW_MSM_Ind.png" />
+
+</div>
+</div>
+<div id="how-do-we-define-the-causal-effect" class="section level3">
+<h3>How do we define the causal effect?</h3>
+<p>With four potential outcomes rather than two, it is less obvious how to define the causal effect. We could, for example, consider three separate causal effects by comparing each of the treatment “regimes” that include at least one exposure to the intervention to the single regime that leaves the patient entirely unexposed. That is, we could be interested in (at the individual <span class="math inline">\(i\)</span> level) <span class="math inline">\(E^i_1 = Y^i_{10}-Y^i_{00}\)</span>, <span class="math inline">\(E^i_2 = Y^i_{01}-Y^i_{00}\)</span>, and <span class="math inline">\(E^i_3 = Y^i_{11}-Y^i_{00}\)</span>. This is just one possibility; the effects of interest are driven entirely by the research question.</p>
+<p>When we have three or four or more intervention periods, the potential outcomes can start to pile up rapidly (we will have <span class="math inline">\(2^n\)</span> potential outcomes for a sequence of <span class="math inline">\(n\)</span> treatments.) So, the researcher might want to be judicious in deciding which contrasts to be made. Maybe something like <span class="math inline">\(Y_{1111} - Y_{0000}\)</span>, <span class="math inline">\(Y_{0111} - Y_{0000}\)</span>, <span class="math inline">\(Y_{0011} - Y_{0000}\)</span>, and <span class="math inline">\(Y_{0001} - Y_{0000}\)</span> for a four-period intervention. This would allow us to consider the effect of starting (and never stopping) the intervention in each period compared to never starting the intervention at all. By doing this, though, we would be using only 5 out of the 16 potential outcomes. If the remaining 11 paths are not so rare, we might be ignoring a lot of data.</p>
+</div>
+<div id="the-marginal-effect" class="section level3">
+<h3>The marginal effect</h3>
+<p>The tree below represents an aggregate set of branches for a sample of 5000 individuals. The sample is initially characterized only by the distribution of <span class="math inline">\(L_0\)</span>. Each individual will go down her own set of four paths, which depend on the starting value of <span class="math inline">\(L_0\)</span> and how each value of <span class="math inline">\(L_1\)</span> responds in the context of each treatment arm.</p>
+<div class="figure">
+<img src="/img/post-msm/IPW_MSM_PO.png" />
+
+</div>
+<p>Each individual <span class="math inline">\(i\)</span> (at least in theory) has four potential outcomes: <span class="math inline">\(Y^i_{00}\)</span>, <span class="math inline">\(Y^i_{10}\)</span>, <span class="math inline">\(Y^i_{01}\)</span>, and <span class="math inline">\(Y^i_{11}\)</span>. Averaging across the sample provides a marginal estimate of each of these potential outcomes. For example, <span class="math inline">\(E(Y_{00})=\sum_i{Y^i_{00}}/5000\)</span>. This can be calculated from the tree as <span class="math display">\[(1742*53 + 1908*61 + 392*61 + 958*69)/5000 = 59.7\]</span> Similarly, <span class="math inline">\(E(Y_{11}) = 40.1\)</span> The sample average causal effects are estimated using the respective averages of the potential outcomes. For example, <span class="math inline">\(E_3\)</span> at the sample level would be defined as <span class="math inline">\(E(Y_{11}) - E(Y_{00}) = 40.1 - 59.7 = -19.6\)</span>.</p>
+</div>
+<div id="back-in-the-real-world" class="section level3">
+<h3>Back in the real world</h3>
+<p>In reality, there are no parallel universes. Maybe we could come up with an actual randomized experiment to mimic this, but it may be difficult. More likely, we’ll have observed data that looks like this:</p>
+<div class="figure">
+<img src="/img/post-msm/IPW_MSM_obs_noIPW.png" />
+
+</div>
+<p>Each individual heads down his or her own path, receiving a single treatment at each time point. Since this is not a randomized trial, the probability of treatment is different across different levels of <span class="math inline">\(L_0\)</span> and <span class="math inline">\(L_1\)</span> and that <span class="math inline">\(L_0\)</span> and <span class="math inline">\(L_1\)</span> are associated with the outcome (i.e. there is confounding).</p>
+</div>
+<div id="estimating-the-marginal-effects" class="section level3">
+<h3>Estimating the marginal effects</h3>
+<p>In the previous posts in this series, I provided some insight as to how we might justify using observed data only to estimate these sample-wide average potential outcomes. The most important assumption is that when we have measured all confounders, we may be able to say, for example, <span class="math inline">\(E(Y_{01}) = E(Y | A_0 = 0 \ \&amp; \ A_1 = 1 )\)</span>. The <em>potential outcome</em> for everyone in the sample is equal to the <em>observed</em> outcome for the subgroup who actually followed the particular path that represents that potential outcome. We will make the same assumption here.</p>
+<p>At the start of this post, I argued that given the complex nature of the data generating process (in particular given that <span class="math inline">\(L_1\)</span> is both a mediator and confounder), it is challenging to get unbiased estimates of the intervention effects. One way to do this with marginal structural models (another way is using <a href="https://academic.oup.com/aje/article/173/7/731/104142"><em>g-computation</em></a>, but I won’t talk about that here). Inverse probability weighting converts the observed tree graph from the real world to the marginal tree graph so that we can estimate sample-wide average (marginal) potential outcomes as an estimate for some population causal effects.</p>
+<p>In this case, the inverse probability weight is calculated as <span class="math display">\[IPW = \frac{1}{P(A_0=a_0 | L_0=l_0) \times P(A_1=a_1 | L_0=l_0, A_0=a_0, L_1=l_1)}\]</span> In practice, we estimate both probabilities using logistic regression or some other modeling technique. But here, we can read the probabilities off the tree graph. For example, if we are interested in the weight associated with individuals observed with <span class="math inline">\(L_0=1, A_0=0, L_1=0, \textbf{and } A_1=1\)</span>, the probabilities are <span class="math display">\[P(A_0 = 0 | L_0=1) = \frac{676}{1350}=0.50\]</span> and <span class="math display">\[P(A_1=1 | L_0=1, A_0=0, L_1=0) = \frac{59}{196} = 0.30\]</span></p>
+<p>So, the inverse probability weight for these individuals is <span class="math display">\[IPW = \frac{1}{0.50 \times 0.30} = 6.67\]</span> For the 59 individuals that followed this pathway, the weighted number is <span class="math inline">\(59 \times 6.67 = 393\)</span>. In the marginal world of parallel universes, there were 394 individuals.</p>
+</div>
+<div id="simulating-data-from-an-msm" class="section level3">
+<h3>Simulating data from an MSM</h3>
+<p>Before I jump into the simulation, I do want to reference a paper by <a href="http://onlinelibrary.wiley.com/doi/10.1002/sim.5472/full">Havercroft and Didelez</a> that describes in great detail how to generate data from a MSM with time-dependent confounding. It turns out that the data can’t be generated exactly using the intial DAG (presented above), but rather needs to come from something like this:</p>
+<div class="figure">
+<img src="/img/post-msm/MSM_DAG_dataGen.png" />
+
+</div>
+<p>where <span class="math inline">\(U\)</span> is an unmeasured, maybe latent, covariate. The observed data (that ignores <span class="math inline">\(U\)</span>) will indeed have a DAG that looks like the one that we started with.</p>
+<p>When doing simulations with potential outcomes, we can generate all the potential outcomes for each individual using a parallel universe approach. The observed data (treatment choices and observed outcomes) are generated separately. The advantage of this is that we can confirm the <em>true</em> causal effects because we have actually generated potential outcomes. The disadvantage is that the code is considerably more complicated and the quantity of data generated grows. The situation is not so bad with just two treatment periods, but the size of the data increases exponentially with the number of treatments: as I mentioned earlier, there will be <span class="math inline">\(2^n\)</span> potential outcomes for each individual.</p>
+<p>Alternatively, we can just generate the observed data directly. Since we know the true causal parameters we actually “know” the causal effects and can compare our estimates.</p>
+<p>I will go through the convoluted approach because I think it clarifies (at least a bit) what is going on. As an addendum, I will show how all of this could be done in a few lines of code if we take the second approach …</p>
+<pre class="r"><code>library(broom)
+library(simstudy)
+
+# define U, e and L0
+
+defA0 &lt;- defData(varname = &quot;U&quot;, formula = &quot;0;1&quot;, dist = &quot;uniform&quot;)
+defA0 &lt;- defData(defA0, varname = &quot;e&quot;, formula = 0, 
+                 variance = 4, dist = &quot;normal&quot;)
+defA0&lt;- defData(defA0, varname = &quot;L0&quot;, formula = &quot;-2.66+ 3*U&quot;, 
+                dist = &quot;binary&quot;, link = &quot;logit&quot;)
+
+# generate the data
+
+set.seed(1234)
+dtA0 &lt;- genData(n = 50000, defA0)
+dtA0[1:6]</code></pre>
+<pre><code>##    id         U          e L0
+## 1:  1 0.1137034 -3.5951796  0
+## 2:  2 0.6222994 -0.5389197  0
+## 3:  3 0.6092747  1.0675660  0
+## 4:  4 0.6233794 -0.7226909  1
+## 5:  5 0.8609154  0.8280401  0
+## 6:  6 0.6403106  3.3532399  0</code></pre>
+<p>Now we need to create the two parallel universes - assigning each individual to both treatments. <code>simstudy</code> has a function <code>addPeriods</code> to generate longitudinal data. I am not doing that here, but can generate 2-period data and change the name of the “period” field to “A0”.</p>
+<pre class="r"><code>dtA0 &lt;- addPeriods(dtA0, 2)
+setnames(dtA0, &quot;period&quot;, &quot;A0&quot;)
+dtA0[1:6]</code></pre>
+<pre><code>##    id A0         U          e L0 timeID
+## 1:  1  0 0.1137034 -3.5951796  0      1
+## 2:  1  1 0.1137034 -3.5951796  0      2
+## 3:  2  0 0.6222994 -0.5389197  0      3
+## 4:  2  1 0.6222994 -0.5389197  0      4
+## 5:  3  0 0.6092747  1.0675660  0      5
+## 6:  3  1 0.6092747  1.0675660  0      6</code></pre>
+<p>Now we are ready to randomly assign a value of <span class="math inline">\(L_1\)</span>. The probability is lower for cases where <span class="math inline">\(A_0 = 1\)</span>, so individuals themselves may have different values of <span class="math inline">\(L_1\)</span> in the alternative paths.</p>
+<pre class="r"><code># generate L1 as a function of U, L0, and A0
+
+addA0 &lt;- defDataAdd(varname = &quot;L1&quot;, 
+                    formula = &quot;-1.2 + 3*U + 0.2*L0 - 2.5*A0&quot;, 
+                    dist= &quot;binary&quot;, link=&quot;logit&quot;)
+
+dtA0 &lt;- addColumns(addA0, dtOld = dtA0)
+dtA0[1:6]</code></pre>
+<pre><code>##    id A0         U          e L0 timeID L1
+## 1:  1  0 0.1137034 -3.5951796  0      1  0
+## 2:  1  1 0.1137034 -3.5951796  0      2  0
+## 3:  2  0 0.6222994 -0.5389197  0      3  1
+## 4:  2  1 0.6222994 -0.5389197  0      4  0
+## 5:  3  0 0.6092747  1.0675660  0      5  0
+## 6:  3  1 0.6092747  1.0675660  0      6  0</code></pre>
+<pre class="r"><code># L1 is clearly a function of A0
+
+dtA0[, .(prob_L1 = mean(L1)), keyby = .(L0,A0)]</code></pre>
+<pre><code>##    L0 A0   prob_L1
+## 1:  0  0 0.5238369
+## 2:  0  1 0.1080039
+## 3:  1  0 0.7053957
+## 4:  1  1 0.2078551</code></pre>
+<p>Now we create two additional parallel universes for treatment <span class="math inline">\(A_1\)</span> and the potential outcomes. This will result in four records per individual:</p>
+<pre class="r"><code>dtA1 &lt;- addPeriods(dtA0, 2)
+setnames(dtA1, &quot;period&quot;, &quot;A1&quot;)
+
+addA1 &lt;- defDataAdd(varname = &quot;Y_PO&quot;, 
+                    formula = &quot;39.95 + U*40 - A0 * 8 - A1 * 12 + e&quot;, 
+                    dist = &quot;nonrandom&quot;)
+
+dtA1 &lt;- addColumns(addA1, dtA1)
+dtA1[1:8]</code></pre>
+<pre><code>##    id A1 A0         U          e L0 timeID L1     Y_PO
+## 1:  1  0  0 0.1137034 -3.5951796  0      1  0 40.90296
+## 2:  1  0  1 0.1137034 -3.5951796  0      2  0 32.90296
+## 3:  1  1  0 0.1137034 -3.5951796  0      3  0 28.90296
+## 4:  1  1  1 0.1137034 -3.5951796  0      4  0 20.90296
+## 5:  2  0  0 0.6222994 -0.5389197  0      5  1 64.30306
+## 6:  2  0  1 0.6222994 -0.5389197  0      6  0 56.30306
+## 7:  2  1  0 0.6222994 -0.5389197  0      7  1 52.30306
+## 8:  2  1  1 0.6222994 -0.5389197  0      8  0 44.30306</code></pre>
+<p>Not surprisingly, the estimates for the causal effects mirror the parameters we used to generate the <span class="math inline">\(Y\)</span>’s above …</p>
+<pre class="r"><code># estimate for Y_00 is close to what we estimated from the tree
+
+Y_00 &lt;- dtA1[A0 == 0 &amp; A1 == 0, mean(Y_PO)]
+Y_00</code></pre>
+<pre><code>## [1] 59.96619</code></pre>
+<pre class="r"><code>Y_10 &lt;- dtA1[A0 == 1 &amp; A1 == 0, mean(Y_PO)]
+Y_01 &lt;- dtA1[A0 == 0 &amp; A1 == 1, mean(Y_PO)]
+Y_11 &lt;- dtA1[A0 == 1 &amp; A1 == 1, mean(Y_PO)]
+
+# estimate 3 causal effects
+
+c(Y_10 - Y_00,  Y_01 - Y_00, Y_11 - Y_00)</code></pre>
+<pre><code>## [1]  -8 -12 -20</code></pre>
+<p>Now that we’ve generated the four parallel universes with four potential outcomes per individual, we will generate an observed treatment sequence and measurements of the <span class="math inline">\(L\)</span>’s and <span class="math inline">\(Y\)</span> for each individual. The observed data set will have a single record for each individual:</p>
+<pre class="r"><code>dt &lt;- dtA1[A0 == 0 &amp; A1 == 0, .(id, L0)]
+dt</code></pre>
+<pre><code>##           id L0
+##     1:     1  0
+##     2:     2  0
+##     3:     3  0
+##     4:     4  1
+##     5:     5  0
+##    ---         
+## 49996: 49996  1
+## 49997: 49997  0
+## 49998: 49998  1
+## 49999: 49999  0
+## 50000: 50000  1</code></pre>
+<p><span class="math inline">\(A_0\)</span> is a function of <span class="math inline">\(L_0\)</span>:</p>
+<pre class="r"><code>dtAdd &lt;- defDataAdd(varname = &quot;A0&quot;, 
+                    formula = &quot;0.3 + L0 * 0.2&quot;, dist = &quot;binary&quot; )
+
+dt &lt;- addColumns(dtAdd, dt)
+dt[, mean(A0), keyby= L0]</code></pre>
+<pre><code>##    L0        V1
+## 1:  0 0.3015964
+## 2:  1 0.4994783</code></pre>
+<p>Now, we need to pull the appropriate value of <span class="math inline">\(L_1\)</span> from the original data set that includes both possible values for each individual. The value that gets pulled will be based on the observed value of <span class="math inline">\(A_0\)</span>:</p>
+<pre class="r"><code>setkeyv(dt, c(&quot;id&quot;, &quot;A0&quot;))
+setkeyv(dtA1, c(&quot;id&quot;, &quot;A0&quot;))
+
+dt &lt;- merge(dt, dtA1[, .(id, A0, L1, A1) ], by = c(&quot;id&quot;, &quot;A0&quot;))
+dt &lt;- dt[A1 == 0, .(id, L0, A0, L1)]
+dt</code></pre>
+<pre><code>##           id L0 A0 L1
+##     1:     1  0  1  0
+##     2:     2  0  1  0
+##     3:     3  0  0  0
+##     4:     4  1  1  1
+##     5:     5  0  0  1
+##    ---               
+## 49996: 49996  1  1  0
+## 49997: 49997  0  1  0
+## 49998: 49998  1  1  0
+## 49999: 49999  0  0  1
+## 50000: 50000  1  0  0</code></pre>
+<p>Finally, we generate <span class="math inline">\(A_1\)</span> based on the observed values of <span class="math inline">\(A_0\)</span> and <span class="math inline">\(L_1\)</span>, and select the appropriate value of <span class="math inline">\(Y\)</span>:</p>
+<pre class="r"><code>dtAdd &lt;- defDataAdd(varname = &quot;A1&quot;, 
+                    formula = &quot;0.3 + L1 * 0.2 + A0 * .2&quot;, dist = &quot;binary&quot;)
+
+dt &lt;- addColumns(dtAdd, dt)
+
+# merge to get potential outcome that matches actual path
+
+setkey(dt, id, L0, A0, L1, A1)
+setkey(dtA1, id, L0, A0, L1, A1)
+dtObs &lt;- merge(dt, dtA1[,.(id, L0, A0, L1, A1, Y = Y_PO)])
+
+dtObs</code></pre>
+<pre><code>##           id L0 A0 L1 A1        Y
+##     1:     1  0  1  0  0 32.90296
+##     2:     2  0  1  0  1 44.30306
+##     3:     3  0  0  0  1 53.38856
+##     4:     4  1  1  1  1 44.16249
+##     5:     5  0  0  1  0 75.21466
+##    ---                           
+## 49996: 49996  1  1  0  0 74.09161
+## 49997: 49997  0  1  0  0 50.26162
+## 49998: 49998  1  1  0  0 73.29376
+## 49999: 49999  0  0  1  0 52.96703
+## 50000: 50000  1  0  0  0 57.13109</code></pre>
+<p>If we do a crude estimate of the causal effects using the unadjusted observed data, we know we are going to get biased estimates (remember the true causal effects are -8, -12, and -20):</p>
+<pre class="r"><code>Y_00 &lt;- dtObs[A0 == 0 &amp; A1 == 0, mean(Y)]
+Y_10 &lt;- dtObs[A0 == 1 &amp; A1 == 0, mean(Y)]
+Y_01 &lt;- dtObs[A0 == 0 &amp; A1 == 1, mean(Y)]
+Y_11 &lt;- dtObs[A0 == 1 &amp; A1 == 1, mean(Y)]
+
+c(Y_10 - Y_00,  Y_01 - Y_00, Y_11 - Y_00)</code></pre>
+<pre><code>## [1]  -6.272132 -10.091513 -17.208856</code></pre>
+<p>This biased result is confirmed using an unadjusted regression model:</p>
+<pre class="r"><code>lmfit &lt;- lm(Y ~ A0 + A1, data = dtObs)
+tidy(lmfit)</code></pre>
+<pre><code>##          term   estimate  std.error statistic p.value
+## 1 (Intercept)  58.774695 0.07805319 753.00828       0
+## 2          A0  -6.681213 0.10968055 -60.91520       0
+## 3          A1 -10.397080 0.10544448 -98.60241       0</code></pre>
+<p>Now, shouldn’t we do better if we adjust for the confounders? I don’t think so - the parameter estimate for <span class="math inline">\(A_0\)</span> should be close to <span class="math inline">\(8\)</span>; the estimate for <span class="math inline">\(A_1\)</span> should be approximately <span class="math inline">\(12\)</span>, but this is not the case, at least not for both of the estimates:</p>
+<pre class="r"><code>lmfit &lt;- lm(Y ~ L0 + L1 + A0 + A1, data = dtObs)
+tidy(lmfit)</code></pre>
+<pre><code>##          term   estimate  std.error  statistic p.value
+## 1 (Intercept)  53.250244 0.08782653  606.31157       0
+## 2          L0   7.659460 0.10798594   70.93016       0
+## 3          L1   8.203983 0.10644683   77.07119       0
+## 4          A0  -4.369547 0.11096204  -39.37875       0
+## 5          A1 -12.037274 0.09592735 -125.48323       0</code></pre>
+<p>Maybe if we just adjust for <span class="math inline">\(L_0\)</span> or <span class="math inline">\(L_1\)</span>?</p>
+<pre class="r"><code>lmfit &lt;- lm(Y ~ L1 + A0 + A1, data = dtObs)
+tidy(lmfit)</code></pre>
+<pre><code>##          term   estimate  std.error  statistic       p.value
+## 1 (Intercept)  54.247394 0.09095074  596.44808  0.000000e+00
+## 2          L1   9.252919 0.11059038   83.66839  0.000000e+00
+## 3          A0  -2.633981 0.11354466  -23.19775 2.031018e-118
+## 4          A1 -12.016545 0.10063687 -119.40499  0.000000e+00</code></pre>
+<pre class="r"><code>lmfit &lt;- lm(Y ~ L0 + A0 + A1, data = dtObs)
+tidy(lmfit)</code></pre>
+<pre><code>##          term   estimate  std.error  statistic p.value
+## 1 (Intercept)  57.036320 0.07700591  740.67459       0
+## 2          L0   8.815691 0.11311215   77.93761       0
+## 3          A0  -8.150706 0.10527255  -77.42480       0
+## 4          A1 -10.632238 0.09961593 -106.73231       0</code></pre>
+<p>So, none of these approaches seem to work. This is where IPW can provide a solution. First we estimate the treatment/exposure models, then we estimate the IPW, and finally we use weighted regression or just estimate weighted average outcomes directly (we’d have to bootstrap here if we want standard errors for the simple average approach):</p>
+<pre class="r"><code># estimate P(A0|L0) and P(A1|L0, A0, L1)
+
+fitA0 &lt;- glm(A0 ~ L0, data = dtObs, family=binomial)
+fitA1 &lt;- glm(A1 ~ L0 + A0 + L1, data = dtObs, family=binomial)
+
+dtObs[, predA0 := predict(fitA0, type = &quot;response&quot;)]
+dtObs[, predA1 := predict(fitA1, type = &quot;response&quot;)]
+
+# function to convert propenisty scores to IPW
+
+getWeight &lt;- function(predA0, actA0, predA1, actA1) {
+  predActA0 &lt;- actA0*predA0 + (1-actA0)*(1-predA0)
+  predActA1 &lt;- actA1*predA1 + (1-actA1)*(1-predA1)
+  
+  p &lt;- predActA0 * predActA1
+  return(1/p)
+}
+
+dtObs[, wgt := getWeight(predA0, A0, predA1, A1)]
+
+# fit weighted model
+
+lmfit &lt;- lm(Y ~ A0 + A1, weights = wgt, data = dtObs)
+tidy(lmfit)</code></pre>
+<pre><code>##          term   estimate  std.error  statistic p.value
+## 1 (Intercept)  59.982379 0.09059652  662.08257       0
+## 2          A0  -7.986486 0.10464257  -76.32157       0
+## 3          A1 -12.051805 0.10464258 -115.17114       0</code></pre>
+<pre class="r"><code># non-parametric estimation
+
+Y_00 &lt;- dtObs[A0 == 0 &amp; A1 == 0, weighted.mean(Y, wgt)]
+Y_10 &lt;- dtObs[A0 == 1 &amp; A1 == 0, weighted.mean(Y, wgt)]
+Y_01 &lt;- dtObs[A0 == 0 &amp; A1 == 1, weighted.mean(Y, wgt)]
+Y_11 &lt;- dtObs[A0 == 1 &amp; A1 == 1, weighted.mean(Y, wgt)]
+
+round(c(Y_10 - Y_00,  Y_01 - Y_00, Y_11 - Y_00), 2)</code></pre>
+<pre><code>## [1]  -8.04 -12.10 -20.04</code></pre>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+<p>This post has been quite long, so I probably shouldn’t go on. But, I wanted to show that we can do the data generation in a much less convoluted way that avoids generating all possible forking paths for each individual. As always in <code>simstudy</code> the data generation process needs us to create a data definition table. In this example, I’ve created that table in an external file named <code>msmDef.csv</code>. In the end, this simpler approach has reduced necessary code by about 95%.</p>
+<pre class="r"><code>defMSM &lt;- defRead(&quot;msmDef.csv&quot;)
+defMSM</code></pre>
+<pre><code>##    varname                         formula variance      dist     link
+## 1:       U                             0;1        0   uniform identity
+## 2:       e                               0        9    normal identity
+## 3:      L0                      -2.66+ 3*U        0    binary    logit
+## 4:      A0                  0.3 + L0 * 0.2        0    binary identity
+## 5:      L1    -1.2 + 3*U + 0.2*L0 - 2.5*A0        0    binary    logit
+## 6:      A1           0.3 + L1*0.2 + A0*0.2        0    binary identity
+## 7:       Y 39.95 + U*40 - A0*8 - A1*12 + e        0 nonrandom identity</code></pre>
+<pre class="r"><code>dt &lt;- genData(50000, defMSM)
+
+fitA0 &lt;- glm(A0 ~ L0, data = dt, family=binomial)
+fitA1 &lt;- glm(A1 ~ L0 + A0 + L1, data = dt, family=binomial)
+
+dt[, predA0 := predict(fitA0, type = &quot;response&quot;)]
+dt[, predA1 := predict(fitA1, type = &quot;response&quot;)]
+dt[, wgt := getWeight(predA0, A0, predA1, A1)]
+
+tidy(lm(Y ~ A0 + A1, weights = wgt, data = dt))</code></pre>
+<pre><code>##          term   estimate  std.error  statistic p.value
+## 1 (Intercept)  60.061609 0.09284532  646.89967       0
+## 2          A0  -7.931715 0.10715916  -74.01808       0
+## 3          A1 -12.131829 0.10715900 -113.21335       0</code></pre>
+<div id="does-the-msm-still-work-with-more-complicated-effects" class="section level3">
+<h3>Does the MSM still work with more complicated effects?</h3>
+<p>In conclusion, I wanted to show that MSMs still function well even when the causal effects do not follow a simple linear pattern. (And I wanted to be able to end with a figure.) I generated 10000 datasets of 900 observations each, and calculated the crude and marginal causal effects after each iteration. The true treatment effects are described by an “interaction” between <span class="math inline">\(A_0\)</span> and <span class="math inline">\(A_1\)</span>. If treatment is received in <em>both</em> periods (i.e. <span class="math inline">\(A_0=1\)</span> and <span class="math inline">\(A_1=1\)</span>), there is an extra additive effect:</p>
+<p><span class="math display">\[ Y = 39.95 + U*40 - A0*8 - A1*12 - A0*A1*3 + e\]</span></p>
+<p>The purple density is the (biased) observed estimates and the green density is the (unbiased) IPW-based estimate. Again the true causal effects are -8, -12, and -23:</p>
+<div class="figure">
+<img src="/img/post-msm/densities.png" />
+
+</div>
+</div>
+</div>
