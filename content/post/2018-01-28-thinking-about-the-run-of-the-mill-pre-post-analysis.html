@@ -1,0 +1,167 @@
+---
+title: Have you ever asked yourself, "how should I approach the classic pre-post analysis?"
+author: ''
+date: '2018-01-28'
+slug: thinking-about-the-run-of-the-mill-pre-post-analysis
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Well, maybe not, but this comes up all the time. An investigator wants to assess the effect of an intervention on a outcome. Study participants are randomized either to receive the intervention (could be a new drug, new protocol, behavioral intervention, whatever) or treatment as usual. For each participant, the outcome measure is recorded at baseline - this is the <em>pre</em> in pre/post analysis. The intervention is delivered (or not, in the case of the control group), some time passes, and the outcome is measured a second time. This is our <em>post</em>. The question is, how should we analyze this study to draw conclusions about the intervention’s effect on the outcome?</p>
+<p>There are at least three possible ways to approach this. (1) Ignore the <em>pre</em> outcome measure and just compare the average <em>post</em> scores of the two groups. (2) Calculate a <em>change</em> score for each individual (<span class="math inline">\(\Delta_i = post_i - pre_i\)</span>), and compare the average <span class="math inline">\(\Delta\)</span>’s for each group. Or (3), use a more sophisticated regression model to estimate the intervention effect while <em>controlling</em> for the <em>pre</em> or baseline measure of the outcome. Here are three models associated with each approach (<span class="math inline">\(T_i\)</span> is 1 if the individual <span class="math inline">\(i\)</span> received the treatment, 0 if not, and <span class="math inline">\(\epsilon_i\)</span> is an error term):</p>
+<span class="math display">\[\begin{aligned}
+&amp;(1) \ \ post_i = \beta_0 + \beta_1T_i + \epsilon_i \\
+\\
+&amp;(2) \ \ \Delta_i = \alpha_0 + \alpha_1T_i + \epsilon_i \\
+\\
+&amp;(3) \ \ post_i = \gamma_0 + \gamma_1 pre_i+ \gamma_2 T_i + \epsilon_i
+\end{aligned}\]</span>
+<p>I’ve explored various scenarios (i.e. different data generating assumptions) to see if it matters which approach we use. (Of course it does.)</p>
+<div id="scenario-1-pre-and-post-not-correlated" class="section level3">
+<h3>Scenario 1: pre and post not correlated</h3>
+<p>In the simulations that follow, I am generating potential outcomes for each individual. So, the variable <code>post0</code> represents the follow-up outcome for the individual under the control condition, and <code>post1</code> is the outcome in the intervention condition. <code>pre0</code> and <code>pre1</code> are the same, because the intervention does not affect the baseline measurement. The effect of the intervention is specified by <code>eff</code>. In the first scenario, the baseline and follow-up measures are not related to each other, and the effect size is 1. All of the data definitions and data generation are done using package <code>simstudy</code>.</p>
+<pre class="r"><code>library(simstudy)
+
+# generate potential outcomes
+
+defPO &lt;- defData(varname = &quot;pre0&quot;, formula = 8.5, 
+               variance = 4, dist = &quot;normal&quot;)
+defPO &lt;- defData(defPO, varname = &quot;post0&quot;, formula = 7.5, 
+               variance = 4, dist = &quot;normal&quot;)
+defPO &lt;- defData(defPO, varname = &quot;pre1&quot;, formula = &quot;pre0&quot;, 
+               dist = &quot;nonrandom&quot;)
+defPO &lt;- defData(defPO, varname = &quot;eff&quot;, formula = 1, 
+               variance = 0.2, dist = &quot;normal&quot;)
+defPO &lt;- defData(defPO, varname = &quot;post1&quot;, formula = &quot;post0 + eff&quot;,
+               dist = &quot;nonrandom&quot;)</code></pre>
+<p>The baseline, follow-up, and change that are actually <em>observed</em> are merely a function of the group assignment.</p>
+<pre class="r"><code># generate observed data
+
+defObs &lt;- defDataAdd(varname = &quot;pre&quot;, 
+              formula = &quot;pre0 * (trtGrp == 0) + pre1 * (trtGrp == 1)&quot;,
+              dist = &quot;nonrandom&quot;)
+
+defObs &lt;- defDataAdd(defObs, varname = &quot;post&quot;, 
+              formula = &quot;post0 * (trtGrp == 0) + post1 * (trtGrp == 1)&quot;,
+              dist = &quot;nonrandom&quot;)
+
+defObs &lt;- defDataAdd(defObs, varname = &quot;delta&quot;, 
+              formula = &quot;post - pre&quot;,
+              dist = &quot;nonrandom&quot;)</code></pre>
+<p>Now we generate the potential outcomes, the group assignment, and observed data for 1000 individuals. (I’m using package <code>stargazer</code>, definitely worth checking out, to print out the first five rows of the dataset.)</p>
+<pre class="r"><code>set.seed(123)
+
+dt &lt;- genData(1000, defPO)
+dt &lt;- trtAssign(dt)
+dt &lt;- addColumns(defObs, dt)
+
+stargazer::stargazer(dt[1:5,], type = &quot;text&quot;, summary=FALSE, digits = 2)</code></pre>
+<pre><code>## 
+## =========================================================
+##   id trtGrp pre0  post0 pre1  eff  post1  pre  post delta
+## ---------------------------------------------------------
+## 1 1    1    7.38  5.51  7.38  0.77 6.28  7.38  6.28 -1.10
+## 2 2    1    8.04  5.42  8.04  1.11 6.53  8.04  6.53 -1.51
+## 3 3    1    11.62 7.46  11.62 0.76 8.22  11.62 8.22 -3.40
+## 4 4    0    8.64  7.24  8.64  1.55 8.78  8.64  7.24 -1.41
+## 5 5    1    8.76  2.40  8.76  1.08 3.48  8.76  3.48 -5.28
+## ---------------------------------------------------------</code></pre>
+<p>The plots show the three different types of analysis - follow-up measurement alone, change, or follow-up controlling for baseline:</p>
+<p><img src="/post/2018-01-28-thinking-about-the-run-of-the-mill-pre-post-analysis_files/figure-html/unnamed-chunk-4-1.png" width="1152" /></p>
+<p>I compare the different modeling approaches by using simulation to estimate statistical power for each. That is, given that there is some effect, how often is the p-value of the test less than 0.05. I’ve written a function to handle the data generation and power estimation. The function generates 1000 data sets of a specified sample size, each time fitting the three models, and keeping track of the relevant p-values for each iteration.</p>
+<pre class="r"><code>powerFunc &lt;- function(def, addDef, ss, rct = TRUE) {
+  
+  presults &lt;- data.table()
+  iter &lt;- 1000
+
+  for (i in 1:iter) {
+  
+    dt &lt;- genData(ss, def) 
+    
+    if (rct) { 
+      dt &lt;- trtAssign(dt)
+    } else {
+      dt &lt;- trtObserve(dt, &quot;-4.5 + .5*pre0&quot;, logit.link = TRUE)
+    }
+ 
+    dt &lt;- addColumns(addDef, dt)
+  
+    lmfit1 &lt;- lm(post ~ trtGrp, data = dt)
+    lmfit2 &lt;- lm(delta ~ trtGrp, data = dt)
+    lmfit3 &lt;- lm(post ~ pre + trtGrp, data = dt)
+    lmfit3x &lt;- lm(post ~ pre + trtGrp + pre*trtGrp, data = dt)
+ 
+    p1 &lt;- coef(summary(lmfit1))[&quot;trtGrp&quot;,&quot;Pr(&gt;|t|)&quot; ]
+    p2 &lt;- coef(summary(lmfit2))[&quot;trtGrp&quot;,&quot;Pr(&gt;|t|)&quot; ]
+    p3 &lt;- coef(summary(lmfit3))[&quot;trtGrp&quot;,&quot;Pr(&gt;|t|)&quot; ]
+    p3x &lt;- coef(summary(lmfit3x))[&quot;pre:trtGrp&quot;,&quot;Pr(&gt;|t|)&quot; ]
+  
+    presults &lt;- rbind(presults, data.table(p1, p2, p3, p3x))
+  }
+  
+  return(presults)
+  
+}</code></pre>
+<p>The results for the first data set are based on a sample size of 150 individuals (75 in each group). The <em>post-only</em> model does just as well as the <em>post adjusted for baseline</em> model. The model evaluating change in this scenario is way under powered.</p>
+<pre class="r"><code>presults &lt;- powerFunc(defPO, defObs, 150)
+
+presults[, .(postonly = mean(p1 &lt;= 0.05), 
+             change = mean(p2 &lt;= 0.05), 
+             adjusted = mean(p3 &lt;= 0.05))]</code></pre>
+<pre><code>##    postonly change adjusted
+## 1:     0.85  0.543    0.845</code></pre>
+<p> </p>
+</div>
+<div id="scenario-2-pre-and-post-are-moderately-correlated" class="section level3">
+<h3>Scenario 2: pre and post are moderately correlated</h3>
+<p>Now, we update the definition of <code>post0</code> so that it is now a function of <code>pre0</code>, so that the correlation is around 0.45.</p>
+<pre class="r"><code>defPO &lt;- updateDef(defPO, changevar = &quot;post0&quot;, 
+                 newformula = &quot;3.5 + 0.47 * pre0&quot;,
+                 newvariance = 3) </code></pre>
+<p><img src="/post/2018-01-28-thinking-about-the-run-of-the-mill-pre-post-analysis_files/figure-html/unnamed-chunk-8-1.png" width="1152" /></p>
+<p>The correlation actually increases power, so we use a reduced sample size of 120 for the power estimation. In this case, the three models actually all do pretty well, but the <em>adjusted</em> model is slightly superior.</p>
+<pre><code>##    postonly change adjusted
+## 1:    0.776  0.771    0.869</code></pre>
+<p> </p>
+</div>
+<div id="scenario-3-pre-and-post-are-almost-perfectly-correlated" class="section level3">
+<h3>Scenario 3: pre and post are almost perfectly correlated</h3>
+<p>When baseline and follow-up measurements are almost perfectly correlated (in this case about 0.85), we would be indifferent between the <em>change</em> and <em>adjusted</em> analyses - the power of the tests is virtually identical. However, the analysis that considers the follow-up measure alone does is much less adequate, due primarily to the measure’s relatively high variability.</p>
+<pre class="r"><code>defPO &lt;- updateDef(defPO, changevar = &quot;post0&quot;, 
+                 newformula = &quot;0.9 * pre0&quot;,
+                 newvariance = 1) </code></pre>
+<p><img src="/post/2018-01-28-thinking-about-the-run-of-the-mill-pre-post-analysis_files/figure-html/unnamed-chunk-11-1.png" width="1152" /></p>
+<pre><code>##    postonly change adjusted
+## 1:    0.358  0.898    0.894</code></pre>
+<p> </p>
+</div>
+<div id="when-the-effect-differs-by-baseline-measurement" class="section level3">
+<h3>When the effect differs by baseline measurement</h3>
+<p>In a slight variation of the previous scenario, the <em>effect</em> of the intervention itself is a now function of the baseline score. Those who score higher will benefit less from the intervention - they simply have less room to improve. In this case, the adjusted model appears slightly inferior to the change model, while the unadjusted <em>post-only</em> model is still relatively low powered.</p>
+<pre class="r"><code>defPO &lt;- updateDef(defPO, changevar = &quot;eff&quot;, 
+                 newformula = &quot;1.9 - 1.9 * pre0/15&quot;) </code></pre>
+<p><img src="/post/2018-01-28-thinking-about-the-run-of-the-mill-pre-post-analysis_files/figure-html/unnamed-chunk-13-1.png" width="1152" /></p>
+<pre class="r"><code>presults[, .(postonly = mean(p1 &lt;= 0.05), 
+             change = mean(p2 &lt;= 0.05), 
+             adjusted = mean(p3 &lt;= 0.025 | p3x &lt;= 0.025))]</code></pre>
+<pre><code>##    postonly change adjusted
+## 1:    0.425  0.878    0.863</code></pre>
+<p>The <em>adjusted</em> model has less power than the <em>change</em> model, because I used a reduced <span class="math inline">\(\alpha\)</span>-level for the hypothesis test of the <em>adjusted</em> models. I am testing for interaction first, then if that fails, for main effects, so I need to adjust for multiple comparisons. (I have another <a href="https://www.rdatagen.net/post/sub-group-analysis-in-rct/">post</a> that shows why this might be a good thing to do.) I have used a Bonferroni adjustment, which can be a more conservative test. I still prefer the <em>adjusted</em> model, because it provides more insight into the underlying process than the <em>change</em> model.</p>
+</div>
+<div id="treatment-assignment-depends-on-baseline-measurement" class="section level3">
+<h3>Treatment assignment depends on baseline measurement</h3>
+<p>Now, slightly off-topic. So far, we’ve been talking about situations where treatment assignment is randomized. What happens in a scenario where those with higher baseline scores are more likely to receive the intervention? Well, if we don’t adjust for the baseline score, we will have unmeasured confounding. A comparison of follow-up scores in the two groups will be biased towards the intervention group if the baseline scores are correlated with follow-up scores - as we see visually with a scenario in which the effect size is set to 0. Also notice that the p-values for the unadjusted model are consistently below 0.05 - we are almost always drawing the wrong conclusion if we use this model. On the other hand, the error rate for the adjusted model is close to 0.05, what we would expect.</p>
+<pre class="r"><code>defPO &lt;- updateDef(defPO, changevar = &quot;eff&quot;,
+                 newformula = 0)
+
+dt &lt;- genData(1000, defPO)
+dt &lt;- trtObserve(dt, &quot;-4.5 + 0.5 * pre0&quot;, logit.link = TRUE)
+dt &lt;- addColumns(defObs, dt)</code></pre>
+<p><img src="/post/2018-01-28-thinking-about-the-run-of-the-mill-pre-post-analysis_files/figure-html/unnamed-chunk-16-1.png" width="1152" /></p>
+<pre><code>##    postonly change adjusted
+## 1:    0.872  0.095    0.046</code></pre>
+<p>I haven’t proved anything here, but these simulations suggest that we should certainly think twice about using an unadjusted model if we happen to have baseline measurements. And it seems like you are likely to maximize power (and maybe minimize bias) if you compare follow-up scores while adjusting for baseline scores rather than analyzing change in scores by group.</p>
+</div>
