@@ -1,0 +1,232 @@
+---
+title: Exploring the underlying theory of the chi-square test through simulation - part 1
+author: ''
+date: '2018-03-18'
+slug: a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Kids today are so sophisticated (at least they are in New York City, where I live). While I didn’t hear about the chi-square test of independence until my first stint in graduate school, they’re already talking about it in high school. When my kids came home and started talking about it, I did what I usually do when they come home asking about a new statistical concept. I opened up R and started generating some data. Of course, they rolled their eyes, but when the evening was done, I had something that might illuminate some of what underlies the theory of this ubiquitous test.</p>
+<p>Actually, I created enough simulations to justify two posts - so this is just part 1, focusing on the <span class="math inline">\(\chi^2\)</span> distribution and its relationship to the Poisson distribution. Part 2 will consider contingency tables, where we are often interested in understanding the nature of the relationship between two categorical variables. More on that the next time.</p>
+<div id="the-chi-square-distribution" class="section level3">
+<h3>The chi-square distribution</h3>
+<p>The chi-square (or <span class="math inline">\(\chi^2\)</span>) distribution can be described in many ways (for example as a special case of the Gamma distribution), but it is most intuitively characterized in relation to the standard normal distribution, <span class="math inline">\(N(0,1)\)</span>. The <span class="math inline">\(\chi^2_k\)</span> distribution has a single parameter <span class="math inline">\(k\)</span> which represents the <em>degrees of freedom</em>. If <span class="math inline">\(U\)</span> is standard normal, (i.e <span class="math inline">\(U \sim N(0,1)\)</span>), then <span class="math inline">\(U^2\)</span> has a <span class="math inline">\(\chi^2_1\)</span> distribution. If <span class="math inline">\(V\)</span> is also standard normal, then <span class="math inline">\((U^2 + V^2) \sim \chi^2_2\)</span>. That is, if we add two squared standard normal random variables, the distribution of the sum is chi-squared with 2 degrees of freedom. More generally, <span class="math display">\[\sum_{j=1}^k X^2_j \sim \chi^2_k,\]</span></p>
+<p>where each <span class="math inline">\(X_j \sim N(0,1)\)</span>.</p>
+<p>The following code defines a data set with two standard normal random variables and their sum:</p>
+<pre class="r"><code>library(simstudy)
+
+def &lt;- defData(varname = &quot;x&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;chisq1df&quot;, formula = &quot;x^2&quot;, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, &quot;y&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;chisq2df&quot;, 
+               formula = &quot;(x^2) + (y^2)&quot;, dist = &quot;nonrandom&quot;) 
+
+set.seed(2018)
+dt &lt;- genData(10000, def)
+
+dt[1:5,]</code></pre>
+<pre><code>##    id           x    chisq1df           y    chisq2df
+## 1:  1 -0.42298398 0.178915450  0.05378131 0.181807879
+## 2:  2 -1.54987816 2.402122316  0.70312385 2.896505464
+## 3:  3 -0.06442932 0.004151137 -0.07412058 0.009644997
+## 4:  4  0.27088135 0.073376707 -1.09181873 1.265444851
+## 5:  5  1.73528367 3.011209400 -0.79937643 3.650212075</code></pre>
+<p>The standard normal has mean zero and variance one. Approximately 95% of the values will be expected to fall within two standard deviations of zero. Here is your classic “bell” curve:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>Since the statistic <span class="math inline">\(X^2\)</span> (try not to confuse <span class="math inline">\(X^2\)</span> and <span class="math inline">\(\chi^2\)</span>, unfortunate I know) is the sum of the squares of a continuous random variable and is always greater or equal to zero, the <span class="math inline">\(\chi^2\)</span> is a distribution of positive, continuous measures. Here is a histogram of <code>chisq1df</code> from the data set <code>dt</code>, which has a <span class="math inline">\(\chi^2_1\)</span> distribution:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>And here is a plot of <code>chisq2df</code>, which has two degrees of freedom, and has a <span class="math inline">\(\chi^2_2\)</span> distribution. Unsurprisingly, since we are adding positive numbers, we start to see values further away from zero:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Just to show that the data we generated by adding two squared standard normal random variables is actually distributed as a <span class="math inline">\(\chi^2_2\)</span>, we can generate data from this distribution directly, and overlay the plots:</p>
+<pre class="r"><code>actual_chisq2 &lt;- rchisq(10000, 2)</code></pre>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+</div>
+<div id="recycling-and-the-poisson-distribution" class="section level3">
+<h3>Recycling and the Poisson distribution</h3>
+<p>When we talk about counts, we are often dealing with a Poisson distribution. An example I use below is the number of glass bottles that end up in an apartment building’s recycling bin every day (as I mentioned, I do live in New York City). The Poisson distribution is a non-negative, discrete distribution that is characterized by a single parameter <span class="math inline">\(\lambda\)</span>. If <span class="math inline">\(H \sim Poisson(\lambda)\)</span>, then <span class="math inline">\(E(H) = Var(H) = \lambda\)</span>.</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;h&quot;, formula = 40, dist = &quot;poisson&quot;)
+
+dh &lt;- genData(10000, def)
+
+round(dh[, .(avg = mean(h), var = var(h))], 1)</code></pre>
+<pre><code>##     avg var
+## 1: 40.1  40</code></pre>
+<p>To standardize a <em>normally</em> distributed variable (such as <span class="math inline">\(W \sim N(\mu,\sigma^2)\)</span>), we subtract the mean and divide by the standard deviation:</p>
+<p><span class="math display">\[ W_i^{s} = \frac{W_i - \mu}{\sigma},\]</span></p>
+<p>and <span class="math inline">\(W^s \sim N(0,1)\)</span>. Analogously, to standardize a Poisson variable we do the same, since <span class="math inline">\(\lambda\)</span> is the mean and the variance:</p>
+<p><span class="math display">\[ S_{i} = \frac{H_i - \lambda}{\sqrt{\lambda}}\]</span></p>
+<p>The distribution of this standardized variable <span class="math inline">\(S\)</span> will be close to a standard normal. We can generate some data and check this out. In this case, the mean and variance of the Poisson variable is 40:</p>
+<pre class="r"><code>defA &lt;- defDataAdd(varname = &quot;s&quot;, formula = &quot;(h-40)/sqrt(40)&quot;, 
+               dist = &quot;nonrandom&quot;)
+
+dh &lt;- addColumns(defA, dh)
+dh[1:5, ]</code></pre>
+<pre><code>##    id  h          s
+## 1:  1 34 -0.9486833
+## 2:  2 44  0.6324555
+## 3:  3 37 -0.4743416
+## 4:  4 46  0.9486833
+## 5:  5 42  0.3162278</code></pre>
+<p>The mean and variance of the standardized data do suggest a standardized normal distribution:</p>
+<pre class="r"><code>round(dh[ , .(mean = mean(s), var = var(s))], 1)</code></pre>
+<pre><code>##    mean var
+## 1:    0   1</code></pre>
+<p>Overlaying the plots of the standardized poisson distribution with the standard normal distribution, we can see that they <em>are</em> quite similar:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Since the standardized Poisson is roughly standard normal, the square of the standardized Poisson should be roughly <span class="math inline">\(\chi^2_1\)</span>. If we square normalized Poisson, this is what we have:</p>
+<p><span class="math display">\[ S_i^2 = \frac{(H_i - \lambda)^2}{\lambda}\]</span></p>
+<p>Or maybe in a more familiar form (think Pearson):</p>
+<p><span class="math display">\[ S_i^2 = \frac{(O_i - E_i)^2}{E_i},\]</span></p>
+<p>where <span class="math inline">\(O_i\)</span> is the observed value and <span class="math inline">\(E_i\)</span> is the expected value. Since <span class="math inline">\(\lambda\)</span> is the expected value (and variance) of the Poisson random variable, the two formulations are equivalent.</p>
+<p>Adding the transformed data to the data set, and calculating the mean and variance, it is apparent that these observations are close to a <span class="math inline">\(\chi^2_1\)</span> distribution:</p>
+<pre class="r"><code>defA &lt;- defDataAdd(varname = &quot;h.chisq&quot;, formula = &quot;(h-40)^2/40&quot;, 
+               dist = &quot;nonrandom&quot;)
+
+dh &lt;- addColumns(defA, dh)
+
+round(dh[, .(avg = mean(h.chisq), var = var(h.chisq))], 2)</code></pre>
+<pre><code>##    avg  var
+## 1:   1 1.97</code></pre>
+<pre class="r"><code>actual_chisq1 &lt;- rchisq(10000, 1)
+round(c(avg = mean(actual_chisq1), var = var(actual_chisq1)), 2)</code></pre>
+<pre><code>##  avg  var 
+## 0.99 2.04</code></pre>
+<p>Once again, an overlay of the two distributions based on the data we generated shows that this is plausible:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>Just for fun, let’s repeatedly generate 10 Poisson variables each with its own value of <span class="math inline">\(\lambda\)</span> and calculate <span class="math inline">\(X^2\)</span> for each iteration to compare with data generated from a <span class="math inline">\(\chi^2_{10}\)</span> distribution:</p>
+<pre class="r"><code>nObs &lt;- 10000
+nMeasures &lt;- 10
+
+lambdas &lt;- rpois(nMeasures, 50)
+poisMat &lt;- matrix(rpois(n = nMeasures*nObs, lambda = lambdas), 
+                  ncol = nMeasures, byrow = T)
+
+poisMat[1:5,]</code></pre>
+<pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
+## [1,]   48   51   49   61   59   51   67   35   43    39
+## [2,]   32   58   49   67   57   35   69   40   57    55
+## [3,]   44   50   60   56   57   49   68   49   48    32
+## [4,]   44   44   42   49   52   50   63   39   51    38
+## [5,]   42   38   62   57   62   40   68   34   41    58</code></pre>
+<p>Each column (variable) has its own mean and variance:</p>
+<pre class="r"><code>rbind(lambdas,
+      mean = apply(poisMat, 2, function(x) round(mean(x), 0)),
+      var = apply(poisMat, 2, function(x) round(var(x), 0))
+)</code></pre>
+<pre><code>##         [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
+## lambdas   43   45   51   61   55   46   62   35   48    47
+## mean      43   45   51   61   55   46   62   35   48    47
+## var       43   46   51   61   55   46   62   35   47    47</code></pre>
+<p>Calculate <span class="math inline">\(X^2\)</span> for each iteration (i.e. each row of the matrix <code>poisMat</code>), and estimate mean and variance across all estimated values of <span class="math inline">\(X^2\)</span>:</p>
+<pre class="r"><code>X2 &lt;- sapply(seq_len(nObs), 
+             function(x) sum((poisMat[x,] - lambdas)^2 / lambdas))
+
+round(c(mean(X2), var(X2)), 1)</code></pre>
+<pre><code>## [1] 10.0 20.2</code></pre>
+<p>The true <span class="math inline">\(\chi^2\)</span> distribution with 10 degrees of freedom:</p>
+<pre class="r"><code>chisqkdf &lt;- rchisq(nObs, nMeasures)
+round(c(mean(chisqkdf), var(chisqkdf)), 1)</code></pre>
+<pre><code>## [1] 10.0 19.8</code></pre>
+<p>These simulations strongly suggest that summing across independent standardized Poisson variables generates a statistic that has a <span class="math inline">\(\chi^2\)</span> distribution.</p>
+</div>
+<div id="the-consequences-of-conditioning" class="section level3">
+<h3>The consequences of conditioning</h3>
+<p>If we find ourselves in the situation where we have some number of bins or containers or cells into which we are throwing a <em>fixed</em> number of something, we are no longer in the realm of independent, unconditional Poisson random variables. This has implications for our <span class="math inline">\(X^2\)</span> statistic.</p>
+<p>As an example, say we have those recycling bins again (this time five) and a total of 100 glass bottles. If each bottle has an equal chance of ending up in any of the five bins, we would expect on average 20 bottles to end up in each. Typically, we highlight the fact that under this constraint (of having 100 bottles) information about about four of the bins is the same as having information about all five. If I tell you that the first four bins contain a total of 84 bottles, we know that the last bin must have exactly 16. Actually counting those bottles in the fifth bin provides <em>no</em> additional information. In this case (where we really only have 4 pieces of information, and not the the 5 we are looking at), we say we have lost 1 degree of freedom due to the constraint. This loss gets translated into the chi-square test.</p>
+<p>I want to explore more concretely how the constraint on the total number of bottles affects the distribution of the <span class="math inline">\(X^2\)</span> statistic and ultimately the chi-square test.</p>
+<div id="unconditional-counting" class="section level4">
+<h4>Unconditional counting</h4>
+<p>Consider a simpler example of three glass recycling bins in three different buildings. We know that, on average, the bin in building 1 typically has 20 bottles deposited daily, the bin in building 2 usually has 40, and the bin in building 3 has 80. These number of bottles in each bin is Poisson distributed, with <span class="math inline">\(\lambda_i, \ i \in \{1,2, 3\}\)</span> equal to 20, 40, and 80, respectively. Note, while we would expect on average 140 total bottles across the three buildings, some days we have fewer, some days we have more - all depending on what happens in each individual building. The total is also Poisson distributed with <span class="math inline">\(\lambda_{total} = 140\)</span>.</p>
+<p>Let’s generate 10,000 days worth of data (under the assumption that bottle disposal patterns are consistent over a very long time, a dubious assumption).</p>
+<pre class="r"><code>library(simstudy)
+
+def &lt;- defData(varname = &quot;bin_1&quot;, formula = 20, dist = &quot;poisson&quot;)
+def &lt;- defData(def, &quot;bin_2&quot;, formula = 40, dist = &quot;poisson&quot;)
+def &lt;- defData(def, &quot;bin_3&quot;, formula = 80, dist = &quot;poisson&quot;)
+def &lt;- defData(def, varname = &quot;N&quot;, 
+               formula = &quot;bin_1 + bin_2 + bin_3&quot;, 
+               dist = &quot;nonrandom&quot;)
+
+
+set.seed(1234)
+dt &lt;- genData(10000, def)
+
+dt[1:5, ]</code></pre>
+<pre><code>##    id bin_1 bin_2 bin_3   N
+## 1:  1    14    44    59 117
+## 2:  2    21    36    81 138
+## 3:  3    21    34    68 123
+## 4:  4    16    43    81 140
+## 5:  5    22    44    86 152</code></pre>
+<p>The means and variances are as expected:</p>
+<pre class="r"><code>round(dt[ ,.(mean(bin_1), mean(bin_2), mean(bin_3))], 1)</code></pre>
+<pre><code>##    V1   V2   V3
+## 1: 20 39.9 80.1</code></pre>
+<pre class="r"><code>round(dt[ ,.(var(bin_1), var(bin_2), var(bin_3))], 1)</code></pre>
+<pre><code>##      V1   V2   V3
+## 1: 19.7 39.7 80.6</code></pre>
+<p>This plot shows the actual numbers of bottles in each bin in each building over the 10,000 days:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+<p>There is also quite a lot of variability in the daily totals calculated by adding up the bins across three buildings. (While it is clear based on the mean and variance that this total has a <span class="math inline">\(Poisson(140)\)</span> distribution, the plot looks quite symmetrical. It is the case that as <span class="math inline">\(\lambda\)</span> increases, the Poisson distribution becomes well approximated by the normal distribution.)</p>
+<pre class="r"><code>round(dt[, .(avgN = mean(N), varN = var(N))], 1)</code></pre>
+<pre><code>##    avgN  varN
+## 1:  140 139.6</code></pre>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-21-1.png" width="672" /></p>
+</div>
+<div id="conditional-counting" class="section level4">
+<h4>Conditional counting</h4>
+<p>Now, let’s say that the three bins are actually in the <em>same</em> (very large) building, located in different rooms in the basement, just to make it more convenient for residents (in case you are wondering, my bins are right next to the service elevator). But, let’s also make the assumption (and condition) that there are always between 138 and 142 total bottles on any given day. The expected values for each bin remain 20, 40, and 80, respectively</p>
+<p>We calculate the total number of bottles every day and identify all cases where the sum of the three bins is within the fixed range. For this subset of the sample, we see that the means are unchanged:</p>
+<pre class="r"><code>defAdd &lt;- defDataAdd(varname = &quot;condN&quot;, 
+                     formula = &quot;(N &gt;= 138 &amp; N &lt;= 142)&quot;, 
+                     dist = &quot;nonrandom&quot;)
+
+dt &lt;- addColumns(defAdd, dt)
+
+round(dt[condN == 1,
+         .(mean(bin_1), mean(bin_2), mean(bin_3))],
+      1)</code></pre>
+<pre><code>##      V1 V2   V3
+## 1: 20.1 40 79.9</code></pre>
+<p>However, <strong>and this is really the key point</strong>, the variance of the sample (which is conditional on the sum being between 138 and 142) is reduced:</p>
+<pre class="r"><code>round(dt[condN == 1,
+         .(var(bin_1), var(bin_2), var(bin_3))], 
+      1)</code></pre>
+<pre><code>##      V1   V2   V3
+## 1: 17.2 28.3 35.4</code></pre>
+<p>The red points in the plot below represent all daily totals <span class="math inline">\(\sum_i bin_i\)</span> that fall between 138 and 142 bottles. The spread from top to bottom is contained by the rest of the (unconstrained) sample, an indication that the variance for this conditional scenario is smaller:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-24-1.png" width="672" /></p>
+<p>Not surprisingly, the distribution of the totals across the bins is quite narrow. But, this is almost a tautology, since this is how we defined the sample:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-25-1.png" width="672" /></p>
+</div>
+</div>
+<div id="biased-standardization" class="section level3">
+<h3>Biased standardization</h3>
+<p>And here is the grand finale of part 1. When we calculate <span class="math inline">\(X^2\)</span> using the standard formula under a constrained data generating process, we are not dividing by the proper variance. We just saw that the conditional variance within each bin is smaller than the variance of the unconstrained Poisson distribution. So, <span class="math inline">\(X^2\)</span>, as defined by</p>
+<p><span class="math display">\[ X^2 = \sum_{i=1}^{k \ bins} {\frac{(O_i - E_i)^2}{E_i}}\]</span></p>
+<p>is not a sum of approximately standard normal variables - the variance used in the formula is too high. <span class="math inline">\(X^2\)</span> will be smaller than a <span class="math inline">\(\chi^2_k\)</span>. How much smaller? Well, if the constraint is even tighter, limited to where the total equals exactly 140 bottles every day, <span class="math inline">\(X^2\)</span> has a <span class="math inline">\(\chi^2_{k-1}\)</span> distribution.</p>
+<p>Even using our slightly looser constraint of fixing the total between 138 and 142, the distribution is quite close to a <span class="math inline">\(chi^2_2\)</span> distribution:</p>
+<pre class="r"><code>defA &lt;- defDataAdd(varname = &quot;X2.1&quot;, 
+                   formula = &quot;(bin_1-20)^2 / 20&quot;, dist = &quot;nonrandom&quot;)
+defA &lt;- defDataAdd(defA, &quot;X2.2&quot;, 
+                   formula = &quot;(bin_2-40)^2 / 40&quot;, dist = &quot;nonrandom&quot;)
+defA &lt;- defDataAdd(defA, &quot;X2.3&quot;, 
+                   formula = &quot;(bin_3-80)^2 / 80&quot;, dist = &quot;nonrandom&quot;)
+defA &lt;- defDataAdd(defA, &quot;X2&quot;, 
+                   formula = &quot;X2.1 + X2.2 + X2.3&quot;, dist = &quot;nonrandom&quot;)
+
+dt &lt;- addColumns(defA, dt)</code></pre>
+<p>Comparison with <span class="math inline">\(\chi^2_3\)</span> shows clear bias:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-27-1.png" width="672" /></p>
+<p>Here it is with a <span class="math inline">\(\chi^2_2\)</span> distribution:</p>
+<p><img src="/post/2018-03-18-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-28-1.png" width="672" /></p>
+</div>
+<div id="recycling-more-than-glass" class="section level3">
+<h3>Recycling more than glass</h3>
+<p>Part 2 will extend this discussion to the contingency table, which is essentially a 2-dimensional array of bins. If we have different types of materials to recycle - glass bottles, plastic containers, cardboard boxes, and metal cans - we need four bins at each location. We might be interested in knowing if the distribution of these four materials is different across the 3 different locations - this is where the chi-square test for independence can be useful.</p>
+<p>As an added bonus, you can expect to see lots of code that allows you to simulate contingency tables under different assumptions of conditioning. I know my kids are psyched.</p>
+</div>
