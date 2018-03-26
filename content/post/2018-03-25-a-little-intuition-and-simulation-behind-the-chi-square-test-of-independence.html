@@ -1,0 +1,368 @@
+---
+title: Exploring the underlying theory of the chi-square test through simulation - part 2
+author: ''
+date: '2018-03-25'
+slug: a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence-part-2
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>In the last <a href="https://www.rdatagen.net/post/a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence/">post</a>, I tried to provide a little insight into the chi-square test. In particular, I used simulation to demonstrate the relationship between the Poisson distribution of counts and the chi-squared distribution. The key point in that post was the role conditioning plays in that relationship by reducing variance.</p>
+<p>To motivate some of the key issues, I talked a bit about recycling. I asked you to imagine a set of bins placed in different locations to collect glass bottles. I will stick with this scenario, but instead of just glass bottle bins, we now also have cardboard, plastic, and metal bins at each location. In this expanded scenario, we are interested in understanding the relationship between location and material. A key question that we might ask: is the distribution of materials the same across the sites? (Assume we are still just counting items and not considering volume or weight.)</p>
+<div id="independence" class="section level3">
+<h3>Independence</h3>
+<p>If we tracked the number of items for a particular day, we could record the data in a contingency table, which in this case would be <span class="math inline">\(4 \times 3\)</span> array. If we included the row and column totals, it might look like this:</p>
+<div class="figure">
+<img src="/img/post-chisquare/ContingencyInd.png" />
+
+</div>
+<p>One way to inspect the data would be to calculate row- and column-specific proportions. From this (albeit stylized example), it is apparent that the proportion of each material is constant across locations - 10% of the items are glass, roughly 30% are cardboard, 40% are plastic, and 20% are metal. Likewise, for each material, about 17% are in location 1, 33% in location 2, and 50% in location 3:</p>
+<div class="figure">
+<img src="/img/post-chisquare/PropInd.png" />
+
+</div>
+<p>This consistency in proportions across rows and columns is the hallmark of independence. In more formal terms, <span class="math inline">\(P(M = m | L = l) = P(M = m)\)</span> and <span class="math inline">\(P(L = l|M = m) = P(L = l)\)</span>. The conditional probability (what we see in a particular row or column) is equal to the overall probability (what we see in the marginal (total) row or column.</p>
+<p>The actual definition of statistical independence with respect to materials and location is</p>
+<p><span class="math display">\[ P(M=m \ \&amp; \ L= l) = P(M=m) \times P(L=l) \]</span></p>
+<p>The probability on the left is the cell-specific proportion (the count of the number of items with <span class="math inline">\(M=m\)</span> and <span class="math inline">\(L=l\)</span> divided by <span class="math inline">\(N\)</span>, the total number of items in the entire table). The two terms on the right side of the equation are the marginal row and column probabilities respectively. The table of overall proportions gives us an example of data generated from two characteristics that are independent:</p>
+<div class="figure">
+<img src="/img/post-chisquare/PropNInd.png" />
+
+</div>
+<p>There are 116 plastic items in location 3, 19% of the overall items (<span class="math inline">\(116 \div 600\)</span>). The overall proportion of plastic items is 40%, the overall proportion of items in location 3 is 50%, and <span class="math inline">\(0.19 \approx 0.4 \times 0.5\)</span>. If we inspect all of the cells, the same approximation will hold.</p>
+</div>
+<div id="dependence" class="section level3">
+<h3>Dependence</h3>
+<p>In the case where the distributions of materials differ across locations, we no longer have independence. Here is an example, though note that the marginal totals are unchanged:</p>
+<div class="figure">
+<img src="/img/post-chisquare/ContingencyDep.png" />
+
+</div>
+<p>Looking across the row- and column-specific proportions, it is clear that something unique might be going on at each location:</p>
+<div class="figure">
+<img src="/img/post-chisquare/PropDep.png" />
+
+</div>
+<p>It is apparent that the formal definition of independence might be violated: <span class="math inline">\(P(M=m \ \&amp; \ L=l) \ne P(M=m)P(L=l\)</span>). Look again at plastics in location 3: <span class="math inline">\(0.30 \ne 0.4 \times 0.5\)</span>.</p>
+<div class="figure">
+<img src="/img/post-chisquare/PropNDep.png" />
+
+</div>
+</div>
+<div id="the-chi-square-test-of-independence" class="section level3">
+<h3>The chi-square test of independence</h3>
+<p>I have been making declarations about independence with my made up contingency tables, just because I was the all-knowing creator who made them up. Of course, when we collect actual data, we don’t have that luxury. That is where the chi-square test of independence helps us.</p>
+<p>Here’s the general idea. We start off by making the initial assumption that the rows and columns are indeed independent (this is actually our null hypothesis). We then define a test statistic <span class="math inline">\(X^2\)</span> as</p>
+<p><span class="math display">\[ X^2 = \sum_{m,l} \frac{(O_{ml} - E_{ml})^2}{E_{ml}}.\]</span> This is just a slight modification of the test statistic we saw in <a href="https://www.rdatagen.net/post/a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence/">part 1</a>, which was presented as a summary of a <span class="math inline">\(k \times 1\)</span> array. In this context, <span class="math inline">\(X^2\)</span> is just a summary of the <span class="math inline">\(M \times \ L\)</span> table. As previously discussed, <span class="math inline">\(X^2\)</span> has a <span class="math inline">\(\chi^2\)</span> distribution with a particular parameter specifying the <span class="math inline">\(k\)</span> degrees freedom.</p>
+<p>The question is, how can we calculate <span class="math inline">\(X^2\)</span>? The observed data <span class="math inline">\(O_{ml}\)</span> are just the observed data. But, we don’t necessarily know <span class="math inline">\(E_{ml}\)</span>, the expected value of each cell in the contingency table. These expected values can be defined as <span class="math inline">\(E_{ml} = P(M=m \ \&amp; \ L=l) \times N\)</span>. If we assume that <span class="math inline">\(N\)</span> is fixed, then we are half way there. All that remains is the joint probability of <span class="math inline">\(M\)</span> and <span class="math inline">\(L\)</span>, <span class="math inline">\(P(M=m \ \&amp; \ L=l)\)</span>. Under independence (which is our starting, or null, assumption) <span class="math inline">\(P(M=m \ \&amp; \ L=l) = P(M=m)P(L=l)\)</span>. If we make the additional assumption that the row and column totals (margins) <span class="math inline">\(R_m\)</span> and <span class="math inline">\(C_l\)</span> are fixed, we can calculate <span class="math inline">\(P(M=m) = R_m/N\)</span> and <span class="math inline">\(P(L=l) = C_l/N\)</span>. So now,</p>
+<p><span class="math display">\[E_{ml} = \frac{(R_m * C_l)}{N}.\]</span> Where does that leave us? We calculate the test statistic <span class="math inline">\(X^2\)</span> and evaluate that statistic in the context of the theoretical sampling distribution suggested by the assumptions of independence <strong>and</strong> fixed marginal totals. That theoretical sampling distribution is <span class="math inline">\(\chi^2\)</span> with some degrees of freedom. If the observed <span class="math inline">\(X^2\)</span> is very large and defies the theoretical distribution (i.e. seems like an outlier), we will reject the notion of independence. (This is just null hypothesis testing using the <span class="math inline">\(X^2\)</span> statistic.)</p>
+</div>
+<div id="chi-square-tests-of-our-two-tables" class="section level3">
+<h3>Chi-square tests of our two tables</h3>
+<p>The test statistic from the first table (which I suggest is from a scenario where material and location are independent) is relatively small. We would <em>not</em> conclude that material and location are associated:</p>
+<pre><code>##                 Sum
+##       8  23  29  60
+##      28  61  91 180
+##      39  85 116 240
+##      25  31  64 120
+## Sum 100 200 300 600</code></pre>
+<pre class="r"><code>chisq.test(im)</code></pre>
+<pre><code>## 
+##  Pearson&#39;s Chi-squared test
+## 
+## data:  im
+## X-squared = 5.0569, df = 6, p-value = 0.5365</code></pre>
+<p>In the second case, the test statistic <span class="math inline">\(X^2\)</span> is quite large, leading us to conclude that material and location are indeed related, which is as we suspected:</p>
+<pre><code>##                 Sum
+##      51   5   4  60
+##      22  99  59 180
+##      21  40 179 240
+##       6  56  58 120
+## Sum 100 200 300 600</code></pre>
+<pre class="r"><code>chisq.test(dm)</code></pre>
+<pre><code>## 
+##  Pearson&#39;s Chi-squared test
+## 
+## data:  dm
+## X-squared = 314.34, df = 6, p-value &lt; 2.2e-16</code></pre>
+</div>
+<div id="degrees-of-freedom" class="section level2">
+<h2>Degrees of freedom</h2>
+<p>The paramount question is what <span class="math inline">\(\chi^2\)</span> distribution does <span class="math inline">\(X^2\)</span> have under the independence assumption? If you look at the results of the chi-square tests above, you can see that, under the null hypothesis of independence and fixed margins, these tables have six degree of freedom, so <span class="math inline">\(X^2 \sim \chi^2_6\)</span>. But, how do we get there? What follows is a series of simulations that start with an unconditional data generation process and ends with the final set of marginal conditions. The idea is to show that by progressively adding stricter conditions to the assumptions, we continuously reduce variability and lower the degrees of freedom.</p>
+<div id="unconditional-contingency-tables" class="section level3">
+<h3>Unconditional contingency tables</h3>
+<p>If we start with a data generation process based on the <span class="math inline">\(4 \times 3\)</span> table that has no conditions on the margins or total number of items, the statistic <span class="math inline">\(X^2\)</span> is a function of 12 independent Poisson variables. Each cell has an expected value determined by row and column independence. It should follow that <span class="math inline">\(X^2\)</span> will have 12 degrees of freedom. Simulating a large number of tables under these conditions and evaluating the distribution of the calculated <span class="math inline">\(X^2\)</span> statistics will likely support this.</p>
+<p>The initial (independent) table specified above is our starting point:</p>
+<pre class="r"><code>addmargins(im)</code></pre>
+<pre><code>##                 Sum
+##       8  23  29  60
+##      28  61  91 180
+##      39  85 116 240
+##      25  31  64 120
+## Sum 100 200 300 600</code></pre>
+<pre class="r"><code>row &lt;- margin.table(im, 1)
+col &lt;- margin.table(im, 2)
+N &lt;- sum(row)</code></pre>
+<p>These are the expected values based on the observed row and column totals:</p>
+<pre class="r"><code>(expected &lt;- (row/N) %*% t(col/N) * N)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]   10   20   30
+## [2,]   30   60   90
+## [3,]   40   80  120
+## [4,]   20   40   60</code></pre>
+<p>Each randomly generated table is a collection of 12 independent Poisson random variables with <span class="math inline">\(\lambda_{ml}\)</span> defined by the “expected” table. The tables are first generated as a collection columns and stored in a matrix. Here, I am creating 10,000 tables - and print out the first two in column form:</p>
+<pre class="r"><code>set.seed(2021)
+
+(lambdas &lt;-  as.vector(t(expected)))</code></pre>
+<pre><code>##  [1]  10  20  30  30  60  90  40  80 120  20  40  60</code></pre>
+<pre class="r"><code>condU &lt;- matrix(rpois(n = 10000*length(lambdas), 
+                           lambda = lambdas), 
+                     nrow = length(lambdas))
+condU[, 1:2]</code></pre>
+<pre><code>##       [,1] [,2]
+##  [1,]    9   15
+##  [2,]   22   11
+##  [3,]   31   37
+##  [4,]   31   25
+##  [5,]   66   71
+##  [6,]   71   81
+##  [7,]   41   50
+##  [8,]   74   87
+##  [9,]  138   96
+## [10,]   15   20
+## [11,]   36   30
+## [12,]   71   53</code></pre>
+<p>Now, I convert each column to a table and create a “list” of tables. Here are the first two tables with the row and column margins; you can see that even the totals change from table to table:</p>
+<pre class="r"><code>condUm &lt;- lapply(seq_len(ncol(condU)), 
+  function(i) matrix(condU[,i], length(row), length(col), byrow = T))
+
+addmargins(condUm[[1]])</code></pre>
+<pre><code>##                Sum
+##      9  22  31  62
+##     31  66  71 168
+##     41  74 138 253
+##     15  36  71 122
+## Sum 96 198 311 605</code></pre>
+<pre class="r"><code>addmargins(condUm[[2]])</code></pre>
+<pre><code>##                 Sum
+##      15  11  37  63
+##      25  71  81 177
+##      50  87  96 233
+##      20  30  53 103
+## Sum 110 199 267 576</code></pre>
+<p>A function <code>avgMatrix</code> estimates the average and variance of each of the cells (code can be made available if there is interest). The average of the 10,000 tables mirrors the “expected” table. And since all cells (including the totals) are Poisson distributed, the variance should be quite close to the mean table:</p>
+<pre class="r"><code>sumU &lt;- avgMatrix(condUm, addMarg = T, sLabel = &quot;U&quot;)
+
+round(sumU$sampAvg, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3] [,4]
+## [1,]   10   20   30   60
+## [2,]   30   60   90  180
+## [3,]   40   80  120  240
+## [4,]   20   40   60  120
+## [5,]  100  200  300  600</code></pre>
+<pre class="r"><code>round(sumU$sampVar, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3] [,4]
+## [1,]   10   19   30   60
+## [2,]   30   61   90  180
+## [3,]   40   80  124  244
+## [4,]   20   40   60  122
+## [5,]  100  199  308  613</code></pre>
+<p>Function <code>estX2</code> calculates the <span class="math inline">\(X^2\)</span> statistic for each contingency table:</p>
+<pre class="r"><code>estX2 &lt;- function(contMat, expMat) {
+  X2 &lt;- sum( (contMat - expMat)^2 / expMat)
+  return(X2)
+}
+
+X2 &lt;- sapply(condUm, function(x) estX2(x, expected))
+
+head(X2)</code></pre>
+<pre><code>## [1] 11.819444 23.162500 17.681944  3.569444 31.123611 14.836111</code></pre>
+<p>Comparing the mean and variance of the 10,000 simulated <span class="math inline">\(X^2\)</span> statistics with the mean and variance of data generated from a <span class="math inline">\(\chi^2_{12}\)</span> distribution indicates that the two are quite close:</p>
+<pre class="r"><code>trueChisq &lt;- rchisq(10000, 12)
+
+# Comparing means
+round(c( mean(X2), mean(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 12 12</code></pre>
+<pre class="r"><code># Comparing variance
+round(c( var(X2), var(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 24.5 24.3</code></pre>
+</div>
+<div id="conditioning-on-n" class="section level3">
+<h3>Conditioning on N</h3>
+<p>If we assume that the total number of items remains the same from day to day (or sample to sample), but we allow to totals to vary by location and materials, we have a constrained contingency table that looks like this:</p>
+<div class="figure">
+<img src="/img/post-chisquare/ConditionN.png" />
+
+</div>
+<p>The table total is highlighted in yellow to indicate that <span class="math inline">\(N\)</span> is fixed. The “metal/location 3” is also highlighted because once <span class="math inline">\(N\)</span> is fixed and all the other cells are allowed to be randomly generated, that last cell is automatically determined as <span class="math display">\[C_{metal, 3} = N - \sum_{ml \ne (metal \ \&amp; \ 3)} C_{ml}.\]</span> The data generation process that reflects this constraint is the multinomial distribution, which is the multivariate analogue to the binomial distribution. The cell probabilities are set based on the proportions of the independence table:</p>
+<pre class="r"><code>round(probs &lt;- expected/N, 2)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,] 0.02 0.03 0.05
+## [2,] 0.05 0.10 0.15
+## [3,] 0.07 0.13 0.20
+## [4,] 0.03 0.07 0.10</code></pre>
+<p>As before with the unconditional scenario, let’s generate a large number of tables, each conditional on N. I’ll show two tables so you can see that N is indeed constrained:</p>
+<pre class="r"><code>condN &lt;- rmultinom(n = 10000, size = N, prob = as.vector(t(probs)))
+condNm &lt;- lapply(seq_len(ncol(condN)), 
+                 function(i) matrix(condN[,i], length(row), length(col),
+                                    byrow = T))
+addmargins(condNm[[1]])</code></pre>
+<pre><code>##                Sum
+##     12  16  30  58
+##     26  67  83 176
+##     36  91 119 246
+##     21  40  59 120
+## Sum 95 214 291 600</code></pre>
+<pre class="r"><code>addmargins(condNm[[2]])</code></pre>
+<pre><code>##                Sum
+##      8  20  19  47
+##     30  64  97 191
+##     36  84 112 232
+##     21  52  57 130
+## Sum 95 220 285 600</code></pre>
+<p><em>And here is the key point</em>: if we look at the mean of the cell counts across the samples, they mirror the expected values. But, the variances are slightly reduced. We are essentially looking at a subset of the samples generated above that were completely unconstrained, and in this subset the total across all cells equals <span class="math inline">\(N\)</span>. As I <a href="https://www.rdatagen.net/post/a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence/">demonstrated</a> in the last post, this constraint effectively removes samples with more extreme values in some of the cells - which reduces the variance of each cell:</p>
+<pre class="r"><code>sumN &lt;- avgMatrix(condNm, sLabel = &quot;N&quot;)
+
+round(sumN$sampAvg, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]   10   20   30
+## [2,]   30   60   90
+## [3,]   40   80  120
+## [4,]   20   40   60</code></pre>
+<pre class="r"><code>round(sumN$sampVar, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]   10   19   29
+## [2,]   28   53   76
+## [3,]   37   70   95
+## [4,]   19   39   54</code></pre>
+<p>We lost one degree of freedom (the one cell highlighted in grey in the table above), so it makes sense to compare the distribution of <span class="math inline">\(X^2\)</span> to a <span class="math inline">\(\chi^2_{11}\)</span>:</p>
+<pre class="r"><code>X2 &lt;- sapply(condNm, function(x) estX2(x, expected))
+
+trueChisq &lt;- rchisq(10000, 11)
+
+# Comparing means
+round(c( mean(X2), mean(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 11 11</code></pre>
+<pre class="r"><code># Comparing variance
+round(c( var(X2), var(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 21.7 22.4</code></pre>
+</div>
+<div id="conditioning-on-row-totals" class="section level3">
+<h3>Conditioning on row totals</h3>
+<p>We go one step further - and condition on the row totals (I am going to skip conditioning on the column totals, because conceptually it is the same thing). Now, the row totals in the table are highlighted, and all of the cells in “location 3” are grayed out. Once the row total is set, and the first two elements in each row are generated, the last cell in the row is determined. We are losing four degrees of freedom.</p>
+<div class="figure">
+<img src="/img/post-chisquare/ConditionRow.png" />
+
+</div>
+<p>These tables can be generated again using the multinomial distribution, but each row of the table is generated individually. The cell probabilities are all based on the overall column proportions:</p>
+<pre class="r"><code>round(prob &lt;- col/N, 2)</code></pre>
+<pre><code>## [1] 0.17 0.33 0.50</code></pre>
+<p>The rows are generated individually based on the count of the total number fixed items in the row. Two of the tables are shown again to show that the generated tables have the same row totals:</p>
+<pre class="r"><code>condRow &lt;- lapply(seq_len(length(row)), 
+              function(i) t(rmultinom(10000, size = row[i],prob=prob)))
+
+condRm &lt;- lapply(seq_len(10000), 
+              function(i) {
+                  do.call(rbind, lapply(condRow, function(x) x[i,]))
+              }
+)
+
+addmargins(condRm[[1]])</code></pre>
+<pre><code>##                Sum
+##      5  19  36  60
+##     32  55  93 180
+##     39  76 125 240
+##     19  42  59 120
+## Sum 95 192 313 600</code></pre>
+<pre class="r"><code>addmargins(condRm[[2]])</code></pre>
+<pre><code>##                 Sum
+##      11  19  30  60
+##      36  52  92 180
+##      44  74 122 240
+##      16  41  63 120
+## Sum 107 186 307 600</code></pre>
+<p>This time around, the variance of the cells is reduced even further:</p>
+<pre class="r"><code>sumR &lt;- avgMatrix(condRm, sLabel = &quot;R&quot;)
+
+round(sumR$sampAvg, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]   10   20   30
+## [2,]   30   60   90
+## [3,]   40   80  120
+## [4,]   20   40   60</code></pre>
+<pre class="r"><code>round(sumR$sampVar, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]    8   14   15
+## [2,]   26   41   46
+## [3,]   34   53   59
+## [4,]   17   27   31</code></pre>
+<p>And let’s compare the distribution of the sample <span class="math inline">\(X^2\)</span> statistics with the <span class="math inline">\(\chi^2_8\)</span> distribution (since we now have <span class="math inline">\(12 - 4 = 8\)</span> degrees of freedom):</p>
+<pre class="r"><code>X2 &lt;- sapply(condRm, function(x) estX2(x, expected))
+
+trueChisq &lt;- rchisq(10000, 8)
+
+# Comparing means
+round(c( mean(X2), mean(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 8.1 8.0</code></pre>
+<pre class="r"><code># Comparing variance
+round(c( var(X2), var(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 16.4 16.4</code></pre>
+</div>
+<div id="conditioning-on-both-row-and-column-totals" class="section level3">
+<h3>Conditioning on both row and column totals</h3>
+<p>I know this has gotten a little repetitive, but we are at the grand finale, where we condition on both the row and column totals as required for the chi-square test of independence. The whole point of this is to show that once we set this condition, the variance of the cells is reduced far below the Poisson variance. As a result, we must use a <span class="math inline">\(\chi^2\)</span> distribution with fewer degrees of freedom when evaluating the <span class="math inline">\(X^2\)</span> test statistic.</p>
+<p>This final table shows both the constraints on the row and column totals, and the impact on the specific cell. The six grayed out cells are determined by the column totals once the six other cells are generated. That is, we lose six degrees of freedom. (Maybe you can now see where the <span class="math inline">\(degrees \ of \  freedom = (\# \ rows - 1) \times (\# \ cols - 1)\)</span> comes from?)</p>
+<div class="figure">
+<img src="/img/post-chisquare/ConditionRC.png" />
+
+</div>
+<p>The process for generating data for a table where both row totals and column totals is interesting, and I actually wrote some pretty inefficient code that was based on a simple algorithm tied to the multivariate hypergeometric distribution, which was described <a href="https://blogs.sas.com/content/iml/2015/10/21/simulate-contingency-tables-fixed-sums-sas.html">here</a>. Luckily, just as I started writing this section, I stumbled upon the R function <code>r2dtable</code>. (Not sure why I didn’t find it right away, but was glad to have found it in any case.) So, with a single line, 10,000 tables can be very quickly generated.</p>
+<pre class="r"><code>condRCm &lt;- r2dtable(10000, row, col)</code></pre>
+<p>Here are the first two generated tables:</p>
+<pre class="r"><code>addmargins(condRCm[[1]])</code></pre>
+<pre><code>##                 Sum
+##      14  12  34  60
+##      24  64  92 180
+##      38  79 123 240
+##      24  45  51 120
+## Sum 100 200 300 600</code></pre>
+<pre class="r"><code>addmargins(condRCm[[2]])</code></pre>
+<pre><code>##                 Sum
+##       7  23  30  60
+##      30  60  90 180
+##      38  78 124 240
+##      25  39  56 120
+## Sum 100 200 300 600</code></pre>
+<p>And with this most restrictive set of conditioning constraints, the variances of the cell counts are considerably lower than when conditioning on row or column totals alone:</p>
+<pre class="r"><code>sumRC &lt;- avgMatrix(condRCm, sLabel = &quot;RC&quot;)
+
+round(sumRC$sampAvg, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]   10   20   30
+## [2,]   30   60   90
+## [3,]   40   80  120
+## [4,]   20   40   60</code></pre>
+<pre class="r"><code>round(sumRC$sampVar, 0)</code></pre>
+<pre><code>##      [,1] [,2] [,3]
+## [1,]    8   12   13
+## [2,]   18   28   31
+## [3,]   20   32   36
+## [4,]   13   22   24</code></pre>
+<p>And, take a look at the mean and variance of the <span class="math inline">\(X^2\)</span> statistic as it compares to the mean and variance of the <span class="math inline">\(\chi^2_6\)</span> distribution:</p>
+<pre class="r"><code>X2 &lt;- sapply(condRCm, function(x) estX2(x, expected))
+
+trueChisq &lt;- rchisq(10000, 6)
+
+# Comparing means
+round(c( mean(X2), mean(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 6 6</code></pre>
+<pre class="r"><code># Comparing variance
+round(c( var(X2), var(trueChisq)), 1)</code></pre>
+<pre><code>## [1] 11.8 11.7</code></pre>
+<p>I’ll leave you with a plot of the cell counts for each of the 10,000 tables generated in each of the conditioning scenarios: unconditional (U), conditional on N (N), conditional on row totals (R), and conditional on both row and column totals (RC). This plot confirms the point I’ve been trying to make in this post and the last: <em>adding more and more restrictive conditions progessively reduces variability within each cell</em>. The reduction in degrees of freedom in the chi-square test is the direct consequence of this reduction in within-cell variability.</p>
+<p><img src="/post/2018-03-25-a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence_files/figure-html/unnamed-chunk-25-1.png" width="576" /></p>
+</div>
+</div>
