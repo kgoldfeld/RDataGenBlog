@@ -1,0 +1,159 @@
+---
+title: A little function to help generate ICCs in simple clustered data
+author: ''
+date: '2018-05-21'
+slug: a-little-function-to-help-generate-iccs-in-simple-clustered-data
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In the field of health services research, experiments are often conducted at the level of a provider or site rather than the patient. For example, we might be interested in understanding the effect of a training program for physicians on their patients. It would be very difficult to randomize patients to be exposed or not to the training if a group of patients all see the same doctor. So we set it up so that only some doctors get the training and others serve as the control and we compare the outcome at the patient level. (For example, we might be interested in a program to have more patients referred to necessary drug counseling services, and the training program might be geared towards getting doctors to make the referrals.)</p>
+<p>The challenge is that in an experiment we typically assume that the individual outcomes are not related to each other (other than the common effect of the exposure). In this situation, we can’t make that assumption - groups of patients are all being treated by the same doctor. Just in general, even before the intervention, there might be variation across physicians. The doctors might practice differently or they may have patients with particular needs or issues. So, the average referral rate might just naturally be different for the different practices. And of course, patients within a practice will vary. So, we have two sources of variation: <em>between</em> practice and <em>within</em> practice variation that explain overall variation.</p>
+<p>I touched on this <a href="https://www.rdatagen.net/post/icc-for-gamma-distribution/">earlier</a> when I discussed issues related to Gamma distributed clustered data. The key concept is the intra-class coefficient or ICC, which is a measure of how within variation relates to overall variation. The ICC ranges from 0 (where there is no <em>between</em> variation - all site averages are the same) to 1 (where there is no variation within a site - all patients have the same outcomes). You should definitely take a look at the earlier post for a bit more detail.</p>
+<p>My goal here is to highlight a little function I created in the recently updated version of <code>simstudy</code> (v0.1.9, now available on <code>CRAN</code>). In the course of exploring study designs for cluster randomized trials, I often need to explore what happens (to sample size requirements, for example) when the ICC increases. But, when you generate data, you don’t control the ICC directly, but rather the variation. This is not really an issue with normally distributed data as the ICC is an obvious function of the variances used to generate the data. But, when the outcomes have binary, Poisson, or Gamma (or anything else really) distributions, the connection is not always so obvious. So, to find data with a specific ICC, it might require a bit of trial and error, which can be a little time consuming.</p>
+<p><code>simstudy</code> now includes function <code>iccRE</code> (short for ICC random effects) that allows the users to specify target ICCs for a desired distribution (along with relevant parameters), and then returns the corresponding variances that would be specified at the cluster level to generate those ICCs.</p>
+<p>Here’s an example for three possible ICCs in the context of the normal distribution:</p>
+<pre class="r"><code>library(simstudy)
+
+targetICC &lt;- c(0.05, 0.075, 0.10)
+
+setVars &lt;- iccRE(ICC = targetICC, dist = &quot;normal&quot;, varWithin = 4)
+
+round(setVars, 4)</code></pre>
+<pre><code>## [1] 0.2105 0.3243 0.4444</code></pre>
+<p>This means if we specify the variance for the site-level random effect to be 0.2105 in conjunction with the individual-level (within) variance of 4, the observed ICC from the simulated data will be approximately 0.05:</p>
+<pre class="r"><code>set.seed(73632)
+
+d &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 0.2105, id = &quot;grp&quot;)
+d &lt;- defData(d, varname = &quot;size&quot;, formula = 1000, dist = &quot;nonrandom&quot;)
+
+a &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;30 + a&quot;, 
+                variance = 4, dist = &quot;normal&quot;)
+
+dT &lt;- genData(10000, d)
+
+dC &lt;- genCluster(dtClust = dT, cLevelVar = &quot;grp&quot;, 
+                 numIndsVar = &quot;size&quot;, level1ID = &quot;id&quot;)
+
+dC &lt;- addColumns(a, dC)
+dC</code></pre>
+<pre><code>##             grp          a size       id       y1
+##        1:     1 -0.3255465 1000        1 32.08492
+##        2:     1 -0.3255465 1000        2 27.21180
+##        3:     1 -0.3255465 1000        3 28.37411
+##        4:     1 -0.3255465 1000        4 27.70485
+##        5:     1 -0.3255465 1000        5 32.11814
+##       ---                                        
+##  9999996: 10000  0.3191311 1000  9999996 30.15837
+##  9999997: 10000  0.3191311 1000  9999997 32.66302
+##  9999998: 10000  0.3191311 1000  9999998 28.34583
+##  9999999: 10000  0.3191311 1000  9999999 28.56443
+## 10000000: 10000  0.3191311 1000 10000000 30.06957</code></pre>
+<p>The <em>between</em> variance is estimated as a variance of the group means, and the <em>within</em> variance is estimated as an average of the variances calculated for each group:</p>
+<pre class="r"><code>between &lt;- dC[, mean(y1), keyby = grp][, var(V1)] 
+within &lt;- dC[, var(y1), keyby = grp][, mean(V1)]
+
+total &lt;- dC[, var(y1)]
+
+round(c(between, within, total), 3)</code></pre>
+<pre><code>## [1] 0.212 3.996 4.203</code></pre>
+<p>The ICC is the ratio of the <em>between</em> variance to the <em>total</em>, which is also the sum of the two component variances:</p>
+<pre class="r"><code>round(between/(total), 3)</code></pre>
+<pre><code>## [1] 0.05</code></pre>
+<pre class="r"><code>round(between/(between + within), 3)</code></pre>
+<pre><code>## [1] 0.05</code></pre>
+<p>Setting the site-level variance at 0.4444 gives us the ICC of 0.10:</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 0.4444, id = &quot;grp&quot;)
+d &lt;- defData(d, varname = &quot;size&quot;, formula = 1000, dist = &quot;nonrandom&quot;)
+
+a &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;30 + a&quot;, 
+                variance = 4, dist = &quot;normal&quot;)
+
+dT &lt;- genData(10000, d)
+
+dC &lt;- genCluster(dtClust = dT, cLevelVar = &quot;grp&quot;, 
+                 numIndsVar = &quot;size&quot;, level1ID = &quot;id&quot;)
+
+dC &lt;- addColumns(a, dC)
+
+between &lt;- dC[, mean(y1), keyby = grp][, var(V1)] 
+within &lt;- dC[, var(y1), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)</code></pre>
+<pre><code>## [1] 0.102</code></pre>
+<div id="other-distributions" class="section level3">
+<h3>Other distributions</h3>
+<p>The ICC is a bit more difficult to interpret using other distributions where the variance is a function of the mean, such as with the binomial, Poisson, or Gamma distributions. However, we can still use the notion of <em>between</em> and <em>within</em>, but it may need to be transformed to another scale.</p>
+<p>In the case of <strong>binary</strong> outcomes, we have to imagine an underlying or latent continuous process that takes place on the logistic scale. (I talked a bit about this <a href="https://www.rdatagen.net/post/ordinal-regression/">here</a>.)</p>
+<pre class="r"><code>### binary
+
+(setVar &lt;- iccRE(ICC = 0.05, dist = &quot;binary&quot;))</code></pre>
+<pre><code>## [1] 0.173151</code></pre>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 0.1732, id = &quot;grp&quot;)
+d &lt;- defData(d, varname = &quot;size&quot;, formula = 1000, dist = &quot;nonrandom&quot;)
+
+a &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;-1 + a&quot;, dist = &quot;binary&quot;, 
+                link = &quot;logit&quot;)
+
+dT &lt;- genData(10000, d)
+
+dC &lt;- genCluster(dtClust = dT, cLevelVar = &quot;grp&quot;, numIndsVar = &quot;size&quot;, 
+                 level1ID = &quot;id&quot;)
+dC &lt;- addColumns(a, dC)</code></pre>
+<p>The ICC for the binary distribution is on the logistic scale, and the <em>within</em> variance is constant for any dataset. We calculate the <em>within</em> using the log-odds of the mean proportion:</p>
+<pre class="r"><code>within &lt;- (pi ^ 2) / 3
+means &lt;- dC[,mean(y1), keyby = grp]
+between &lt;- means[, log(V1/(1-V1)), keyby = grp][abs(V1) != Inf, var(V1)]
+
+round(between / (between + within), 3)</code></pre>
+<pre><code>## [1] 0.051</code></pre>
+<p>The ICC for the <strong>Poisson</strong> distribution is interpreted on the scale of the count measurements, even though the random effect variance is on the log scale. If you want to see the details behind the random effect variance derivation, see this <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.7532">paper</a> by <em>Austin et al.</em>, which was based on original work by <em>Stryhn et al.</em> that can be found <a href="http://www.sciquest.org.nz/node/64294">here</a>.</p>
+<pre class="r"><code>(setVar &lt;- iccRE(ICC = 0.05, dist = &quot;poisson&quot;, lambda = 30))</code></pre>
+<pre><code>## [1] 0.0017513</code></pre>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 0.0018, id = &quot;grp&quot;)
+d &lt;- defData(d, varname = &quot;size&quot;, formula = 1000, dist = &quot;nonrandom&quot;)
+
+a &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;log(30) + a&quot;, 
+                dist = &quot;poisson&quot;, link = &quot;log&quot;)
+
+dT &lt;- genData(10000, d)
+
+dC &lt;- genCluster(dtClust = dT, cLevelVar = &quot;grp&quot;, 
+                 numIndsVar = &quot;size&quot;, level1ID = &quot;id&quot;)
+
+dC &lt;- addColumns(a, dC)</code></pre>
+<p>The variance components for the Poisson are estimated the same way as was done for the normal distribution:</p>
+<pre class="r"><code>between &lt;- dC[, mean(y1), keyby = grp][, var(V1)] 
+within &lt;- dC[, var(y1), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)</code></pre>
+<pre><code>## [1] 0.051</code></pre>
+<p>Finally, here are the results for the <strong>Gamma</strong> distribution, which I talked about in great length in this <a href="https://www.rdatagen.net/post/icc-for-gamma-distribution/">previous post</a>.</p>
+<pre class="r"><code>(setVar &lt;- iccRE(ICC = 0.05, dist = &quot;gamma&quot;, disp = 1.5 ))</code></pre>
+<pre><code>## [1] 0.1612566</code></pre>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 0.1613, id = &quot;grp&quot;)
+d &lt;- defData(d, varname = &quot;size&quot;, formula = 1000, dist = &quot;nonrandom&quot;)
+
+a &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;30 + a&quot;, variance = 1.5, 
+                dist = &quot;gamma&quot;, link = &quot;log&quot;)
+
+dT &lt;- genData(10000, d)
+
+dC &lt;- genCluster(dtClust = dT, cLevelVar = &quot;grp&quot;, numIndsVar = &quot;size&quot;,
+                 level1ID = &quot;id&quot;)
+
+dC &lt;- addColumns(a, dC)
+
+# ICC is on log scale
+
+between &lt;- dC[, mean(log(y1)), keyby = grp][, var(V1)] 
+within &lt;- dC[, var(log(y1)), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)</code></pre>
+<pre><code>## [1] 0.05</code></pre>
+<p>It is possible to think about the ICC in the context of covariates, but things get a lot more complicated and more confusing. The ICC itself will likely be different across different levels of the covariates. For this reason, I like to think of it in the marginal context.</p>
+</div>

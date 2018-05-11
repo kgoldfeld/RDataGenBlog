@@ -1,0 +1,134 @@
+---
+title: Is non-inferiority on par with superiority?
+author: ''
+date: '2018-05-14'
+slug: are-non-inferiority-trials-inferior
+categories: []
+tags: []
+subtitle: ''
+---
+
+
+
+<p>It is grant season around here (actually, it is pretty much always grant season), which means another series of problems to tackle. Even with the most straightforward study designs, there is almost always some interesting twist, or an approach that presents a subtle issue or two. In this case, the investigator wants compare two interventions, but doesn’t feel the need to show that one is better than the other. He just wants to see if the newer intervention is <em>not inferior</em> to the more established intervention.</p>
+<p>The shift from a superiority trial to a non-inferiority trial leads to a fundamental shift in the hypothesis testing framework. In the more traditional superiority trial, where we want to see if an intervention is an improvement over another intervention, we can set up the hypothesis test with null and alternative hypotheses based on the difference of the intervention proportions <span class="math inline">\(p_{old}\)</span> and <span class="math inline">\(p_{new}\)</span> (under the assumption of a binary outcome):</p>
+<p><span class="math display">\[
+\begin{aligned}
+H_0: p_{new} - p_{old} &amp;\le 0 \\
+H_A: p_{new} - p_{old} &amp;&gt; 0
+\end{aligned}
+\]</span> In this context, if we reject the null hypothesis that the difference in proportions is less than zero, we conclude that the new intervention is an improvement over the old one, at least for the population under study. (A crucial element of the test is the <span class="math inline">\(\alpha\)</span>-level that determines the Type 1 error (probability of rejecting <span class="math inline">\(H_0\)</span> when <span class="math inline">\(H_0\)</span> is actually true. If we use <span class="math inline">\(\alpha = 0.025\)</span>, then that is analogous to doing a two-sided test with <span class="math inline">\(\alpha = .05\)</span> and hypotheses <span class="math inline">\(H_0: p_{new} - p_{old} = 0\)</span> and <span class="math inline">\(H_A: p_{new} - p_{old} \ne 0\)</span>.)</p>
+<p>In the case of an inferiority trial, we add a little twist. Really, we subtract a little twist. In this case the hypotheses are:</p>
+<p><span class="math display">\[
+\begin{aligned}
+H_0: p_{new} - p_{old} &amp;\le -\Delta \\
+H_A: p_{new} - p_{old} &amp;&gt; -\Delta
+\end{aligned}
+\]</span></p>
+<p>where <span class="math inline">\(\Delta\)</span> is some threshold that sets the non-inferiority bounds. Clearly, if <span class="math inline">\(\Delta = 0\)</span> then this is equivalent to a superiority test. However, for any other <span class="math inline">\(\Delta\)</span>, there is a bit of a cushion so that the new intervention will still be considered <em>non-inferior</em> even if we observe a <em>lower</em> proportion for the new intervention compared to the older intervention.</p>
+<p>As long as the confidence interval around the observed estimate for the difference in proportions does not cross the <span class="math inline">\(-\Delta\)</span> threshold, we can conclude the new intervention is non-inferior. If we construct a 95% confidence interval, this procedure will have a Type 1 error rate <span class="math inline">\(\alpha = 0.025\)</span>, and a 90% CI will yield an <span class="math inline">\(\alpha = 0.05\)</span>. (I will demonstrate this with a simulation.)</p>
+<p>The following figures show how different confident intervals imply different conclusions. I’ve added an equivalence trial here as well, but won’t discuss in detail except to say that in this situation we would conclude that two interventions are <em>equivalent</em> if the confidence interval falls between <span class="math inline">\(-\Delta\)</span> and <span class="math inline">\(\Delta\)</span>). The bottom interval crosses the non-inferiority threshold, so is considered inconclusive. The second interval from the top crosses zero, but does not cross the non-inferiority threshold, so we conclude that the new intervention is at least as effective as the old one. And the top interval excludes zero, so we conclude that the new intervention is an improvement:</p>
+<p><img src="/post/2018-05-14-are-non-inferiority-trials-inferior_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+<p>This next figure highlights the key challenge of the the non-inferiority trial: where do we set <span class="math inline">\(\Delta\)</span>? By shifting the threshold towards zero in this example (and not changing anything else), we can no longer conclude non-inferiority. But, the superiority test is not affected, and never will be. The comparison for a superiority test is made relative to zero only, and has nothing to do with <span class="math inline">\(\Delta\)</span>. So, unless there is a principled reason for selecting <span class="math inline">\(\Delta\)</span>, the process (and conclusions) and feel a little arbitrary. (Check out this interactive <a href="http://rpsychologist.com/d3/equivalence/">post</a> for a really cool way to explore some of these issues.)</p>
+<p><img src="/post/2018-05-14-are-non-inferiority-trials-inferior_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<div id="type-1-error-rate" class="section level2">
+<h2>Type 1 error rate</h2>
+<p>To calculate the Type 1 error rate, we generate data under the null hypothesis, or in this case on the rightmost boundary of the null hypothesis since it is a composite hypothesis. First, let’s generate one data set:</p>
+<pre class="r"><code>library(magrittr)
+library(broom)
+
+set.seed(319281)
+
+def &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;0.30 - 0.15*rx&quot;, 
+                  dist = &quot;binary&quot;)
+
+DT &lt;- genData(1000) %&gt;% trtAssign(dtName = ., grpName = &quot;rx&quot;)
+DT &lt;- addColumns(def, DT)
+DT</code></pre>
+<pre><code>##         id rx y
+##    1:    1  0 0
+##    2:    2  1 0
+##    3:    3  1 0
+##    4:    4  0 0
+##    5:    5  1 0
+##   ---          
+##  996:  996  0 1
+##  997:  997  0 0
+##  998:  998  1 0
+##  999:  999  0 0
+## 1000: 1000  0 0</code></pre>
+<p>And we can estimate a confidence interval for the difference between the two means:</p>
+<pre class="r"><code>props &lt;- DT[, .(success = sum(y), n=.N), keyby = rx]
+setorder(props, -rx)
+
+round(tidy(prop.test(props$success, props$n, 
+               correct = FALSE, conf.level = 0.95))[ ,-c(5, 8,9)], 3)</code></pre>
+<pre><code>##   estimate1 estimate2 statistic p.value conf.low conf.high
+## 1     0.142     0.276    27.154       0   -0.184    -0.084</code></pre>
+<p>If we generate 1000 data sets in the same way, we can count the number of occurrences where the where we would incorrectly reject the null hypothesis (i.e. commit a Type 1 error):</p>
+<pre class="r"><code>powerRet &lt;- function(nPerGrp, level, effect, d = NULL) {
+  
+  Form &lt;- genFormula(c(0.30, -effect), c(&quot;rx&quot;))
+
+  def &lt;- defDataAdd(varname = &quot;y&quot;, formula = Form, dist = &quot;binary&quot;)
+  DT &lt;- genData(nPerGrp*2) %&gt;% trtAssign(dtName = ., grpName = &quot;rx&quot;)
+  
+  iter &lt;- 1000
+  ci &lt;- data.table()
+  
+  # generate 1000 data sets and store results each time in &quot;ci&quot;
+  
+  for (i in 1: iter) {
+    
+    dx &lt;- addColumns(def, DT)
+    
+    props &lt;- dx[, .(success = sum(y), n=.N), keyby = rx]
+    setorder(props, -rx)
+    ptest &lt;- prop.test(props$success, props$n, correct = FALSE, 
+                       conf.level = level)
+    
+    ci &lt;- rbind(ci, data.table(t(ptest$conf.int), 
+                       diff = ptest$estimate[1] - ptest$estimate[2]))
+  }
+  
+  setorder(ci, V1)
+  ci[, i:= 1:.N]
+  
+  # for sample size calculation at 80% power
+  
+  if (is.null(d)) d &lt;- ci[i==.2*.N, V1]
+  
+  ci[, d := d]
+  
+  # determine if interval crosses threshold
+
+  ci[, nullTrue := (V1 &lt;= d)]
+  
+  return(ci[])
+  
+}</code></pre>
+<p>Using 95% CIs, we expect 2.5% of the intervals to lie to the right of the non-inferiority threshold. That is, 2.5% of the time we would reject the null hypothesis when we shouldn’t:</p>
+<pre class="r"><code>ci &lt;- powerRet(nPerGrp = 500, level = 0.95, effect = 0.15, d = -0.15)
+formattable::percent(ci[, mean(!(nullTrue))], 1)</code></pre>
+<pre><code>## [1] 2.4%</code></pre>
+<p>And using 90% CIs, we expect 5% of the intervals to lie to the right of the threshold:</p>
+<pre class="r"><code>ci &lt;- powerRet(nPerGrp = 500, level = 0.90, effect = 0.15, d = -0.15)
+formattable::percent(ci[, mean(!(nullTrue))], 1)</code></pre>
+<pre><code>## [1] 5.1%</code></pre>
+</div>
+<div id="sample-size-estimates" class="section level2">
+<h2>Sample size estimates</h2>
+<p>If we do not expect the effect sizes to be different across interventions, it seems reasonable to find the sample size under this assumption of no effect. Assuming we want to set <span class="math inline">\(\alpha = 0.025\)</span>, we generate many data sets and estimate the 95% confidence interval for each one. The power is merely the proportion of these confidence intervals lie entirely to the right of <span class="math inline">\(-\Delta\)</span>.</p>
+<p>But how should we set <span class="math inline">\(\Delta\)</span>? I’d propose that for each candidate sample size level, we find <span class="math inline">\(-\Delta\)</span> such that 80% of the simulated confidence intervals lie to the right of some value, where 80% is the desired power of the test (i.e., given that there is no treatment effect, 80% of the (hypothetical) experiments we conduct will lead us to conclude that the new treatment is <em>non-inferior</em> to the old treatment).</p>
+<pre class="r"><code>ci &lt;- powerRet(nPerGrp = 200, level = 0.95, effect = 0)
+p1 &lt;- plotCIs(ci, 200, 0.95)
+
+ci &lt;- powerRet(nPerGrp = 500, level = 0.95, effect = 0)
+p2 &lt;- plotCIs(ci, 500, 0.95)</code></pre>
+<pre class="r"><code>library(gridExtra)
+grid.arrange(p1, p2, nrow = 1, 
+             bottom = &quot;difference in proportion&quot;, left = &quot;iterations&quot;)</code></pre>
+<p><img src="/post/2018-05-14-are-non-inferiority-trials-inferior_files/figure-html/unnamed-chunk-10-1.png" width="912" /></p>
+<p>It is clear that increasing the sample size reduces the width of the 95% confidence intervals. As a result, the non-inferiority threshold based on 80% power is shifted closer towards zero when sample size increases. This implies that a larger sample size allows us to make a more compelling statement about non-inferiority.</p>
+<p>Unfortunately, not all non-inferiority statements are alike. If we set <span class="math inline">\(\Delta\)</span> too large, we may expand the bounds of non-inferiority beyond a reasonable, justifiable point. Given that there is no actual constraint on what <span class="math inline">\(\Delta\)</span> can be, I would say that the non-inferiority test is somewhat more problematic than its closely related cousin, the superiority test, where <span class="math inline">\(\Delta\)</span> is in effect fixed at zero. But, if we take this approach, where we identify <span class="math inline">\(\Delta\)</span> that satisfies the desired power, we can make a principled decision about whether or not the threshold is within reasonable bounds.</p>
+</div>
