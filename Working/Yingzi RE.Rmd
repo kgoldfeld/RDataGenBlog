@@ -1,0 +1,53 @@
+---
+title: "Short Example"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message = FALSE}
+
+library(simstudy)
+library(ordinal)
+
+baseprobs<-c(0.40, 0.25, 0.15, 0.20)
+
+def <- defData(varname="male", formula=0.65, dist = "binary")
+
+# define random effect
+
+def <- defData(def, varname = "re", formula = 0, variance = 1, dist = "normal")
+def <- defData(def, varname = "res", formula = 0, variance = 1.5, dist = "normal")
+
+
+# define "shift"
+
+defZ <- defDataAdd(varname = "z", formula = "1*male + re + period * res", dist = "nonrandom")
+
+# generate data
+
+set.seed(12345)
+
+dx <- genData(25000, def)
+dx <- addPeriods(dx, 3)
+dx <- addColumns(defZ, dx)
+dx <- genOrdCat(dx, adjVar = "z", baseprobs, catVar = "r")
+
+print(dx)
+
+## Estiamte correlation
+
+dc <- dcast(dx, id ~ period, value.var = "r")
+setnames(dc, c("id", "r1", "r2", "r3"))
+
+cor(dc[, matrix(cbind(r1, r2, r3), ncol = 3)])
+
+
+## Fit mixed-effects model
+
+clm.mixed <- clmm(r ~ male + (1 | id), data = dx)
+summary(clm.mixed)
+
+```
