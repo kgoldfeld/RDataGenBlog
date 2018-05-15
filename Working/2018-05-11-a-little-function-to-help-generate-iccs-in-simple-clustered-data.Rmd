@@ -44,20 +44,20 @@ a <- defDataAdd(varname = "y1", formula = "30 + a",
 
 dT <- genData(10000, d)
 
-dC <- genCluster(dtClust = dT, cLevelVar = "grp", 
+dCn05 <- genCluster(dtClust = dT, cLevelVar = "grp", 
                  numIndsVar = "size", level1ID = "id")
 
-dC <- addColumns(a, dC)
-dC
+dCn05 <- addColumns(a, dCn05)
+dCn05
 ```
 
 The *between* variance is estimated as a variance of the group means, and the *within* variance is estimated as an average of the variances calculated for each group:
 
 ```{r}
-between <- dC[, mean(y1), keyby = grp][, var(V1)] 
-within <- dC[, var(y1), keyby = grp][, mean(V1)]
+between <- dCn05[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCn05[, var(y1), keyby = grp][, mean(V1)]
 
-total <- dC[, var(y1)]
+total <- dCn05[, var(y1)]
 
 round(c(between, within, total), 3)
 ```
@@ -80,13 +80,13 @@ a <- defDataAdd(varname = "y1", formula = "30 + a",
 
 dT <- genData(10000, d)
 
-dC <- genCluster(dtClust = dT, cLevelVar = "grp", 
+dCn10 <- genCluster(dtClust = dT, cLevelVar = "grp", 
                  numIndsVar = "size", level1ID = "id")
 
-dC <- addColumns(a, dC)
+dCn10 <- addColumns(a, dCn10)
 
-between <- dC[, mean(y1), keyby = grp][, var(V1)] 
-within <- dC[, var(y1), keyby = grp][, mean(V1)]
+between <- dCn10[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCn10[, var(y1), keyby = grp][, mean(V1)]
 
 round(between / (between + within), 3)
 ```
@@ -110,16 +110,16 @@ a <- defDataAdd(varname = "y1", formula = "-1 + a", dist = "binary",
 
 dT <- genData(10000, d)
 
-dC <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size", 
+dCb05 <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size", 
                  level1ID = "id")
-dC <- addColumns(a, dC)
+dCb05 <- addColumns(a, dCb05)
 ```
 
 The ICC for the binary distribution is on the logistic scale, and the *within* variance is constant for any dataset. We calculate the *within* using the log-odds of the mean proportion:
 
 ```{r}
 within <- (pi ^ 2) / 3
-means <- dC[,mean(y1), keyby = grp]
+means <- dCb05[,mean(y1), keyby = grp]
 between <- means[, log(V1/(1-V1)), keyby = grp][abs(V1) != Inf, var(V1)]
 
 round(between / (between + within), 3)
@@ -138,17 +138,17 @@ a <- defDataAdd(varname = "y1", formula = "log(30) + a",
 
 dT <- genData(10000, d)
 
-dC <- genCluster(dtClust = dT, cLevelVar = "grp", 
+dCp05 <- genCluster(dtClust = dT, cLevelVar = "grp", 
                  numIndsVar = "size", level1ID = "id")
 
-dC <- addColumns(a, dC)
+dCp05 <- addColumns(a, dCp05)
 ```
 
 The variance components for the Poisson are estimated the same way as was done for the normal distribution:
 
 ```{r}
-between <- dC[, mean(y1), keyby = grp][, var(V1)] 
-within <- dC[, var(y1), keyby = grp][, mean(V1)]
+between <- dCp05[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCp05[, var(y1), keyby = grp][, mean(V1)]
 
 round(between / (between + within), 3)
 ```
@@ -156,27 +156,113 @@ round(between / (between + within), 3)
 Finally, here are the results for the **Gamma** distribution, which I talked about in great length in this [previous post](https://www.rdatagen.net/post/icc-for-gamma-distribution/).
 
 ```{r}
-(setVar <- iccRE(ICC = 0.05, dist = "gamma", disp = 1.5 ))
+(setVar <- iccRE(ICC = 0.05, dist = "gamma", disp = 0.25 ))
 
-d <- defData(varname = "a", formula = 0, variance = 0.1613, id = "grp")
+d <- defData(varname = "a", formula = 0, variance = 0.0149, id = "grp")
 d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
 
-a <- defDataAdd(varname = "y1", formula = "30 + a", variance = 1.5, 
+a <- defDataAdd(varname = "y1", formula = "log(30) + a", variance = 0.25, 
                 dist = "gamma", link = "log")
 
 dT <- genData(10000, d)
 
-dC <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size",
+dCg05 <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size",
                  level1ID = "id")
 
-dC <- addColumns(a, dC)
+dCg05 <- addColumns(a, dCg05)
 
 # ICC is on log scale
 
-between <- dC[, mean(log(y1)), keyby = grp][, var(V1)] 
-within <- dC[, var(log(y1)), keyby = grp][, mean(V1)]
+between <- dCg05[, mean(log(y1)), keyby = grp][, var(V1)] 
+within <- dCg05[, var(log(y1)), keyby = grp][, mean(V1)]
 
 round(between / (between + within), 3)
 ```
 
 It is possible to think about the ICC in the context of covariates, but things get a lot more complicated and more confusing. The ICC itself will likely be different across different levels of the covariates. For this reason, I like to think of it in the marginal context.
+
+```{r}
+sClust <- sample(1:1000, 15, replace = FALSE)
+
+# normal
+
+sIDs <- dCn05[grp %in% sClust, .(id = sample(id, 100, replace = FALSE)), keyby = grp]
+dS <- dCn05[id %in% sIDs$id]
+
+avg <- dCn05[grp %in% sClust, .(avg = mean(y1)), keyby = grp]
+
+p1 <- ggplot(data = avg) +
+  geom_jitter(data = dS, aes (y = y1, x = factor(grp)), 
+              width = .1, color = "grey70") +
+    geom_point(aes(y = avg, x = factor(grp)), size = 2, color = "red") +
+  scale_x_discrete(name = "selected sites") +
+  scale_y_continuous(limits = c(0,100), name = "outcome") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title = element_blank()) +
+  ggtitle("normal distribution")
+
+##
+
+sIDs <- dCb05[grp %in% sClust, .(id = sample(id, 100, replace = FALSE)), keyby = grp]
+dS <- dCb05[id %in% sIDs$id]
+
+avg <- dCb05[grp %in% sClust, .(avg = mean(y1)), keyby = grp]
+
+p2 <- ggplot(data = avg) +
+  geom_point(aes(y = log(avg/(1-avg)), x = factor(grp)), size = 2, color = "red") +
+  scale_x_discrete(name = "selected sites") +
+  scale_y_continuous(limits = c(-2, 2), name = "outcome") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title = element_blank()) +
+  ggtitle("binary distribution")
+
+# poisson
+
+sIDs <- dCp05[grp %in% sClust, .(id = sample(id, 100, replace = FALSE)), keyby = grp]
+dS <- dCp05[id %in% sIDs$id]
+
+avg <- dCp05[grp %in% sClust, .(avg = mean(y1)), keyby = grp]
+
+p3 <- ggplot(data = avg) +
+  geom_jitter(data = dS, aes (y = y1, x = factor(grp)), 
+              width = .1, color = "grey70") +
+    geom_point(aes(y = avg, x = factor(grp)), size = 2, color = "red") +
+  scale_x_discrete(name = "selected sites") +
+  scale_y_continuous(limits = c(0,100), name = "outcome") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title = element_blank()) +
+  ggtitle("poisson distribution")
+
+# gamma
+
+sIDs <- dCg05[grp %in% sClust, .(id = sample(id, 100, replace = FALSE)), keyby = grp]
+dS <- dCg05[id %in% sIDs$id]
+
+avg <- dCg05[grp %in% sClust, .(avg = mean(y1)), keyby = grp]
+
+p4 <- ggplot(data = avg) +
+  geom_jitter(data = dS, aes (y = log(y1), x = factor(grp)), 
+              width = .1, color = "grey70") +
+    geom_point(aes(y = log(avg), x = factor(grp)), size = 2, color = "red") +
+  scale_x_discrete(name = "selected sites") +
+  scale_y_continuous(limits = c(0,25), name = "outcome") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title = element_blank()) +
+  ggtitle("gamma distribution")
+
+library(gridExtra)
+grid.arrange(p1, p2, p3, p4, nrow = 2)
+
+```
