@@ -1,0 +1,266 @@
+---
+title: A little function to help generate ICCs in simple clustered data
+author: ''
+date: '2018-05-24'
+slug: a-little-function-to-help-generate-iccs-in-simple-clustered-data
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+In health services research, experiments are often conducted at the provider or site level rather than the patient level. However, we might still be interested in the outcome at the patient level. For example, we could be interested in understanding the effect of a training program for physicians on their patients. It would be very difficult to randomize patients to be exposed or not to the training if a group of patients all see the same doctor. So the experiment is set up so that only some doctors get the training and others serve as the control; we still compare the outcome at the patient level.
+
+Typically, when conducting an experiment we assume that individual outcomes are not related to each other (other than the common effect of the exposure). With site-level randomization, we can't make that assumption - groups of patients are all being treated by the same doctor. In general, even before the intervention, there might be variation across physicians. At the same time, patients within a practice will vary. So, we have two sources of variation: *between* practice and *within* practice variation that explain overall variation.
+
+I touched on this when I discussed issues related to [Gamma distributed clustered data](https://www.rdatagen.net/post/icc-for-gamma-distribution/). A key concept is the intra-class coefficient or ICC, which is a measure of how *between* variation relates to overall variation. The ICC ranges from 0 (where there is no *between* variation - all site averages are the same) to 1 (where there is no variation within a site - all patients within the site have the same outcomes). Take a look at the earlier post for a bit more detail. 
+
+My goal here is to highlight a little function recently added to `simstudy` (v0.1.9, now available on `CRAN`). In the course of exploring study designs for cluster randomized trials, it is often useful to understand what happens (to sample size requirements, for example) when the ICC changes. When generating the data, it is difficult to control the ICC directly - we do this by controlling the variation. With normally distributed data, the ICC is an obvious function of the variances used to generate the data, so the connection is pretty clear. But, when the outcomes have binary, Poisson, or Gamma distributions (or anything else really), the connection between variation and the ICC is not always so obvious. Figuring out how to specify the data to generate a particular ICC might require quite a bit of trial and error.
+
+The new function, `iccRE` (short for ICC random effects), allows users to specify target ICCs for a desired distribution (along with relevant parameters). The function returns the corresponding random effect variances that would be specified at the cluster level to generate the desired ICC(s).
+
+Here's an example for three possible ICCs in the context of the normal distribution:
+
+```{r}
+library(simstudy)
+
+targetICC <- c(0.05, 0.075, 0.10)
+
+setVars <- iccRE(ICC = targetICC, dist = "normal", varWithin = 4)
+
+round(setVars, 4)
+```
+
+In the case when the target ICC is 0.075:
+
+$$ ICC = \frac{\sigma_b^2}{\sigma_b ^2 + \sigma_w ^2} = \frac{0.324}{0.324 + 4} \approx 0.075$$
+
+### Simulating from the normal distribution
+
+If we specify the variance for the site-level random effect to be 0.2105 in conjunction with the individual-level (within) variance of 4, the observed ICC from the simulated data will be approximately 0.05:
+
+```{r}
+set.seed(73632)
+
+# specify between site variation
+
+d <- defData(varname = "a", formula = 0, variance = 0.2105, id = "grp")
+d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+a <- defDataAdd(varname = "y1", formula = "30 + a", 
+                variance = 4, dist = "normal")
+
+dT <- genData(10000, d)
+
+# add patient level data
+
+dCn05 <- genCluster(dtClust = dT, cLevelVar = "grp", 
+                 numIndsVar = "size", level1ID = "id")
+
+dCn05 <- addColumns(a, dCn05)
+dCn05
+```
+
+The *between* variance can be roughly estimated as the variance of the group means, and the *within* variance can be estimated as the average of the variances calculated for each group (this works well here, because we have so many clusters and patients per cluster):
+
+```{r}
+between <- dCn05[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCn05[, var(y1), keyby = grp][, mean(V1)]
+
+total <- dCn05[, var(y1)]
+
+round(c(between, within, total), 3)
+```
+
+The ICC is the ratio of the  *between* variance to the *total*, which is also the sum of the two component variances:
+
+```{r}
+round(between/(total), 3)
+round(between/(between + within), 3)
+```
+
+Setting the site-level variance at 0.4444 gives us the ICC of 0.10:
+
+```{r}
+d <- defData(varname = "a", formula = 0, variance = 0.4444, id = "grp")
+d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+a <- defDataAdd(varname = "y1", formula = "30 + a", 
+                variance = 4, dist = "normal")
+
+dT <- genData(10000, d)
+
+dCn10 <- genCluster(dtClust = dT, cLevelVar = "grp", 
+                 numIndsVar = "size", level1ID = "id")
+
+dCn10 <- addColumns(a, dCn10)
+
+between <- dCn10[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCn10[, var(y1), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)
+```
+
+### Other distributions
+
+The ICC is a bit more difficult to interpret using other distributions where the variance is a function of the mean, such as with the binomial, Poisson, or Gamma distributions. However, we can still use the notion of *between* and *within*, but it may need to be transformed to another scale.
+
+In the case of **binary** outcomes, we have to imagine an underlying or latent continuous process that takes place on the logistic scale. (I talked a bit about this [here](https://www.rdatagen.net/post/ordinal-regression/).)
+
+```{r}
+### binary
+
+(setVar <- iccRE(ICC = 0.05, dist = "binary"))
+
+d <- defData(varname = "a", formula = 0, variance = 0.1732, id = "grp")
+d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+a <- defDataAdd(varname = "y1", formula = "-1 + a", dist = "binary", 
+                link = "logit")
+
+dT <- genData(10000, d)
+
+dCb05 <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size", 
+                 level1ID = "id")
+dCb05 <- addColumns(a, dCb05)
+
+dCb05
+```
+
+The ICC for the binary distribution is on the logistic scale, and the *within* variance is constant. The *between* variance is estimated on the log-odds scale:
+
+```{r}
+within <- (pi ^ 2) / 3
+means <- dCb05[,mean(y1), keyby = grp]
+between <- means[, log(V1/(1-V1)), keyby = grp][abs(V1) != Inf, var(V1)]
+
+round(between / (between + within), 3)
+```
+
+The ICC for the **Poisson** distribution is interpreted on the scale of the count measurements, even though the random effect variance is on the log scale. If you want to see the details behind the random effect variance derivation, see this [paper](https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.7532) by *Austin et al.*, which was based on original work by *Stryhn et al.* that can be found [here](http://www.sciquest.org.nz/node/64294).
+
+```{r}
+(setVar <- iccRE(ICC = 0.05, dist = "poisson", lambda = 30))
+
+d <- defData(varname = "a", formula = 0, variance = 0.0018, id = "grp")
+d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+a <- defDataAdd(varname = "y1", formula = "log(30) + a", 
+                dist = "poisson", link = "log")
+
+dT <- genData(10000, d)
+
+dCp05 <- genCluster(dtClust = dT, cLevelVar = "grp", 
+                 numIndsVar = "size", level1ID = "id")
+
+dCp05 <- addColumns(a, dCp05)
+dCp05
+```
+
+The variance components and ICC for the Poisson can be estimated using the same approach as the normal distribution:
+
+```{r}
+between <- dCp05[, mean(y1), keyby = grp][, var(V1)] 
+within <- dCp05[, var(y1), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)
+```
+
+Finally, here are the results for the **Gamma** distribution, which I talked about in great length in an [earlier post](https://www.rdatagen.net/post/icc-for-gamma-distribution/):
+
+```{r}
+(setVar <- iccRE(ICC = 0.05, dist = "gamma", disp = 0.25 ))
+
+d <- defData(varname = "a", formula = 0, variance = 0.0149, id = "grp")
+d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+a <- defDataAdd(varname = "y1", formula = "log(30) + a", variance = 0.25, 
+                dist = "gamma", link = "log")
+
+dT <- genData(10000, d)
+
+dCg05 <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size",
+                 level1ID = "id")
+
+dCg05 <- addColumns(a, dCg05)
+dCg05
+```
+
+The ICC for the Gamma distribution is on the log scale:
+
+```{r}
+between <- dCg05[, mean(log(y1)), keyby = grp][, var(V1)] 
+within <- dCg05[, var(log(y1)), keyby = grp][, mean(V1)]
+
+round(between / (between + within), 3)
+```
+
+It is possible to think about the ICC in the context of covariates, but interpretation is less straightforward. The ICC itself will likely vary across different levels of the covariates. For this reason, I like to think of the ICC in the marginal context.
+
+I leave you with some visuals of clustered binary data with ICC's ranging from 0 to 0.075, both on the log-odds and probability scales:
+
+```{r, echo = FALSE, fig.width = 9, fig.height = 6}
+## binary
+
+pbin <- function(tICC) {
+  
+  reVar <- iccRE(ICC = tICC , dist = "binary")
+
+  d <- defData(varname = "a", formula = 0, variance = reVar, id = "grp")
+  d <- defData(d, varname = "size", formula = 1000, dist = "nonrandom")
+
+  a <- defDataAdd(varname = "y1", formula = "-1 + a", dist = "binary", 
+                  link = "logit")
+
+  dT <- genData(50, d)
+
+  dC <- genCluster(dtClust = dT, cLevelVar = "grp", numIndsVar = "size", 
+                 level1ID = "id")
+  dC <- addColumns(a, dC)
+
+  avg <- dC[, .(avg = mean(y1)), keyby = grp]
+
+  avg[, ICC := tICC]
+  
+  avg[]
+}
+
+a000 <- pbin(0.0)
+a010 <- pbin(0.01)
+a025 <- pbin(0.025)
+a050 <- pbin(0.05)
+
+avg <- rbind(a000, a010, a025, a050)
+
+p1 <- ggplot(data = avg) +
+    geom_point(aes(y = log(avg/(1-avg)), x = factor(grp)), 
+             size = 1.5, color = "#8343e7") +
+    scale_y_continuous(limits = c(-2.9, 0.7), name = "log odds", 
+                       breaks = seq(-2, 0, 1)) +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0, 0, 0.5, 0), "cm")) +
+    facet_grid(.~ factor(ICC, labels = c("ICC = 0", "ICC = 0.01",
+                                         "ICC = 0.025", "ICC = 0.05"))) +
+  ggtitle("binary data on the log-odds scale")
+
+p2 <- ggplot(data = avg) +
+    geom_point(aes(y = avg, x = factor(grp)), 
+             size = 1.5, color = "#e78343") +
+    scale_y_continuous(limits = c(0, 1), name = "proportion", 
+                       breaks = seq(0, 1, 0.25)) +
+    theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.text.x= element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.title.x = element_blank(),
+        plot.margin = unit(c(0.5, 0, 0, 0), "cm")) +
+    facet_grid(.~ factor(ICC, labels = c("ICC = 0", "ICC = 0.01",
+                                         "ICC = 0.025", "ICC = 0.05"))) + 
+    ggtitle("binary data on the probability scale")
+
+gridExtra::grid.arrange(p1, p2, nrow = 2, bottom = "clusters")
+```
