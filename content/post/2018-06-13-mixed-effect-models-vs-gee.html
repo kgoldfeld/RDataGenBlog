@@ -1,0 +1,187 @@
+---
+title: >
+  Late anniversary edition redux: conditional vs marginal models for clustered data
+author: ''
+date: '2018-06-13'
+slug: mixed-effect-models-vs-gee
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>This afternoon, I was looking over some simulations I plan to use in an upcoming lecture on multilevel models. I created these examples a while ago, before I started this blog. But since it was just about a year ago that I first wrote about this topic (and started the blog), I thought I’d post this now to mark the occasion.</p>
+<p>The code below provides another way to visualize the difference between marginal and conditional logistic regression models for clustered data (see <a href="https://www.rdatagen.net/post/marginal-v-conditional/">here</a> for an earlier post that discusses in greater detail some of the key issues raised here.) The basic idea is that both models for a binary outcome are valid, but they provide estimates for different quantities.</p>
+<p>The marginal model is estimated using a generalized estimating equation (GEE) model (here using function <code>geeglm</code> in package <code>geepack</code>). If the intervention is binary, the intervention effect (log-odds ratio) is interpreted as the average effect across all individuals regardless of the group or cluster they might belong to. (This estimate is sensitive to the relative sizes of the clusters.)</p>
+<p>The conditional model is estimated using a random mixed effect generalized linear model (using function <code>glmer</code> in package <code>lme4</code>), and provides the log-odds ratio conditional on the cluster. (The estimate is not as sensitive to the relative sizes of the clusters since it is essentially providing a within-cluster effect.)</p>
+<p>As the variation across clusters increases, so does the discrepancy between the conditional and marginal models. Using a generalized linear model that ignores clustering altogether will provide the correct (marginal) point estimate, but will underestimate the underlying variance (and standard errors) as long as there is between cluster variation. If there is no between cluster variation, the GLM model should be fine.</p>
+<div id="simulation" class="section level3">
+<h3>Simulation</h3>
+<p>To start, here is a function that uses <code>simstudy</code> to define and generate a data set of individuals that are clustered in groups. A key argument passed to this function is the across cluster variation.</p>
+<pre class="r"><code>library(lme4)
+library(geepack)
+library(broom)
+
+genFunc &lt;- function(nClusters, effVar) {
+  
+  # define the cluster
+  
+  def1 &lt;- defData(varname = &quot;clustEff&quot;, formula = 0, 
+                  variance = effVar, id = &quot;cID&quot;)
+  def1 &lt;- defData(def1, varname = &quot;nInd&quot;, formula = 40, 
+                  dist = &quot;noZeroPoisson&quot;)
+  
+  # define individual level data
+  
+  def2 &lt;- defDataAdd(varname = &quot;Y&quot;, formula = &quot;-2 + 2*grp + clustEff&quot;, 
+                     dist = &quot;binary&quot;, link = &quot;logit&quot;)
+  
+  # generate cluster level data
+  
+  dtC &lt;- genData(nClusters, def1)
+  dtC &lt;- trtAssign(dtC, grpName = &quot;grp&quot;)
+  
+  # generate individual level data
+  
+  dt &lt;- genCluster(dtClust = dtC, cLevelVar = &quot;cID&quot;, numIndsVar = &quot;nInd&quot;, 
+                   level1ID = &quot;id&quot;)
+  dt &lt;- addColumns(def2, dt)
+  
+  return(dt)
+  
+}</code></pre>
+<p>A plot of the average site level outcome from data generated with across site variance of 1 (on the log-odds scale) shows the treatment effect:</p>
+<pre class="r"><code>set.seed(123)
+dt &lt;- genFunc(100, 1)
+dt</code></pre>
+<pre><code>##       cID grp   clustEff nInd   id Y
+##    1:   1   0 -0.5604756   35    1 1
+##    2:   1   0 -0.5604756   35    2 0
+##    3:   1   0 -0.5604756   35    3 0
+##    4:   1   0 -0.5604756   35    4 0
+##    5:   1   0 -0.5604756   35    5 0
+##   ---                               
+## 3968: 100   1 -1.0264209   45 3968 0
+## 3969: 100   1 -1.0264209   45 3969 0
+## 3970: 100   1 -1.0264209   45 3970 1
+## 3971: 100   1 -1.0264209   45 3971 0
+## 3972: 100   1 -1.0264209   45 3972 0</code></pre>
+<pre class="r"><code>dplot &lt;- dt[, mean(Y), keyby = .(grp, cID)]
+davg &lt;- dt[, mean(Y)]
+
+ggplot(data = dplot, aes(x=factor(grp), y = V1)) +
+  geom_jitter(aes(color=factor(grp)), width = .10) +
+  theme_ksg(&quot;grey95&quot;) +
+  xlab(&quot;group&quot;) +
+  ylab(&quot;mean(Y)&quot;) +
+  theme(legend.position = &quot;none&quot;) +
+  ggtitle(&quot;Site level means by group&quot;) +
+  scale_color_manual(values = c(&quot;#264e76&quot;, &quot;#764e26&quot;))</code></pre>
+<p><img src="/post/2018-06-13-mixed-effect-models-vs-gee_files/figure-html/unnamed-chunk-2-1.png" width="480" /></p>
+</div>
+<div id="model-fits" class="section level3">
+<h3>Model fits</h3>
+<p>First, the conditional model estimates a log-odds ratio of 1.89, close to the actual log-odds ratio of 2.0.</p>
+<pre class="r"><code>glmerFit &lt;- glmer(Y ~ grp + (1 | cID), data = dt, family=&quot;binomial&quot;)
+tidy(glmerFit)</code></pre>
+<pre><code>##                 term   estimate std.error  statistic      p.value group
+## 1        (Intercept) -1.8764913 0.1468104 -12.781729 2.074076e-37 fixed
+## 2                grp  1.8936999 0.2010359   9.419711 4.523292e-21 fixed
+## 3 sd_(Intercept).cID  0.9038166        NA         NA           NA   cID</code></pre>
+<p>The marginal model that takes into account clustering yields an estimate of 1.63. This model is not wrong, just estimating a different quantity:</p>
+<pre class="r"><code>geeFit &lt;- geeglm(Y ~ grp, family = binomial, data = dt, 
+                 corstr = &quot;exchangeable&quot;, id = dt$cID)
+tidy(geeFit)</code></pre>
+<pre><code>##          term  estimate std.error statistic p.value
+## 1 (Intercept) -1.620073 0.1303681 154.42809       0
+## 2         grp  1.628075 0.1740666  87.48182       0</code></pre>
+<p>The marginal model that ignores clustering also estimates a log-odds ratio, 1.67, but the standard error estimate is much smaller than in the previous model (0.076 vs. 0.174). We could say that this model is not appropriate given the clustering of individuals:</p>
+<pre class="r"><code>glmFit &lt;- glm(Y ~ grp, data = dt, family=&quot;binomial&quot;)
+tidy(glmFit)</code></pre>
+<pre><code>##          term  estimate std.error statistic       p.value
+## 1 (Intercept) -1.639743 0.0606130 -27.05267 3.553136e-161
+## 2         grp  1.668143 0.0755165  22.08978 3.963373e-108</code></pre>
+</div>
+<div id="multiple-replications" class="section level3">
+<h3>Multiple replications</h3>
+<p>With multiple replications (in this case 100), we can see how each model performs under different across cluster variance assumptions. I have written two functions (that are shown at the end in the appendix) to generate multiple datasets and create a plot. The plot shows (1) the average point estimate across all the replications in black, (2) the true standard deviation of all the point estimates across all replications in blue, (3) the average estimate of the standard errors in orange.</p>
+<p>In the first case, the variability across sites is highest. The discrepancy between the marginal and conditional models is relatively large, but both the GEE and mixed effects models estimate the standard errors correctly (the orange line overlaps perfectly with blue line). The generalized linear model, however, provides a biased estimate of the standard error - the orange line does not cover the blue line:</p>
+<pre class="r"><code>set.seed(235)
+
+res1.00 &lt;- iterFunc(40, 1.00, 100)
+s1 &lt;- sumFunc(res1.00)
+s1$p</code></pre>
+<p><img src="/post/2018-06-13-mixed-effect-models-vs-gee_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>When the across cluster variation is reduced, the discrepancy between the marginal and conditional models is reduced, as is the bias of standard error estimate for the GLM model:</p>
+<pre class="r"><code>res0.50 &lt;- iterFunc(40, 0.50, 100)
+s2 &lt;- sumFunc(res0.50)
+s2$p</code></pre>
+<p><img src="/post/2018-06-13-mixed-effect-models-vs-gee_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>Finally, when there is negligible variation across sites, the conditional and marginal models are pretty much one and the same. And even the GLM model that ignores clustering is unbiased (which makes sense, since there really is no clustering):</p>
+<pre class="r"><code>res0.05 &lt;- iterFunc(40, 0.05, 100)
+s3 &lt;- sumFunc(res0.05)
+s3$p</code></pre>
+<p><img src="/post/2018-06-13-mixed-effect-models-vs-gee_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+</div>
+<div id="appendix" class="section level3">
+<h3>Appendix</h3>
+<p>Here are the two functions that generated the the replications and created the plots shown above.</p>
+<pre class="r"><code>iterFunc &lt;- function(nClusters, effVar, iters = 250) {
+  
+  results &lt;- list()
+  
+  for (i in 1:iters) {
+ 
+    dt &lt;- genFunc(nClusters, effVar)
+    
+    glmerFit &lt;- glmer(Y ~ grp + (1 | cID), data = dt, family=&quot;binomial&quot;)
+    glmFit &lt;- glm(Y ~ grp, data = dt, family=&quot;binomial&quot;)
+    geeFit &lt;- geeglm(Y ~ grp, family = binomial, data = dt, 
+                     corstr = &quot;exchangeable&quot;, id = dt$cID)
+    
+    res &lt;- unlist(c(coef(summary(glmerFit))[2,1:2], 
+                    coef(summary(glmFit))[2,1:2],
+                    as.vector(coef(summary(geeFit))[2,1:2])))
+    
+    results[[i]] &lt;- data.table(t(res))
+    
+  }
+  
+  return(rbindlist(results))
+  
+}
+
+sumFunc &lt;- function(dtRes, precision = 2) {
+  
+  setnames(dtRes, c(&quot;estGlmer&quot;, &quot;sdGlmer&quot;, 
+                    &quot;estGlm&quot;,&quot;sdGlm&quot;, 
+                    &quot;estGEE&quot;, &quot;sdGEE&quot;))
+  
+  meanEst &lt;- round(apply(dtRes[, c(1, 3, 5)], 2, mean), precision)
+  estSd &lt;- round(sqrt(apply(dtRes[, c(2, 4, 5)]^2, 2, mean)), precision)
+  sdEst &lt;- round(apply(dtRes[, c(1, 3, 5)], 2, sd), precision)
+  
+  x &lt;- data.table(rbind(c(meanEst[1], estSd[1], sdEst[1]), 
+                        c(meanEst[2], estSd[2], sdEst[2]), 
+                        c(meanEst[3], estSd[3], sdEst[3])
+  ))
+  
+  setnames(x, c(&quot;estMean&quot;,&quot;estSD&quot;,&quot;sd&quot;))
+  x[, method := c(&quot;glmer&quot;,&quot;glm&quot;,&quot;gee&quot;)]
+  
+  p &lt;- ggplot(data = x, aes(x = method, y = estMean)) +
+    geom_errorbar(aes(ymin = estMean - sd, ymax = estMean + sd), 
+                  width = 0.1, color = &quot;#2329fe&quot;, size = 1) +
+    geom_errorbar(aes(ymin = estMean - estSD, ymax = estMean + estSD), 
+                  width = 0.0, color = &quot;#fe8b23&quot;, size = 1.5) +
+    geom_point(size = 2) +
+    ylim(1,2.75) +
+    theme_ksg(&quot;grey95&quot;) +
+    geom_hline(yintercept = 2, lty = 3, color = &quot;grey50&quot;) +
+    theme(axis.title.x = element_blank()) +
+    ylab(&quot;Treatment effect&quot;)
+  
+  return(list(mean=meanEst, sd=sdEst, p=p))
+}</code></pre>
+</div>
