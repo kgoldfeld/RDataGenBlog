@@ -1,0 +1,202 @@
+---
+title: 'Re-referencing factor levels to estimate standard errors when there is interaction turns out to be a really simple solution'
+author: ''
+date: '2018-06-26'
+slug: re-referencing-to-estimate-effects-when-there-is-interaction
+categories: []
+tags:
+  - R
+---
+
+
+
+<p>Maybe this should be filed under topics that are so obvious that it is not worth writing about. But, I hate to let a good simulation just sit on my computer. I was recently working on a paper investigating the relationship of emotion knowledge (EK) in very young kids with academic performance a year or two later. The idea is that kids who are more emotionally intelligent might be better prepared to learn. My collaborator suspected that the relationship between EK and academics would be different for immigrant and non-immigrant children, so we agreed that this would be a key focus of the analysis.</p>
+<p>In model terms, we would describe the relationship for each student <span class="math inline">\(i\)</span> as;</p>
+<p><span class="math display">\[ T_i = \beta_0 + \beta_1 I_i + \beta_2 EK_i + \beta_3 I_i \times EK_i + \epsilon_i,\]</span>
+where <span class="math inline">\(T\)</span> is the academic outcome, <span class="math inline">\(I\)</span> is an indicator for immigrant status (either 0 or 1), and <span class="math inline">\(EK\)</span> is a continuous measure of emotion knowledge. By including the <span class="math inline">\(I \times EK\)</span> interaction term, we allow for the possibility that the effect of emotion knowledge will be different for immigrants. In particular, if we code <span class="math inline">\(I=0\)</span> for non-immigrant kids and <span class="math inline">\(I=1\)</span> for immigrant kids, <span class="math inline">\(\beta_2\)</span> represents the relationship of EK and academic performance for non-immigrant kids, and <span class="math inline">\(\beta_2 + \beta_3\)</span> is the relationship for immigrant kids. In this case, non-immigrant kids are the <em>reference</em> category.</p>
+<p>Here’s the data generation:</p>
+<pre class="r"><code>library(simstudy)
+library(broom)
+
+set.seed(87265145)
+
+def &lt;- defData(varname = &quot;I&quot;, formula = .4, dist = &quot;binary&quot;)
+def &lt;- defData(def, varname = &quot;EK&quot;, formula = &quot;0 + 0.5*I&quot;, variance = 4)
+def &lt;- defData(def, varname = &quot;T&quot;, 
+               formula = &quot;10 + 2*I + 0.5*EK + 1.5*I*EK&quot;, variance = 4 )
+
+dT &lt;- genData(250, def)
+  
+genFactor(dT, &quot;I&quot;, labels = c(&quot;not Imm&quot;, &quot;Imm&quot;))</code></pre>
+<pre><code>##       id I         EK         T      fI
+##   1:   1 1 -1.9655562  5.481254     Imm
+##   2:   2 1  0.9230118 16.140710     Imm
+##   3:   3 0 -2.5315312  9.443148 not Imm
+##   4:   4 1  0.9103722 15.691873     Imm
+##   5:   5 0 -0.2126550  9.524948 not Imm
+##  ---                                   
+## 246: 246 0 -1.2727195  7.546245 not Imm
+## 247: 247 0 -1.2025184  6.658869 not Imm
+## 248: 248 0 -1.7555451 11.027569 not Imm
+## 249: 249 0  2.2967681 10.439577 not Imm
+## 250: 250 1 -0.3056299 11.673933     Imm</code></pre>
+<p>Let’s say our primary interest in this exploration is point estimates of <span class="math inline">\(\beta_2\)</span> and <span class="math inline">\(\beta_2 + \beta_3\)</span>, along with 95% confidence intervals of the estimates. (We could have just as easily reported <span class="math inline">\(\beta_3\)</span>, but we decided the point estimates would be more intuitive to understand.) The point estimates are quite straightforward: we can estimate them directly from the estimates of <span class="math inline">\(\beta_2\)</span> and <span class="math inline">\(\beta_3\)</span>. And the standard error (and confidence interval) for <span class="math inline">\(\beta_2\)</span> can be read directly off of the model output table. But what about the standard error for the relationship of EK and academic performance for the immigrant kids? How do we handle that?</p>
+<p>I’ve always done this the cumbersome way, using this definition:</p>
+<p><span class="math display">\[
+\begin{aligned}
+se_{\beta_2 + \beta_3} &amp;= [Var(\beta_2 + \beta_3)]^\frac{1}{2} \\
+&amp;=[Var(\beta_2) + Var(\beta_3) + 2 \times Cov(\beta_2,\beta_3)]^\frac{1}{2}
+\end{aligned}
+\]</span></p>
+<p>In R, this is relatively easy (though maybe not super convenient) to do manually, by extracting the information from the estimated parameter variance-covariance matrix.</p>
+<p>First, fit a linear model with an interaction term:</p>
+<pre class="r"><code>lm1 &lt;- lm(T ~ fI*EK, data = dT)
+tidy(lm1)</code></pre>
+<pre><code>##          term  estimate  std.error statistic       p.value
+## 1 (Intercept) 10.161842 0.16205385 62.706574 2.651774e-153
+## 2       fIImm  1.616929 0.26419189  6.120281  3.661090e-09
+## 3          EK  0.461628 0.09252734  4.989098  1.147653e-06
+## 4    fIImm:EK  1.603680 0.13960763 11.487049  9.808529e-25</code></pre>
+<p>The estimate for the relationship of EK and academic performance for non-immigrant kids is 0.46 (se = 0.093). And the point estimate for the relationship for immigrant kids is <span class="math inline">\(2.06=0.46 + 1.60\)</span></p>
+<p>The standard error can be calculated from the variance-covariance matrix that is derived from the linear model:</p>
+<pre class="r"><code>vcov(lm1)</code></pre>
+<pre><code>##              (Intercept)        fIImm           EK     fIImm:EK
+## (Intercept)  0.026261449 -0.026261449 -0.000611899  0.000611899
+## fIImm       -0.026261449  0.069797354  0.000611899 -0.006838297
+## EK          -0.000611899  0.000611899  0.008561309 -0.008561309
+## fIImm:EK     0.000611899 -0.006838297 -0.008561309  0.019490291</code></pre>
+<p><span class="math display">\[Var(\beta_2+\beta_3) = 0.0086 + 0.0195 + 2\times(-.0086) = 0.0109\]</span></p>
+<p>The standard error of the estimate is <span class="math inline">\(\sqrt{0.0109} = 0.105\)</span>.</p>
+<div id="so" class="section level3">
+<h3>So?</h3>
+<p>OK - so maybe that isn’t really all that interesting. Why am I even talking about this? Well, in the actual study, we have a fair amount of missing data. In some cases we don’t have an EK measure, and in others we don’t have an outcome measure. And since the missingness is on the order of 15% to 20%, we decided to use multiple imputation. We used the <a href="https://www.jstatsoft.org/article/view/v045i03"><code>mice</code> package</a> in <code>R</code> to impute the data, and we pooled the model estimates from the completed data sets to get our final estimates. <code>mice</code> is a fantastic package, but one thing that is does not supply is some sort of pooled variance-covariance matrix. Looking for a relatively quick solution, I decided to use bootstrap methods to estimate the confidence intervals.</p>
+<p>(“Relatively quick” is itself a relative term, since bootstrapping and imputing together is not exactly a quick process - maybe something to work on. I was also not fitting standard linear models but mixed effect models. Needless to say, it took a bit of computing time to get my estimates.)</p>
+<p>Seeking credit (and maybe some sympathy) for all of my hard work, I mentioned this laborious process to my collaborator. She told me that you can easily estimate the group specific effects merely by changing the reference group and refitting the model. I could see right away that the point estimates would be fine, but surely the standard errors would not be estimated correctly? Of course, a few simulations ensued.</p>
+<p>First, I just changed the reference group so that <span class="math inline">\(\beta_2\)</span> would be measuring the relationship of EK and academic performance for <em>immigrant</em> kids, and <span class="math inline">\(\beta_2 + \beta_3\)</span> would represent the relationship for the <em>non-immigrant</em> kids. Here are the levels before the change:</p>
+<pre class="r"><code>head(dT$fI)</code></pre>
+<pre><code>## [1] Imm     Imm     not Imm Imm     not Imm not Imm
+## Levels: not Imm Imm</code></pre>
+<p>And after:</p>
+<pre class="r"><code>dT$fI &lt;- relevel(dT$fI, ref=&quot;Imm&quot;)
+head(dT$fI)</code></pre>
+<pre><code>## [1] Imm     Imm     not Imm Imm     not Imm not Imm
+## Levels: Imm not Imm</code></pre>
+<p>And the model:</p>
+<pre class="r"><code>lm2 &lt;- lm(T ~ fI*EK, data = dT)
+tidy(lm2)</code></pre>
+<pre><code>##           term  estimate std.error  statistic       p.value
+## 1  (Intercept) 11.778770 0.2086526  56.451588 8.367177e-143
+## 2    fInot Imm -1.616929 0.2641919  -6.120281  3.661090e-09
+## 3           EK  2.065308 0.1045418  19.755813  1.112574e-52
+## 4 fInot Imm:EK -1.603680 0.1396076 -11.487049  9.808529e-25</code></pre>
+<p>The estimate for this new <span class="math inline">\(\beta_2\)</span> is 2.07 (se=0.105), pretty much aligned with our estimate that required a little more work. While this is not a proof by any means, I did do variations on this simulation (adding other covariates, changing the strength of association, changing sample size, changing variation, etc.) and both approaches seem to be equivalent. I even created 10000 samples to see if the coverage rates of the 95% confidence intervals were correct. They were. My collaborator was right. And I felt a little embarrassed, because it seems like something I should have known.</p>
+</div>
+<div id="but" class="section level3">
+<h3>But …</h3>
+<p>Would this still work with missing data? Surely, things would go awry in the pooling process. So, I did one last simulation, generating the same data, but then added missingness. I imputed the missing data, fit the models, and pooled the results (including pooled 95% confidence intervals). And then I looked at the coverage rates.</p>
+<p>First I added some missingness into the data</p>
+<pre class="r"><code>defM &lt;- defMiss(varname = &quot;EK&quot;, formula = &quot;0.05 + 0.10*I&quot;, 
+                logit.link = FALSE)
+defM &lt;- defMiss(defM, varname = &quot;T&quot;, formula = &quot;0.05 + 0.05*I&quot;, 
+                logit.link = FALSE)
+defM</code></pre>
+<pre><code>##    varname       formula logit.link baseline monotonic
+## 1:      EK 0.05 + 0.10*I      FALSE    FALSE     FALSE
+## 2:       T 0.05 + 0.05*I      FALSE    FALSE     FALSE</code></pre>
+<p>And then I generated 500 data sets, imputed the data, and fit the models. Each iteration, I stored the final model results for both models (in one where the reference is <em>non-immigrant</em> and the the other where the reference group is <em>immigrant</em>).</p>
+<pre class="r"><code>library(mice)
+
+nonRes &lt;- list()
+immRes &lt;- list()
+
+set.seed(3298348)
+
+for (i in 1:500) {
+  
+  dT &lt;- genData(250, def)
+  dT &lt;- genFactor(dT, &quot;I&quot;, labels = c(&quot;non Imm&quot;, &quot;Imm&quot;), prefix = &quot;non&quot;)
+  dT$immI &lt;- relevel(dT$nonI, ref = &quot;Imm&quot;)
+  
+  # generate a missing data matrix
+  
+  missMat &lt;- genMiss(dtName = dT, missDefs = defM, idvars = &quot;id&quot;)
+  
+  # create obseverd data set
+  
+  dtObs &lt;- genObs(dT, missMat, idvars = &quot;id&quot;)
+  dtObs &lt;- dtObs[, .(I, EK, nonI, immI, T)]
+  
+  # impute the missing data (create 20 data sets for each iteration)
+
+  dtImp &lt;- mice(data = dtObs, method = &#39;cart&#39;, m = 20, printFlag = FALSE)
+  
+  # non-immgrant is the reference group
+
+  estImp &lt;- with(dtImp, lm(T ~ nonI*EK))
+  lm1 &lt;- summary(pool(estImp), conf.int = TRUE)
+  dt1 &lt;- as.data.table(lm1)
+  dt1[, term := rownames(lm1)]
+  setnames(dt1, c(&quot;2.5 %&quot;, &quot;97.5 %&quot;), c(&quot;conf.low&quot;, &quot;conf.high&quot;))
+  dt1[, iter := i]
+  nonRes[[i]] &lt;- dt1
+  
+  # immgrant is the reference group
+
+  estImp &lt;- with(dtImp, lm(T ~ immI*EK))
+  lm2 &lt;- summary(pool(estImp), conf.int = TRUE)
+  dt2 &lt;- as.data.table(lm2)
+  dt2[, term := rownames(lm2)]
+  setnames(dt2, c(&quot;2.5 %&quot;, &quot;97.5 %&quot;), c(&quot;conf.low&quot;, &quot;conf.high&quot;))
+  dt2[, iter := i]
+  immRes[[i]] &lt;- dt2
+}
+
+nonRes &lt;- rbindlist(nonRes)
+immRes &lt;- rbindlist(immRes)</code></pre>
+<p>The proportion of confidence intervals that contain the true values is pretty close to 95% for both estimates:</p>
+<pre class="r"><code>mean(nonRes[term == &quot;EK&quot;, conf.low &lt; 0.5 &amp; conf.high &gt; 0.5])</code></pre>
+<pre><code>## [1] 0.958</code></pre>
+<pre class="r"><code>mean(immRes[term == &quot;EK&quot;, conf.low &lt; 2.0 &amp; conf.high &gt; 2.0])</code></pre>
+<pre><code>## [1] 0.948</code></pre>
+<p>And the estimates of the mean and standard deviations are also pretty good:</p>
+<pre class="r"><code>nonRes[term == &quot;EK&quot;, .(mean = round(mean(estimate),3), 
+                       obs.SD = round(sd(estimate),3), 
+                       avgEst.SD = round(sqrt(mean(std.error^2)),3))]</code></pre>
+<pre><code>##     mean obs.SD avgEst.SD
+## 1: 0.503  0.086     0.088</code></pre>
+<pre class="r"><code>immRes[term == &quot;EK&quot;, .(mean = round(mean(estimate),3), 
+                       obs.SD = round(sd(estimate),3), 
+                       avgEst.SD = round(sqrt(mean(std.error^2)),3))]</code></pre>
+<pre><code>##     mean obs.SD avgEst.SD
+## 1: 1.952  0.117     0.124</code></pre>
+<p>Because I like to include at least one visual in a post, here is a plot of the 95% confidence intervals, with the CIs not covering the true values colored blue:</p>
+<p><img src="/post/2018-06-26-re-referencing-with-interaction_files/figure-html/unnamed-chunk-11-1.png" width="384" /></p>
+<p>The re-reference approach seems to work quite well (in the context of this simulation, at least). My guess is the hours of bootstrapping may have been unnecessary, though I haven’t fully tested all of this out in the context of clustered data. My guess is it will turn out OK in that case as well.</p>
+</div>
+<div id="appendix-ggplot-code" class="section level3">
+<h3>Appendix: ggplot code</h3>
+<pre class="r"><code>nonEK &lt;- nonRes[term == &quot;EK&quot;, .(iter, ref = &quot;Non-immigrant&quot;,
+  estimate, conf.low, conf.high,
+  cover = (conf.low &lt; 0.5 &amp; conf.high &gt; 0.5))]
+
+immEK &lt;- immRes[term == &quot;EK&quot;, .(iter, ref = &quot;Immigrant&quot;,
+  estimate, conf.low, conf.high,
+  cover = (conf.low &lt; 2 &amp; conf.high &gt; 2))]
+
+EK &lt;- rbindlist(list(nonEK, immEK))
+
+vline &lt;- data.table(xint = c(.5, 2), 
+                    ref = c(&quot;Non-immigrant&quot;, &quot;Immigrant&quot;))
+
+ggplot(data = EK, aes(x = conf.low, xend = conf.high, y = iter, yend = iter)) +
+  geom_segment(aes(color = cover)) +
+  geom_vline(data=vline, aes(xintercept=xint), lty = 3) +
+  facet_grid(.~ ref, scales = &quot;free&quot;) +
+  theme(panel.grid = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = &quot;none&quot;) +
+  scale_color_manual(values = c(&quot;#5c81ba&quot;,&quot;grey75&quot;)) +
+  scale_x_continuous(expand = c(.1, 0), name = &quot;95% CI&quot;)</code></pre>
+</div>
