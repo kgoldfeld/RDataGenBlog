@@ -1,0 +1,207 @@
+---
+title: >
+  How the odds ratio confounds: a brief study in a few colorful figures
+author: ''
+date: '2018-07-10'
+slug: log-odds
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+The odds ratio always confounds: while it may be constant across different groups or clusters, the risk ratios or risk differences across those groups may vary quite substantially. This makes it really hard to interpret an effect. And then there is inconsistency between marginal and conditional odds ratios, a topic I seem to be visiting frequently, most recently last [month](https://www.rdatagen.net/post/mixed-effect-models-vs-gee/).
+
+My aim here is to generate a few figures that might highlight some of these issues.
+
+Assume that there is some exposure (indicated by the use of a $1$ or $0$ subscript) applied across a number of different groups or clusters of people (think different regions, hospitals, schools, etc.) - indicated by some number or letter $i$. Furthermore, assume that the total number exposed at each location is the same as the number unexposed: $N_{i0} = N_{i1} = N = 100$.
+
+The number of folks with exposure at a particular location $i$ who have a poor outcome is $n_{i1}$ and the number with a good outcome is $N-n_{i1}$. Likewise, the corresponding measures for folks not exposed are $n_{i0}$ and $N-n_{i0}$. The probabilities of a poor outcome for exposed and non-exposed are $n_{i1}/N$ and $n_{i0}/N$. The relative risk of a poor outcome for those exposed compared to those non exposed is 
+
+$$\text{RR}_i = \frac{n_{i1}/N}{n_{i0}/N} = \frac{n_{i1}}{n_{i0}},$$
+the risk difference between exposed and unexposed groups is 
+
+$$ \text{RD}_i = \frac{n_{i1}}{N}-\frac{n_{i0}}{N} = \frac{n_{i1} - n_{i0}}{N},$$
+and the odds ratio is 
+
+$$ \text{OR}_i = \frac{[n_{i1}/N] / [(N - n_{i1})/N]}{[n_{i0}/N] / [(N - n_{i0})/N]} $$
+          $$= \frac{n_{i1}(N-n_{i0})}{n_{i0}(N-n_{i1})}.$$
+
+The simple conditional logistic regression model that includes a group-level random effect $b_i$ assumes a constant odds ratio between exposed and unexposed individuals across the different clusters:
+
+$$\text{logit} (Y_{ij}) = \beta_0 + \beta_1 E_{ij} + b_i,$$
+where $E_{ij}$ is an exposure indicator for person $j$ in group $i$. The parameter $\text{exp}(\beta_1)$ is an estimate of the odds ratio defined above.
+
+The point of all of this is to illustrate that although the odds-ratio is the same across all groups/clusters (i.e., there is no $i$ subscript in $\beta_1$ and $\text{OR}_i = \text{OR}$), the risk ratios and risk differences *can* vary greatly across groups, particularly if the $b$'s vary considerably.
+
+### Constant odds ratio, different risk ratios and differences
+
+If the odds ratio is constant and we know $n_{i1}$, we can perform a little algebraic maneuvering on the $\text{OR}$ formula above to find $n_{i0}$:
+
+$$ n_{i0} = \frac{N \times n_{i1}}{\text{OR} \times (N - n_{i1}) + n_{i1}}$$
+
+If we assume that the $n_{i1}$'s can range from 2 to 98 (out of 100), we can see how the risk ratios and risk differences vary considerably even though we fix the odds ratio fixed at a value of 3 (don't pay too close attention to the fact the $n_0$ is not an integer - this is just an illustration that makes a few violations - if I had used $N=1000$, we could have called this rounding error):
+
+```{r}
+N <- 100
+trueOddsRatio <- 3
+
+n1 <- seq(2:98)
+n0 <- (N * n1)/(trueOddsRatio * (N - n1) + n1)
+
+oddsRatio <- ((n1 / (N - n1) ) / (n0 / (N - n0) )) 
+riskRatio <- n1 / n0
+riskDiff <- (n1 - n0) / N
+
+dn <- data.table(n1 = as.double(n1), n0, oddsRatio, 
+                 riskRatio, riskDiff = round(riskDiff,3))
+dn[1:6]
+```
+
+With a constant odds ratio of 3, the risk ratios range from 1 to 3, and the risk differences range from almost 0 to just below 0.3. The odds ratio is not exactly informative with respect to these other two measures. The plots - two takes on the same data - tell a better story:
+
+```{r, echo = FALSE, fig.width = 12}
+p1 <- ggplot(data = dn, aes(x = riskRatio, y = riskDiff)) +
+  geom_line(color = "grey70") +
+  geom_point(size = 1, color = "#dc917e") +
+  xlab( expression("risk ratio ="~(n[1] / n[0]))) +
+  ylab( expression("risk diff ="~(n[1] - n[0]) / N)) +
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14))
+
+# Constant OR different RR and risk differences
+
+dnm <- melt(dn, id.vars = c("riskRatio", "riskDiff"), measure.vars = c("n1", "n0"))
+
+p2 <- ggplot(data = dnm, aes(x = riskRatio, y = value)) +
+  geom_point(size = 1, aes(color = variable)) +
+  geom_line(aes(group = riskRatio), color = "grey70") +
+  scale_color_manual(values = c("#c9dc7e", "#917edc"), 
+                     labels = c(expression(n[1]), expression(n[0]))) +
+  guides(colour = guide_legend(override.aes = list(size=5))) +
+  theme(panel.grid = element_blank(), 
+        axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        legend.title = element_blank(),
+        legend.position = c(.7,.8),
+        legend.background = element_rect(fill = "grey99"),
+        legend.key = element_rect(color = "grey99", fill = "grey99")
+  ) +
+  xlab( expression("risk ratio = "~(n[1] / n[0]))) +
+  ylab( expression(paste("values of ", n[1], " & ",  n[0]))) 
+
+gridExtra::grid.arrange(p2, p1, nrow = 1, 
+          top = textGrob("Risk ratio and risk difference with constant odds ratio",
+                    gp=gpar(fontsize=17,font=2))
+)
+```
+
+### Another look at contrasting marginal vs conditional odds ratios
+
+Using this same simple framework, I thought I'd see if I can illustrate the relationship between marginal and conditional odds ratios.
+
+In this case, we have two groups/clusters where the conditional odds ratios are equivalent, yet when we combine the groups into a single entity, the combined (marginal) odds ratio is less than each of the conditional odds ratios. 
+
+In this scenario each cluster has 100 people who are exposed and 100 who are not, as before. $a_1$ and $a_0$ represent the number of folks with a poor outcome for the exposed and unexposed in the first cluster, respectively; $b_1$ and $b_0$ represent the analogous quantities in the second cluster. As before $a_0$ and $b_0$ are derived as a function of $a_1$ and $b_1$, respectively, and the constant odds ratio.
+
+```{r}
+constantOR <- function(n1, N, OR) {
+  return(N*n1 / (OR*(N-n1) + n1))
+}
+
+
+# Cluster A
+
+a1 <- 55
+a0 <- constantOR(a1, N = 100, OR = 3)
+(a1*(100 - a0)) / (a0 * (100 - a1))
+
+# Cluster B
+
+b1 <- 35
+b0 <- constantOR(b1, N = 100, OR = 3)
+(b1*(100 - b0)) / (b0 * (100 - b1))
+
+# Marginal OR
+tot0 <- a0 + b0
+tot1 <- a1 + b1
+
+(tot1*(200 - tot0)) / (tot0 * (200 - tot1))
+```
+
+For this example, the marginal odds ratio is less than the conditional odds ratio. How does this contrast between the marginal and conditional odds ratio play out with a range of possible outcomes - all meeting the requirement of a constant conditional odds ratio? (Note we are talking about odds ratio larger than 1; everything is flipped if the OR is < 1.) The plot below shows possible combinations of sums $a_1 + b_1$ and $a_0 + b_0$, where the constant conditional odds ratio condition holds within each group. The red line shows all points where the marginal odds ratio equals the conditional odds ratio (which happens to be 3 in this case):
+
+```{r, echo=FALSE, warning=FALSE}
+
+constOR <- function(N, oddsRatio, combined) {
+  
+  a1 <- c( max(1, (combined - 99)) : min(99, (combined-1)))
+  a0 <- N*a1/(oddsRatio*(N-a1) + a1)
+  
+  b1 <- combined - a1
+  b0 <- ( N*b1/(oddsRatio*(N-b1) + b1))
+  
+  tot0 <- a0 + b0
+  tot1 <- a1 + b1
+  
+  ORa <- (a1*(N - a0)) / (a0 * (N - a1))
+  ORb <- (b1*(N - b0)) / (a0 * (N - b1))
+  ORtot <- (tot1*(2*N - tot0)) / (tot0 * (2*N - tot1))
+  
+  return(data.table(tot1, tot0, ORtot, a1, a0, ORa, b1, b0, ORb))
+  
+}
+
+dtotlist <- lapply(2:198, function(x) constOR(N, oddsRatio, x))
+
+dtot <- rbindlist(dtotlist)
+dtot[, isEqual := (round(ORtot,6) >= oddsRatio)]
+
+ggplot(data = dtot, aes(x = tot1, y = tot0)) +
+  geom_point(size = .05, color = "grey70") +
+  geom_line(data = dtot[isEqual == TRUE], color = "red", size = 1.5) +
+  scale_x_continuous(limits = c(0,200)) +
+  scale_y_continuous(limits = c(0,200)) +
+  xlab(expression(a[1] + b[1])) +
+  ylab(expression(a[0] + b[0])) +
+  theme(panel.grid.minor = element_blank())
+```
+
+Here is the same plot, but a yellow line is drawn in all cases where $a_1 = b_1$ (hence $a_0 = b_0$). This line is the directly over the earlier line where the marginal odds ratios equal 3. So, sort of proof by plotting. The marginal odds ratio appears to equal the conditional odds ratio when the proportions of each group are equal.
+
+```{r, echo=FALSE, warning=FALSE}
+ggplot(data = dtot, aes(x = tot1, y = tot0)) +
+  geom_point(size = .05, color = "grey70") +
+  geom_line(data = dtot[a1 == b1], color = "#dcc07e", size = 1.5) +
+  scale_x_continuous(limits = c(0,200)) +
+  scale_y_continuous(limits = c(0,200)) +
+  xlab(expression(a[1] + b[1])) +
+  ylab(expression(a[0] + b[0])) +
+  theme(panel.grid.minor = element_blank())
+```
+
+But are the marginal odds ratios not on the colored lines higher or lower than 3? To check this, look at the next figure. In this plot, the odds ratio is plotted as a function of $a_1 + b_1$, which represents the total number of poor outcomes in the combined exposed groups. Each line represents the marginal odds ratio for a specific value of $a_1$.
+
+```{r, echo=FALSE, warning=FALSE}
+# Marginal odds ratio - maximum is at a1 = b1
+
+dtotcond <- dtot[a1 %in% seq(5,95, by = 10)]
+dtlastrow <- dtotcond[, .SD[.N], keyby = a1]
+
+ggplot(data = dtotcond) +
+  geom_line(aes(x = tot1, y = ORtot, group = a1, color = factor(a1)), size = 1) +
+  geom_hline(yintercept = oddsRatio, color = "grey10", size = .8) +  
+  geom_text(data = dtlastrow, size = 3,
+            aes(x = tot1 + 6, y = ORtot - .04, label = paste("a[1] ==", a1)),
+            parse = TRUE) +
+  ylab("odds ratio") +
+  scale_x_continuous(limits = c(-5, 205), breaks = seq(10, 190, by = 20),
+                     name = expression(a[1] + b[1]) ) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank()
+        ) 
+```
+
+If you notice, the odds ratio reaches the constant conditional odds ratio (which is 3) only when $a_1 + b_1 = 2a_1$, or when $a_1 = b_1$. It appears then, when $a_1 \ne b_1$, the marginal odds ratio lies below the conditional odds ratio. Another "proof" by figure. OK, not a proof, but colorful nonetheless.
