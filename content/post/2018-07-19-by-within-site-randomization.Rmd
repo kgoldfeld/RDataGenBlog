@@ -1,0 +1,122 @@
+---
+title: "Randomize by, or within, cluster?"
+author: ''
+date: '2018-07-19'
+slug: by-vs-within
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+I am involved with a *stepped-wedge* designed study that is exploring whether we can improve care for patients with end-stage disease who show up in the emergency room. The plan is to train nurses and physicians in palliative care. (A while ago, I   [described](https://www.rdatagen.net/post/using-simulation-for-power-analysis-an-example/) what the stepped wedge design is.) 
+
+Under this design, 33 sites around the country will receive the training at some point, which is no small task (and fortunately as the statistician, this is a part of the study I have little involvement). After hearing about this ambitious plan, a colleague asked why we didn't just randomize half the sites to the intervention and conduct a more standard cluster randomized trial, where a site would either get the training or not. I quickly simulated some data to see what we would give up (or gain) if we had decided to go that route. (It is actually a moot point, since there would be no way to simultaneously train 16 or so sites, which is why we opted for the stepped-wedge design in the first place.) 
+
+I simplified things a bit by comparing randomization *within* site with randomization *by* site. The stepped wedge design is essentially a within-site randomization, except that the two treatment arms are defined at different time points, and things are complicated a bit because there might be time by intervention confounding. But, I won't deal with that here.
+
+### Simulate data
+
+```{r, echo = FALSE}
+rndTidy <- function (modelFit) {
+    tidyTable <- broom::tidy(modelFit)
+    for (i in 1:ncol(tidyTable)) {
+        if (is.numeric(tidyTable[, i])) 
+            tidyTable[, i] <- round(tidyTable[, i], 2)
+    }
+    return(tidyTable)
+}
+```
+
+```{r, warning = FALSE, message = FALSE}
+library(simstudy)
+
+# define data
+
+cvar <- iccRE(0.20, dist = "binary")
+  
+d <- defData(varname = "a", formula = 0, variance = cvar, 
+               dist = "normal", id = "cid")
+d <- defData(d, varname = "nper", formula = 100, dist = "nonrandom")
+  
+da <- defDataAdd(varname = "y", formula = "-1 + .4*rx + a", 
+                 dist="binary", link = "logit")
+```
+
+### Randomize *within* cluster
+
+```{r}
+set.seed(11265)
+
+dc <- genData(100, d)
+      
+di <- genCluster(dc, "cid", "nper", "id")
+di <- trtAssign(di, strata = "cid", grpName = "rx")
+di <- addColumns(da, di)
+
+di
+```
+
+I fit a **conditional** mixed effects model, and then manually calculate the conditional log odds from the data just to give a better sense of what the conditional effect is (see [earlier post](https://www.rdatagen.net/post/mixed-effect-models-vs-gee/) for more on conditional vs. marginal effects).
+
+```{r, warning = FALSE, message = FALSE}
+library(lme4)
+rndTidy(glmer(y ~ rx + (1 | cid), data = di, family = binomial))
+
+calc <- di[, .(estp = mean(y)), keyby = .(cid, rx)]
+calc[, lo := log(odds(estp))]
+calc[rx == 1, mean(lo)] - calc[rx == 0, mean(lo)] 
+```
+
+Next, I fit a **marginal** model and calculate the effect manually as well.
+
+```{r, warning = FALSE, message = FALSE}
+library(geepack)
+rndTidy(geeglm(y ~ rx, data = di, id = cid, corstr = "exchangeable",
+            family = binomial))
+
+log(odds(di[rx==1, mean(y)])/odds(di[rx==0, mean(y)]))
+```
+
+As [expected](https://www.rdatagen.net/post/log-odds/), the marginal estimate of the effect is less than the conditional effect.
+
+### Randomize *by* cluster
+
+Next we repeat all of this, though randomization is at the cluster level.
+
+```{r}
+dc <- genData(100, d)
+dc <- trtAssign(dc, grpName = "rx")
+      
+di <- genCluster(dc, "cid", "nper", "id")
+di <- addColumns(da, di)
+
+di
+```
+
+Here is the conditional estimate of the effect:
+
+```{r}
+rndTidy(glmer(y~rx + (1|cid), data = di, family = binomial))
+```
+
+And here is the marginal estimate
+
+```{r}
+rndTidy(geeglm(y ~ rx, data = di, id = cid, corstr = "exchangeable",
+            family = binomial))
+```
+
+While the within- and by-site randomization estimates are quite different, we haven't really learned anything, since those differences could have been due to chance. So, I created 500 data sets under different assumptions to see what the expected estimate would be as well as the variability of the estimate.
+
+### Fixed ICC, varied randomization
+
+From this first set of simulations, the big take away is that randomizing *within* clusters provides an unbiased estimate of the conditional effect, but so does randomizing *by* site. The big disadvantage of randomizing *by* site is the added variability of the conditional estimate. The attenuation of the marginal effect estimates under both scenarios has nothing to do with randomization, but results from intrinsic variability across sites.
+
+![](/img/post-condmarg/pRT.png)
+
+### Fixed randomization, varied ICC
+
+This next figure isolates the effect of across-site variability on the estimates. In this case, randomization is only *by* site (i.e. no within site randomization), but the ICC is set at 0.05 and 0.20. For the conditional model, the ICC has no impact on the expected value of the log-odds ratio, but when variability is higher (ICC = 0.20), the standard error of the estimate increases. For the marginal model, the ICC has an impact on *both* the expected value and standard error of the estimate. In the case with a low ICC (top row in plot), the marginal and condition estimates are quite similar.
+
+![](/img/post-condmarg/pIT.png)
