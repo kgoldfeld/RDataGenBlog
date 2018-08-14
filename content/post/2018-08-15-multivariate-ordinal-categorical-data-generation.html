@@ -1,0 +1,138 @@
+---
+title: Multivariate ordinal categorical data generation
+author: ''
+date: '2018-08-15'
+slug: multivariate-ordinal-categorical-data-generation
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>An economist contacted me about the ability of <code>simstudy</code> to generate correlated ordinal categorical outcomes. He is trying to generate data as an aide to teaching cost-effectiveness analysis, and is hoping to simulate responses to a quality-of-life survey instrument, the EQ-5D. The particular instrument has five questions related to mobility, self-care, activities, pain, and anxiety. Each item has three possible responses: (1) no problems, (2) some problems, and (3) a lot of problems. Although the instrument has been designed so that each item is orthogonal (independent) from the others, it is impossible to avoid correlation. So, in generating (and analyzing) these kinds of data, it is important to take this into consideration.</p>
+<p>I had recently added functions to generate correlated data from non-normal distributions, and I had also created a function that generates ordinal categorical outcomes, but there was nothing to address the data generation problem he had in mind. After a little back forth, I came up with some code that will hopefully address his needs. And I hope the new function <code>genCorOrdCat</code> is general enough to support other data generation needs as well. (For the moment, this version is only available for download from the <a href="https://github.com/kgoldfeld/simstudy">github</a> site, but will be on CRAN sometime soon.)</p>
+<div id="general-approach" class="section level2">
+<h2>General approach</h2>
+<p>The data generation algorithm assumes an underlying latent process logistic process that I’ve described <a href="https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/">earlier</a>. In the context of a set of multivariate responses, there is a latent process for each of the responses. For a single response, we can randomly select a value from the logistic distribution and determine the response region in which this values falls to assign the randomly generated response. To generate correlated responses, we generate correlated values from the logistic distribution using a standard normal copula-like approach, just as I <a href="https://www.rdatagen.net/post/correlated-data-copula/">did</a> to generate multivariate data from non-normal distributions.</p>
+<p>The new function <code>genCorOrdCat</code> requires specification of the baseline probabilities for each of the items in matrix form. The function also provides an argument to incorporate covariates, much like its univariate counterpart <code>genOrdCat</code> <a href="https://www.rdatagen.net/post/generating-and-displaying-likert-type-data/">does</a>. The correlation is specified either with a single correlation coefficient <span class="math inline">\(\rho\)</span> and a correlation structure (“independence”, “compound symmetry”, or “AR-1”) or by specifying the correlation matrix directly.</p>
+</div>
+<div id="examples" class="section level2">
+<h2>Examples</h2>
+<p>In the following examples, I assume four items each with four possible responses - which is different from the EQ-5D.</p>
+<div id="high-correlation" class="section level4">
+<h4>High correlation</h4>
+<p>In the first simulation items two and three share the same uniform distribution, and items one and four each have their own distribution:</p>
+<pre class="r"><code>baseprobs &lt;- matrix(c(0.10, 0.20, 0.30, 0.40,
+                      0.25, 0.25, 0.25, 0.25,
+                      0.25, 0.25, 0.25, 0.25,
+                      0.40, 0.30, 0.20, 0.10),
+             nrow = 4, byrow = TRUE)
+
+# generate the data
+
+set.seed(3333)                  
+dT &lt;- genData(100000)
+dX &lt;- genCorOrdCat(dT, adjVar = NULL, baseprobs = baseprobs, 
+                   prefix = &quot;q&quot;, rho = 0.8, corstr = &quot;cs&quot;)
+
+dX</code></pre>
+<pre><code>##             id q1 q2 q3 q4
+##      1:      1  2  1  1  1
+##      2:      2  1  1  1  1
+##      3:      3  2  2  1  1
+##      4:      4  3  3  3  2
+##      5:      5  4  2  3  1
+##     ---                   
+##  99996:  99996  3  4  4  3
+##  99997:  99997  2  1  1  2
+##  99998:  99998  2  2  2  2
+##  99999:  99999  3  1  1  1
+## 100000: 100000  4  4  4  4</code></pre>
+<p>Here is a correlation plot that tries to help us visualize what high correlation looks like under this context. (The plots are generated using function <code>ggpairs</code> from the package <code>GGally</code>. Details of the plot are provided in the addendum.) In the plot, the size of the circles represents the frequency of observations with a particular combination; the larger the circle, the more times we observe a combination. The correlation that is reported is the estimated <em>Spearman’s Rho</em>, which is appropriate for ordered or ranked data.</p>
+<p>If you look at the plot in the third row and second column of this first example, the observations are mostly located near the diagonal - strong evidence of high correlation.</p>
+<p><img src="/post/2018-08-15-multivariate-ordinal-categorical-data-generation_files/figure-html/unnamed-chunk-1-1.png" width="768" /></p>
+</div>
+<div id="low-correlation" class="section level4">
+<h4>Low correlation</h4>
+<pre class="r"><code>dX &lt;- genCorOrdCat(dT, adjVar = NULL, baseprobs = baseprobs, 
+                   prefix = &quot;q&quot;, rho = 0.05, corstr = &quot;cs&quot;)</code></pre>
+<p>In this second example with very little correlation, the clustering around the diagonal in the third row/second column is less pronounced.</p>
+<p><img src="/post/2018-08-15-multivariate-ordinal-categorical-data-generation_files/figure-html/unnamed-chunk-2-1.png" width="768" /></p>
+</div>
+<div id="same-distribution" class="section level3">
+<h3>Same distribution</h3>
+<p>I leave you with two plots that are based on responses that share the same distributions:</p>
+<pre class="r"><code>baseprobs &lt;- matrix(c(0.1, 0.2, 0.3, 0.4,
+                      0.1, 0.2, 0.3, 0.4,
+                      0.1, 0.2, 0.3, 0.4,
+                      0.1, 0.2, 0.3, 0.4),
+             nrow = 4, byrow = TRUE)</code></pre>
+<p> </p>
+<div id="high-correlation-1" class="section level4">
+<h4>High correlation</h4>
+<p><img src="/post/2018-08-15-multivariate-ordinal-categorical-data-generation_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
+</div>
+<div id="low-correlation-1" class="section level4">
+<h4>Low correlation</h4>
+<p><img src="/post/2018-08-15-multivariate-ordinal-categorical-data-generation_files/figure-html/unnamed-chunk-4-1.png" width="768" /></p>
+</div>
+</div>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+<p>In case you are interested in seeing how I generated the correlation plots, here is the code:</p>
+<pre class="r"><code>library(GGally)
+
+mycor &lt;- function(data, mapping, sgnf=3, size = 8, ...) {
+  
+  xCol &lt;- as.character(mapping[[1]][[2]])
+  yCol &lt;- as.character(mapping[[2]][[2]])
+
+  xVal &lt;- data[[xCol]]
+  yVal &lt;- data[[yCol]]
+  
+  rho &lt;- Hmisc::rcorr(xVal, yVal, type = &quot;spearman&quot;)$r[2,1]
+  loc &lt;- data.table(x=.5, y=.5)
+  
+  p &lt;-  ggplot(data = loc, aes(x = x, y = y)) + 
+    xlim(0:1) + 
+    ylim(0:1) + 
+    theme(panel.background = element_rect(fill = &quot;grey95&quot;),  
+          panel.grid = element_blank()) + 
+    labs(x = NULL, y = NULL) +
+    geom_text(size = size, color = &quot;#8c8cc2&quot;,
+     label = 
+       paste(&quot;rank corr:\n&quot;, round(rho, sgnf), sep = &quot;&quot;, collapse = &quot;&quot;))
+  p
+}
+
+my_lower &lt;- function(data, mapping, ...){
+  
+  xCol &lt;- as.character(mapping[[1]][[2]])
+  yCol &lt;- as.character(mapping[[2]][[2]])
+  dx &lt;- data.table(data)[ , c(xCol, yCol), with = FALSE]
+  ds &lt;- dx[, .N, 
+    keyby = .(eval(parse(text=xCol)), eval(parse(text=yCol)))]
+  setnames(ds, c(&quot;parse&quot;, &quot;parse.1&quot;), c(xCol, yCol))
+
+  p &lt;- ggplot(data = ds, mapping = mapping) + 
+    geom_point(aes(size = N), color = &quot;#adadd4&quot;) +
+    scale_x_continuous(expand = c(.2, 0)) +
+    scale_y_continuous(expand = c(.2, 0)) +
+    theme(panel.grid = element_blank())
+  p
+}
+
+my_diag &lt;- function(data, mapping, ...){
+  p &lt;- ggplot(data = data, mapping = mapping) + 
+    geom_bar(aes(y = (..count..)/sum(..count..)), fill = &quot;#8c8cc2&quot;) +
+    theme(panel.grid = element_blank())
+  p
+}
+
+ggpairs(dX[, -&quot;id&quot;], lower = list(continuous = my_lower), 
+        diag = list(continuous = my_diag),
+        upper = list(continuous = wrap(mycor, sgnf = 2, size = 3.5)))</code></pre>
+</div>
