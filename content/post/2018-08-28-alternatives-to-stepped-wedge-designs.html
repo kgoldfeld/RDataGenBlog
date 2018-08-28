@@ -1,0 +1,221 @@
+---
+title: The power of stepped-wedge designs
+author: ''
+date: '2018-08-28'
+slug: alternatives-to-stepped-wedge-designs
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>Just before heading out on vacation last month, I put up a <a href="https://www.rdatagen.net/post/by-vs-within/">post</a> that purported to compare stepped-wedge study designs with more traditional cluster randomized trials. Either because I rushed or was just lazy, I didn’t exactly do what I set out to do. I <em>did</em> confirm that a multi-site randomized clinical trial can be more efficient than a cluster randomized trial when there is variability across clusters. (I compared randomizing within a cluster with randomization by cluster.) But, this really had nothing to with stepped-wedge designs.</p>
+<p>Here, I will try to rectify the shortcomings of that post by actually simulating data from a traditional stepped-wedge design and two variations on that theme with the aim of seeing which approach might be preferable. These variations were inspired by this extremely useful <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5718336/">paper</a> by Thompson et al. (If you stop reading here and go to the paper, I will consider mission accomplished.)</p>
+<p>The key differences in the various designs are how many sites are exposed to the intervention and what the phase-in schedule looks like. In the examples that follow, I am assuming a study that lasts 24 weeks and with 50 total sites. Each site will include six patients per week. That means if we are collecting data for all sites over the entire study period, we will have <span class="math inline">\(24 \times 6 \times 50 = 7200\)</span> outcome measurements.</p>
+<p>The most important assumption I am making, however, is that the investigators can introduce the intervention at a small number of sites during each time period (for example, because the intervention involves extensive training and there is a limited number of trainers.) In this case, I am assuming that at most 10 sites can start the intervention at any point in time, and we must wait at least 4 weeks until the next wave can be started. (We can proceed slower than 4 weeks, of course, which surprisingly may be the best option.)</p>
+<p>I am going to walk through the data generation process for each of the variations and then present the results of a series of power analyses to compare and contrast each design.</p>
+<div id="stepped-wedge-design" class="section level3">
+<h3>Stepped-wedge design</h3>
+<p><img src="/img/post-stepwedge/TradSW.png" /></p>
+<p>In the stepped-wedge design, all clusters in a trial will receive the intervention at some point, but the start of the intervention will be staggered. The amount of time in each state (control or intervention) will differ for each site (or group of sites if there are waves of more than one site starting up at the same time).</p>
+<p>In this design (and in the others as well) time is divided into discrete data collection/phase-in periods. In the schematic figure, the light blue sections are periods during which the sites are in a control state, and the darker blue are periods during which the sites are in the intervention state. Each period in this case is 4 weeks long.</p>
+<p>Following the Thompson et al. <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5718336/">paper</a>, the periods can be characterized as pre-rollout (where no intervention occurs), rollout (where the intervention is introduced over time), and post-rollout (where the all clusters are under intervention). Here, the rollout period includes periods two through five.</p>
+<p>First, we define the data, which will largely be the same across the designs: 6 individual patients per week, an intervention effect of 0.33, and a weekly time effect (which unfortunately is parameterized as “period”) of 0.02, and standard deviation within each cluster of 3.</p>
+<pre class="r"><code>library(simstudy)
+
+defS &lt;- defData(varname = &quot;n&quot;, formula = 6, 
+                dist = &quot;nonrandom&quot;, id = &quot;site&quot;)
+defS &lt;- defData(defS, varname = &quot;siteInt&quot;, formula = 0, 
+                variance = 1, dist = &quot;normal&quot;)
+
+defP &lt;- defDataAdd(varname = &quot;rx&quot;, 
+                   formula = &quot;(start &lt;= period) * everTrt&quot;,
+                   dist = &quot;nonrandom&quot;)
+
+defI &lt;- defDataAdd(varname = &quot;Y&quot;, 
+                   formula = &quot;10 + rx * 0.33 + period * 0.02 + siteInt&quot;,
+                   variance = 9, dist = &quot;normal&quot;)</code></pre>
+<p>Now, we actually generate the data, starting with the site level data, then the period data, and then the individual patient level data. Note that the intervention is phased in every 4 weeks so that by the end of the 24 weeks all 5 waves are operating under the intervention:</p>
+<pre class="r"><code>set.seed(111)
+
+dS &lt;- genData(50, defS)
+dS[, start := rep((1:5)*4, each = 10)]
+dS[, everTrt := 1]
+
+dS[site %in% c(1, 2, 11, 12, 49, 50)] # review a subset</code></pre>
+<pre><code>##    site n    siteInt start everTrt
+## 1:    1 6  0.2352207     4       1
+## 2:    2 6 -0.3307359     4       1
+## 3:   11 6 -0.1736741     8       1
+## 4:   12 6 -0.4065988     8       1
+## 5:   49 6  2.4856616    20       1
+## 6:   50 6  1.9599817    20       1</code></pre>
+<pre class="r"><code># weekly data
+dP &lt;- addPeriods(dtName = dS, nPeriods = 24, idvars = &quot;site&quot;)
+dP &lt;- addColumns(defP, dP)
+
+dP[site %in% c(3, 17) &amp; period &lt; 5] # review a subset</code></pre>
+<pre><code>##     site period n     siteInt start everTrt timeID rx
+##  1:    3      0 6 -0.31162382     4       1     49  0
+##  2:    3      1 6 -0.31162382     4       1     50  0
+##  3:    3      2 6 -0.31162382     4       1     51  0
+##  4:    3      3 6 -0.31162382     4       1     52  0
+##  5:    3      4 6 -0.31162382     4       1     53  1
+##  6:   17      0 6 -0.08585101     8       1    385  0
+##  7:   17      1 6 -0.08585101     8       1    386  0
+##  8:   17      2 6 -0.08585101     8       1    387  0
+##  9:   17      3 6 -0.08585101     8       1    388  0
+## 10:   17      4 6 -0.08585101     8       1    389  0</code></pre>
+<pre class="r"><code># patient data
+dI &lt;- genCluster(dtClust = dP, cLevelVar = &quot;timeID&quot;, numIndsVar = &quot;n&quot;, 
+                 level1ID = &quot;id&quot;)
+dI &lt;- addColumns(defI, dI)
+
+dI</code></pre>
+<pre><code>##       site period n   siteInt start everTrt timeID rx   id         Y
+##    1:    1      0 6 0.2352207     4       1      1  0    1 10.810211
+##    2:    1      0 6 0.2352207     4       1      1  0    2 14.892854
+##    3:    1      0 6 0.2352207     4       1      1  0    3 12.977948
+##    4:    1      0 6 0.2352207     4       1      1  0    4 11.311097
+##    5:    1      0 6 0.2352207     4       1      1  0    5 10.760508
+##   ---                                                               
+## 7196:   50     23 6 1.9599817    20       1   1200  1 7196 11.317432
+## 7197:   50     23 6 1.9599817    20       1   1200  1 7197  7.909369
+## 7198:   50     23 6 1.9599817    20       1   1200  1 7198 13.048293
+## 7199:   50     23 6 1.9599817    20       1   1200  1 7199 17.625904
+## 7200:   50     23 6 1.9599817    20       1   1200  1 7200  7.147883</code></pre>
+<p>Here is a plot of the site level averages at each time point:</p>
+<pre class="r"><code>library(ggplot2)
+
+dSum &lt;- dI[, .(Y = mean(Y)), keyby = .(site, period, rx, everTrt, start)]
+
+ggplot(data = dSum, aes(x = period, y = Y, group = interaction(site, rx))) +
+  geom_line(aes(color = factor(rx))) +
+  facet_grid(factor(start, labels = c(1 : 5)) ~ .) +
+  scale_x_continuous(breaks = seq(0, 23, by = 4), name = &quot;week&quot;) +
+  scale_color_manual(values = c(&quot;#b8cce4&quot;, &quot;#4e81ba&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.position = &quot;none&quot;) </code></pre>
+<p><img src="/post/2018-08-28-alternatives-to-stepped-wedge-designs_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>Finally, we can fit a linear mixed effects model to estimate the treatment effect:</p>
+<pre class="r"><code>library(lme4)
+library(broom)
+
+tidy(lmer(Y ~ rx + period + (1|site), data = dI))</code></pre>
+<pre><code>##                      term   estimate   std.error statistic    group
+## 1             (Intercept) 9.78836231 0.184842722 52.955086    fixed
+## 2                      rx 0.35246094 0.122453829  2.878317    fixed
+## 3                  period 0.02110481 0.007845705  2.689983    fixed
+## 4     sd_(Intercept).site 1.21303055          NA        NA     site
+## 5 sd_Observation.Residual 2.99488532          NA        NA Residual</code></pre>
+</div>
+<div id="stepped-wedge-using-rollout-stage-only" class="section level3">
+<h3>Stepped-wedge using “rollout” stage only</h3>
+<p><img src="/img/post-stepwedge/SWro.png" /></p>
+<p>The Thompson et al. paper argued that if we limit the study to the rollout period only (periods 2 through 5 in the example above) but increase the length of the periods (here, from 4 to 6 weeks), we can actually increase power. In this case, there will be one wave of 10 sites that never receives the intervention.</p>
+<p>The data generation process is exactly the same as above, except the statement defining the length of periods (6 weeks instead of 4 weeks) and starting point (week 0 vs. week 4) is slightly changed:</p>
+<pre class="r"><code>dS[, start := rep((0:4)*6, each = 10)]</code></pre>
+<p>So the site level data set with starting points at 0, 6, 12, and 18 weeks for each of the four waves that ever receive treatment looks like this:</p>
+<pre><code>##    site n    siteInt start everTrt
+## 1:    1 6  0.2352207     0       1
+## 2:    2 6 -0.3307359     0       1
+## 3:   11 6 -0.1736741     6       1
+## 4:   12 6 -0.4065988     6       1
+## 5:   49 6  2.4856616    24       1
+## 6:   50 6  1.9599817    24       1</code></pre>
+<p>And the data generated under this scenario looks like:</p>
+<p><img src="/post/2018-08-28-alternatives-to-stepped-wedge-designs_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>Here is the model estimation:</p>
+<pre class="r"><code>tidy(lmer(Y ~ rx + period + (1|site), data = dI))</code></pre>
+<pre><code>##                      term   estimate   std.error statistic    group
+## 1             (Intercept) 9.79022407 0.185294936 52.835897    fixed
+## 2                      rx 0.30707559 0.122414620  2.508488    fixed
+## 3                  period 0.02291619 0.006378367  3.592800    fixed
+## 4     sd_(Intercept).site 1.21153700          NA        NA     site
+## 5 sd_Observation.Residual 2.99490926          NA        NA Residual</code></pre>
+</div>
+<div id="staggered-cluster-randomized-trial" class="section level3">
+<h3>Staggered cluster randomized trial</h3>
+<p><img src="/img/post-stepwedge/StagCRG.png" /></p>
+<p>If we wanted to conduct a cluster randomized trial but were able to phase in the intervention over time as we have been assuming, this design is the closest we could get. In this example with 50 sites and five phase-in periods, the intervention waves (in this example 1, 3, 5, 7, and 9) would each include five clusters. The respective control waves (2, 4, 6, 8, and 10) would also have five clusters each. And since we are assuming five waves, each wave will be in the study for eight: the first four weeks comprise “pre” measurement period, and the second four week period is the “post” measurement period.</p>
+<p>The problem with this design relative to all the others discussed here is that the amount of data collected for each site is considerably reduced. As a result, this design is going to be much less efficient (hence less powerful) than the others. So much so, that I do not even generate data for this design (though I did actually confirm using simulations not shown here.)</p>
+</div>
+<div id="staggered-cluster-randomized-trial-with-continued-measurement" class="section level3">
+<h3>Staggered cluster randomized trial with continued measurement</h3>
+<p><img src="/img/post-stepwedge/StagCRT.png" /></p>
+<p>This is the staggered CRT just described, but we collect data for all 24 weeks for all of the sites. In this case, we are not at disadvantage with respect to the number of measurements, so it might be a competitive design. This version of staggered CRT could also be viewed as a traditional stepped-wedge design with controls.</p>
+<p>The data generation is identical to the traditional stepped-wedge design we started with, except the only half of the sites are “ever treated”:</p>
+<pre class="r"><code>dS[, everTrt := rep(0:1)]</code></pre>
+<p>Here is the plot, with the control arm on the left, and the intervention arm on the right. The control arm is never introduced to the intervention.</p>
+<p><img src="/post/2018-08-28-alternatives-to-stepped-wedge-designs_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+</div>
+<div id="conducting-a-power-analysis-using-simulation" class="section level3">
+<h3>Conducting a power analysis using simulation</h3>
+<p>We are ultimately interested in assessing how much information each study design can provide. Power analyses under different conditions are one way to measure this.</p>
+<p>Since one of my missions here is to illustrate as much <code>R</code> code as possible, here is how I do conduct the power analysis of the traditional stepped-wedge design:</p>
+<pre class="r"><code>powerStepWedge1 &lt;- function(x) {
+  
+  # generate data
+  
+  dS &lt;- genData(50, defS)
+  dS[, start := rep((1:5)*4, each = 10)]
+  dS[, everTrt := 1]
+  
+  dP &lt;- addPeriods(dtName = dS, nPeriods = 24, idvars = &quot;site&quot;)
+  dP &lt;- addColumns(defP, dP)
+  
+  dI &lt;- genCluster(dtClust = dP, cLevelVar = &quot;timeID&quot;, 
+                   numIndsVar = &quot;n&quot;, level1ID = &quot;id&quot;)
+  dI &lt;- addColumns(defI, dI)
+  
+  # fit model
+  
+  data.frame(summary(lmer(Y ~ rx + period + (1|site), data = dI))$coef)
+}
+
+res &lt;- vector(&quot;list&quot;, length = 5)
+i &lt;- 0
+
+for (icc in seq(0, 0.04, .01)) {
+  
+  i &lt;- i + 1
+  
+  # update data definition based on new ICC
+      
+  between.var &lt;- iccRE(ICC = icc, dist = &quot;normal&quot;, varWithin = 9)
+  defS &lt;- updateDef(defS, changevar = &quot;siteInt&quot;, newvariance = between.var)
+      
+  # generate 200 data sets and fit models
+  resSW1&lt;- lapply(1:200, FUN = powerStepWedge1) 
+  
+  # estimate and store power
+  pSW1 &lt;- mean( unlist(lapply(resSW1, `[`, 2, 3 )) &gt;= 1.96)
+  res[[i]] &lt;- data.table(icc, pSW1)
+      
+}  
+
+rbindlist(res)</code></pre>
+<pre><code>##     icc  pSW1
+## 1: 0.00 0.940
+## 2: 0.01 0.855
+## 3: 0.02 0.850
+## 4: 0.03 0.830
+## 5: 0.04 0.780</code></pre>
+</div>
+<div id="comparing-power-of-three-different-designs" class="section level3">
+<h3>Comparing power of three different designs</h3>
+<p>The next figure shows the estimated power for all three designs based on the same effect size and a range of ICC’s. The SW rollout only design consistently equals or outperforms the others. When the ICC is moderate to large (in this case &gt; 0.06), the traditional SW design performs equally well. The design that comes closest to a staggered cluster randomized trial, the SW + controls performs well here on the lower range of ICCs, but is less compelling with more between site variation.</p>
+<p><img src="/img/post-stepwedge/power3.png" /></p>
+<p><a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC5718336/">Thompson et al.</a> provide more nuance that can improve power under different conditions - mostly involving changing period lengths or adding control-only sites, or both - but these simulations suggest that some sort of stepped-wedge design (either limited to the rollout phase or not) will generally be advantageous, at least under the strict requirements that I established to frame the design.</p>
+<p>All of this has been done in the context of a normally distributed outcome. At some point, I will certainly re-do this comparison with a binary outcome.</p>
+</div>
+<div id="addendum-cluster-randomized-trial" class="section level3">
+<h3>Addendum: cluster randomized trial</h3>
+<p><img src="/img/post-stepwedge/CRT.png" /></p>
+<p>A traditional cluster randomized trial was not really under consideration because we declared that we could only deliver the intervention to 10 sites at any one time. However, it is illustrative to compare this design to make it clear that CRT is really best used when variability across sites is at its lowest (i.e. when the ICC is at or very close to zero). In this example, 25 sites are randomized to receive the intervention starting in the first week and 25 sites never receive the intervention. Data are collected for all 24 weeks for each of the 50 clusters.</p>
+<p><img src="/post/2018-08-28-alternatives-to-stepped-wedge-designs_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>The simulations confirm findings that the CRT is more efficient than stepped-wedge designs when the ICC is close to zero, but pales in comparison even with ICCs as low as 0.01:</p>
+<p><img src="/img/post-stepwedge/power2.png" /></p>
+</div>
