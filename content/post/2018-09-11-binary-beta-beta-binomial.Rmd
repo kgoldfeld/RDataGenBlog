@@ -1,0 +1,182 @@
+---
+title: Binary, beta, beta-binomial
+author: ''
+date: '2018-09-11'
+slug: binary-beta-beta-binomial
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+I've been working on updates for the [`simstudy`](http://www.rdatagen.net/page/simstudy/) package. In the past few weeks, a couple of folks independently reached out to me about generating correlated binary data. One user was not impressed by the copula algorithm that is already implemented. I've added an option to use an algorithm developed by [Emrich and Piedmonte](https://www.tandfonline.com/doi/abs/10.1080/00031305.1991.10475828) in 1991, and will be incorporating that option soon in the functions `genCorGen` and `addCorGen`. I'll write about that change some point soon.
+
+A second researcher was trying to generate data using parameters that could be recovered using GEE model estimation. I've always done this by using an underlying mixed effects model, but of course, the marginal model parameter estimates might be quite different from the conditional parameters. (I've written about this a number of times, most recently [here](https://www.rdatagen.net/post/mixed-effect-models-vs-gee/).) As a result, the model and the data generation process don't match, which may not be such a big deal, but is not so helpful when trying to illuminate the models.
+
+One simple solution is using a *beta-binomial* mixture data generating process. The [*beta* distribution](https://en.wikipedia.org/wiki/Beta_distribution) is a continuous probability distribution that is defined on the interval from 0 to 1, so it is not too unreasonable as model for probabilities. If we assume that cluster-level probabilities have a beta distribution, and that within each cluster the individual outcomes have a *binomial* distribution defined by the cluster-specific probability, we will get the data generation process we are looking for.
+
+### Generating the clustered data
+
+In these examples, I am using 500 clusters, each with cluster size of 40 individuals. There is a cluster-level covariate `x` that takes on integer values between 1 and 3. The beta distribution is typically defined using two shape parameters usually referenced as $\alpha$ and $\beta$, where $E(Y) = \alpha / (\alpha + \beta)$, and $Var(Y) = (\alpha\beta)/[(\alpha + \beta)^2(\alpha + \beta + 1)]$. In `simstudy`, the distribution is specified using the mean probability ($p_m$) and a *precision* parameter ($\phi_\beta > 0$) (that is specified using the variance argument). Under this specification, $Var(Y) = p_m(1 - p_m)/(1 + \phi_\beta)$. Precision is inversely related to variability: lower precision is higher variability.
+
+In this simple simulation, the cluster probabilities are a function of the cluster-level covariate and precision parameter $\phi_\beta$. Specifically 
+
+$$logodds(p_{clust}) = -2.0 + 0.65x.$$
+The binomial variable of interest $b$ is a function of $p_{clust}$ only, and represents a count of individuals in the cluster with a "success":
+
+```{r, message = FALSE}
+library(simstudy)
+
+set.seed(87387)
+
+phi.beta <- 3       # precision
+n <- 40             # cluster size
+
+def <- defData(varname = "n", formula = n, 
+               dist = 'nonrandom', id = "cID")
+def <- defData(def, varname = "x", formula = "1;3", 
+               dist = 'uniformInt')
+def <- defData(def, varname = "p", formula = "-2.0 + 0.65 * x", 
+               variance = phi.beta, dist = "beta", link = "logit")
+def <- defData(def, varname = "b", formula = "p", variance = n, 
+               dist = "binomial")
+
+dc <- genData(500, def)
+dc
+```
+
+The generated data with $\phi_\beta = 3$ is shown on the left below. Data sets with increasing precision (less variability) are shown to the right:
+
+```{r, echo = FALSE, fig.width = 11}
+p3 <- ggplot(data = dc, aes(x=factor(x), y = p)) + 
+  geom_jitter(width = 0.1, height = 0, size = 1, color ="#457719") +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  xlab("x") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.y = element_blank()) +
+  ggtitle(paste("precision = ", phi.beta))
+
+def <- updateDef(def, "p", newvariance = 10)
+dc2 <- genData(500, def)
+
+p10 <- ggplot(data = dc2, aes(x=factor(x), y = p)) + 
+  geom_jitter(width = 0.1, height = 0, size = 1, color ="#457719") +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  xlab("x") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.y = element_blank()) +
+  ggtitle(paste("precision = ", 10))
+
+def <- updateDef(def, "p", newvariance = 100)
+dc3 <- genData(500, def)
+
+p100 <- ggplot(data = dc3, aes(x=factor(x), y = p)) + 
+  geom_jitter(width = 0.1, height = 0, size = 1, color ="#457719") +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.2)) +
+  xlab("x") +
+  theme(panel.grid.minor = element_blank(),
+        axis.title.y = element_blank()) +
+  ggtitle(paste("precision = ", 100))
+
+gridExtra::grid.arrange(p3, p10, p100, nrow = 1, left = "cluster probabilities")
+
+def <- updateDef(def, "p", newvariance = phi.beta)
+rm(dc2, dc3)
+```
+
+The relationship of $\phi_\beta$ and variance is made clear by evaluating the variance of the cluster probabilities at each level of $x$ and comparing these variance estimates with the theoretical values suggested by parameters specified in the data generation process:
+
+```{r}
+p.clust = 1/(1 + exp(2 - 0.65*(1:3)))
+
+cbind(dc[, .(obs = round(var(p), 3)), keyby = x], 
+    theory = round( (p.clust*(1 - p.clust))/(1 + phi.beta), 3))
+```
+
+### Beta and beta-binomial regression
+
+Before getting to the GEE estimation, here are two less frequently used regression models: beta and beta-binomial regression. Beta regression may not be super-useful, because we would need to observe (and measure) the probabilities directly. In this case, we randomly generated the probabilities, so it is fair to estimate a regression model to recover the same parameters we used to generate the data! But, back in the real world, we might only observe $\hat{p}$, which results from generating data based on the underlying true $p$. This is where we will need the beta-binomial regression (and later, the GEE model).
+
+First, here is the beta regression using package `betareg`, which provides quite good estimates of the two coefficients and the precision parameter $\phi_\beta$, which is not so surprising given the large number of clusters in our sample:
+
+```{r, warning = FALSE, message = FALSE}
+library(betareg)
+model.beta <- betareg(p ~ x, data = dc, link = "logit")
+summary(model.beta)
+```
+
+The beta-binomial regression model, which is estimated using package `aod`, is a reasonable model to fit in this case where we have observed binomial outcomes and unobserved underlying probabilities:
+
+```{r, warning = FALSE, message = FALSE}
+library(aod)
+model.betabinom <- betabin(cbind(b, n - b) ~ x, ~ 1, data = dc)
+model.betabinom
+```
+
+A couple of interesting things to note here. First is that the coefficient estimates are pretty similar to the beta regression model. However, the standard errors are slightly higher, as they should be, since we are using only observed probabilities and not the true (albeit randomly selected or generated) probabilities. So, there is another level of uncertainty beyond sampling error. 
+
+Second, there is a new parameter: $\phi_{overdisp}$. What is that, and how does that relate to $\phi_\beta$? The variance of a binomial random variable $Y$ with a single underlying probability is  $Var(Y) = np(1-p)$. However, when the underlying probability varies across different subgroups (or clusters), the variance is augmented by $\phi_{overdisp}$: $Var(Y) = np(1-p)[1 + (n-1)\phi_{overdisp}]$. It turns out to be the case that $\phi_{overdisp} = 1/(1+\phi_\beta)$:
+
+```{r}
+round(model.betabinom@random.param, 3)    # from the beta - binomial model
+round(1/(1 + coef(model.beta)["(phi)"]), 3)  # from the beta model
+```
+
+The observed variances of the binomial outcome $b$ at each level of $x$ come quite close to the theoretical variances based on $\phi_\beta$:
+
+```{r}
+phi.overdisp <- 1/(1+phi.beta)
+
+cbind(dc[, .(obs = round(var(b),1)), keyby = x],
+  theory = round( n*p.clust*(1-p.clust)*(1 + (n-1)*phi.overdisp), 1))
+```
+
+### GEE and individual level data
+
+With individual level binary outcomes (as opposed to count data we were working with before), GEE models are appropriate. The code below generates individual-level for each cluster level:
+
+```{r}
+defI <- defDataAdd(varname = "y", formula = "p", dist = "binary")
+
+di <- genCluster(dc, "cID", numIndsVar = "n", level1ID = "id")
+di <- addColumns(defI, di)
+di
+```
+
+The GEE model provides estimates of the coefficients as well as the working correlation. If we assume an "exchangeable" correlation matrix, in which each individual is correlated with all other individuals in the cluster but is not correlated with individuals in other clusters, we will get a single correlation estimate, which is labeled as *alpha* in the GEE output:
+
+```{r, message = FALSE}
+library(geepack)
+
+geefit <- geeglm(y ~ x, family = "binomial", data = di, 
+                 id = cID, corstr = "exchangeable" )
+summary(geefit)
+```
+
+In this case, *alpha* ($\alpha$) is estimated at 0.25, which is quite close to the previous estimate of $\phi_{overdisp}$, 0.24. So, it appears to be the case that if we have a target correlation $\alpha$, we know the corresponding $\phi_\beta$ to use in the beta-binomial data generation process. That is, $\phi_\beta = (1 - \alpha)/\alpha$.
+
+While this is certainly not a proof of anything, let's give it a go with a target $\alpha = 0.44$:
+
+```{r}
+phi.beta.new <- (1-0.44)/0.44
+def <- updateDef(def, "p", newvariance = phi.beta.new)
+                 
+dc2 <- genData(500, def)
+di2 <- genCluster(dc2, "cID", numIndsVar = "n", level1ID = "id")
+di2 <- addColumns(defI, di2)
+
+geefit <- geeglm(y ~ x, family = "binomial", data = di2, 
+                 id = cID, corstr = "exchangeable" )
+summary(geefit)
+```
+
+### Addendum
+
+Above, I suggested that the estimator of the effect of `x` based on the beta model will have less variation than the estimator based on the beta-binomial model. I drew 5000 samples from the data generating process and estimated the models each time. Below is a density distribution of the estimates of each of the models from all 5000 iterations. As expected, the beta-binomial process has more variability, as do the related estimates; we can see this in the relative "peakedness"" of the beta density:
+
+![](/img/post-betabin/betabetabin.png)
+
+Also based on these 5000 iterations, the GEE model estimation appears to be less efficient than the beta-binomial model. This is not surprising since the beta-binomial model was the actual process that generated the data (so it is truly the correct model). The GEE model is robust to mis-specification of the correlation structure, but the price we pay for that robustness is a slightly less precise estimate (even if we happen to get the correlation structure right):
+
+![](/img/post-betabin/betabingee.png)
+
