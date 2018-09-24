@@ -1,0 +1,240 @@
+---
+title: 
+  "simstudy update: improved correlated binary outcomes"
+author: ''
+date: '2018-09-25'
+slug: simstudy-update-to-version-0-1-10
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>An updated version of the <code>simstudy</code> package (0.1.10) is now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html">CRAN</a>. The impetus for this release was a series of requests about generating correlated binary outcomes. In the last <a href="https://www.rdatagen.net/post/binary-beta-beta-binomial/">post</a>, I described a beta-binomial data generating process that uses the recently added beta distribution. In addition to that update, I’ve added functionality to <code>genCorGen</code> and <code>addCorGen</code>, functions which generate correlated data from non-Gaussian or normally distributed data such as Poisson, Gamma, and binary data. Most significantly, there is a newly implemented algorithm based on the work of <a href="https://www.tandfonline.com/doi/abs/10.1080/00031305.1991.10475828">Emrich &amp; Piedmonte</a>, which I mentioned the last time around.</p>
+<div id="limitation-of-copula-algorithm" class="section level3">
+<h3>Limitation of copula algorithm</h3>
+<p>The existing copula algorithm is limited when generating correlated binary data. (I did acknowledge this when I first <a href="https://www.rdatagen.net/post/simstudy-update-two-functions-for-correlation/">introduced</a> the new functions.) The generated marginal means are what we would expect. though the observed correlation on the binary scale is biased downwards towards zero. Using the copula algorithm, the specified correlation really pertains to the underlying normal data that is used in the data generation process. Information is lost when moving between the continuous and dichotomous distributions:</p>
+<pre class="r"><code>library(simstudy)
+
+set.seed(736258)
+d1 &lt;- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = &quot;binary&quot;, rho = 0.3, corstr = &quot;cs&quot;, wide = TRUE,
+                method = &quot;copula&quot;)
+
+d1</code></pre>
+<pre><code>##         id V1 V2 V3 V4
+##    1:    1  0  0  0  0
+##    2:    2  0  1  1  1
+##    3:    3  0  1  0  1
+##    4:    4  0  0  1  0
+##    5:    5  0  1  0  1
+##   ---                 
+##  996:  996  0  0  0  0
+##  997:  997  0  1  0  0
+##  998:  998  0  1  1  1
+##  999:  999  0  0  0  0
+## 1000: 1000  0  0  0  0</code></pre>
+<pre class="r"><code>d1[, .(V1 = mean(V1), V2 = mean(V2), 
+       V3 = mean(V3), V4 = mean(V4))]</code></pre>
+<pre><code>##       V1    V2    V3    V4
+## 1: 0.184 0.486 0.595 0.704</code></pre>
+<pre class="r"><code>d1[, round(cor(cbind(V1, V2, V3, V4)), 2)]</code></pre>
+<pre><code>##      V1   V2   V3   V4
+## V1 1.00 0.18 0.17 0.17
+## V2 0.18 1.00 0.19 0.23
+## V3 0.17 0.19 1.00 0.15
+## V4 0.17 0.23 0.15 1.00</code></pre>
+</div>
+<div id="the-ep-option-offers-an-improvement" class="section level3">
+<h3>The <em>ep</em> option offers an improvement</h3>
+<p>Data generated using the Emrich &amp; Piedmonte algorithm, done by specifying the “<em>ep</em>” method, does much better; the observed correlation is much closer to what we specified. (Note that the E&amp;P algorithm may restrict the range of possible correlations; if you specify a correlation outside of the range, an error message is issued.)</p>
+<pre class="r"><code>set.seed(736258)
+d2 &lt;- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = &quot;binary&quot;, rho = 0.3, corstr = &quot;cs&quot;, wide = TRUE,
+                method = &quot;ep&quot;)
+
+d2[, .(V1 = mean(V1), V2 = mean(V2), 
+       V3 = mean(V3), V4 = mean(V4))]</code></pre>
+<pre><code>##       V1    V2    V3    V4
+## 1: 0.199 0.504 0.611 0.706</code></pre>
+<pre class="r"><code>d2[, round(cor(cbind(V1, V2, V3, V4)), 2)]</code></pre>
+<pre><code>##      V1   V2   V3   V4
+## V1 1.00 0.33 0.33 0.29
+## V2 0.33 1.00 0.32 0.31
+## V3 0.33 0.32 1.00 0.28
+## V4 0.29 0.31 0.28 1.00</code></pre>
+<p>If we generate the data using the “long” form, we can fit a <em>GEE</em> marginal model to recover the parameters used in the data generation process:</p>
+<pre class="r"><code>library(geepack)
+
+set.seed(736258)
+d3 &lt;- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = &quot;binary&quot;, rho = 0.3, corstr = &quot;cs&quot;, wide = FALSE,
+                method = &quot;ep&quot;)
+
+geefit3 &lt;- geeglm(X ~ factor(period), id = id, data = d3, 
+                  family = binomial, corstr = &quot;exchangeable&quot;)
+
+summary(geefit3)</code></pre>
+<pre><code>## 
+## Call:
+## geeglm(formula = X ~ factor(period), family = binomial, data = d3, 
+##     id = id, corstr = &quot;exchangeable&quot;)
+## 
+##  Coefficients:
+##                 Estimate  Std.err  Wald Pr(&gt;|W|)    
+## (Intercept)     -1.39256  0.07921 309.1   &lt;2e-16 ***
+## factor(period)1  1.40856  0.08352 284.4   &lt;2e-16 ***
+## factor(period)2  1.84407  0.08415 480.3   &lt;2e-16 ***
+## factor(period)3  2.26859  0.08864 655.0   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)        1 0.01708
+## 
+## Correlation: Structure = exchangeable  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha   0.3114 0.01855
+## Number of clusters:   1000   Maximum cluster size: 4</code></pre>
+<p>And the point estimates for each variable on the probability scale:</p>
+<pre class="r"><code>round(1/(1+exp(1.3926 - c(0, 1.4086, 1.8441, 2.2686))), 2)</code></pre>
+<pre><code>## [1] 0.20 0.50 0.61 0.71</code></pre>
+</div>
+<div id="longitudinal-repeated-measures" class="section level3">
+<h3>Longitudinal (repeated) measures</h3>
+<p>One researcher wanted to generate individual-level longitudinal data that might be analyzed using a GEE model. This is not so different from what I just did, but incorporates a specific time trend to define the probabilities. In this case, the steps are to (1) generate longitudinal data using the <code>addPeriods</code> function, (2) define the longitudinal probabilities, and (3) generate correlated binary outcomes with an AR-1 correlation structure.</p>
+<pre class="r"><code>set.seed(393821)
+probform &lt;- &quot;-2 + 0.3 * period&quot;
+ 
+def1 &lt;- defDataAdd(varname = &quot;p&quot;, formula = probform, 
+                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
+
+dx &lt;- genData(1000)
+dx &lt;- addPeriods(dx, nPeriods = 4)
+dx &lt;- addColumns(def1, dx)
+
+dg &lt;- addCorGen(dx, nvars = 4,   
+                corMatrix = NULL, rho = .4, corstr = &quot;ar1&quot;, 
+                dist = &quot;binary&quot;, param1 = &quot;p&quot;, 
+                method = &quot;ep&quot;, formSpec = probform, 
+                periodvar = &quot;period&quot;)</code></pre>
+<p>The correlation matrix from the observed data is reasonably close to having an AR-1 structure, where <span class="math inline">\(\rho = 0.4\)</span>, <span class="math inline">\(\rho^2 = 0.16\)</span>, <span class="math inline">\(\rho^3 = 0.064\)</span>.</p>
+<pre class="r"><code>cor(dcast(dg, id ~ period, value.var = &quot;X&quot;)[,-1])</code></pre>
+<pre><code>##         0      1      2       3
+## 0 1.00000 0.4309 0.1762 0.04057
+## 1 0.43091 1.0000 0.3953 0.14089
+## 2 0.17618 0.3953 1.0000 0.36900
+## 3 0.04057 0.1409 0.3690 1.00000</code></pre>
+<p>And again, the model recovers the time trend parameter defined in variable <code>probform</code> as well as the correlation parameter:</p>
+<pre class="r"><code>geefit &lt;- geeglm(X ~ period, id = id, data = dg, corstr = &quot;ar1&quot;, 
+                 family = binomial)
+summary(geefit)</code></pre>
+<pre><code>## 
+## Call:
+## geeglm(formula = X ~ period, family = binomial, data = dg, id = id, 
+##     corstr = &quot;ar1&quot;)
+## 
+##  Coefficients:
+##             Estimate Std.err  Wald Pr(&gt;|W|)    
+## (Intercept)  -1.9598  0.0891 484.0   &lt;2e-16 ***
+## period        0.3218  0.0383  70.6   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Estimated Scale Parameters:
+##             Estimate Std.err
+## (Intercept)        1  0.0621
+## 
+## Correlation: Structure = ar1  Link = identity 
+## 
+## Estimated Correlation Parameters:
+##       Estimate Std.err
+## alpha    0.397  0.0354
+## Number of clusters:   1000   Maximum cluster size: 4</code></pre>
+</div>
+<div id="model-mis-specification" class="section level3">
+<h3>Model mis-specification</h3>
+<p>And just for fun, here is an example of how simulation might be used to investigate the performance of a model. Let’s say we are interested in the implications of mis-specifying the correlation structure. In this case, we can fit two GEE models (one correctly specified and one mis-specified) and assess the sampling properties of the estimates from each:</p>
+<pre class="r"><code>library(broom)
+
+dx &lt;- genData(100)
+dx &lt;- addPeriods(dx, nPeriods = 4)
+dx &lt;- addColumns(def1, dx)
+
+iter &lt;- 1000
+rescorrect &lt;- vector(&quot;list&quot;, iter)
+resmisspec &lt;- vector(&quot;list&quot;, iter)
+
+for (i in 1:iter) {
+  
+  dw &lt;- addCorGen(dx, nvars = 4,   
+                  corMatrix = NULL, rho = .5, corstr = &quot;ar1&quot;, 
+                  dist = &quot;binary&quot;, param1 = &quot;p&quot;, 
+                  method = &quot;ep&quot;, formSpec = probform, 
+                  periodvar = &quot;period&quot;)
+  
+  correctfit &lt;- geeglm(X ~ period, id = id, data = dw, 
+                       corstr = &quot;ar1&quot;, family = binomial)
+  
+  misfit     &lt;- geeglm(X ~ period, id = id, data = dw, 
+                       corstr = &quot;independence&quot;, family = binomial)
+    
+  rescorrect[[i]] &lt;- data.table(i, tidy(correctfit))
+  resmisspec[[i]] &lt;- data.table(i, tidy(misfit))
+}
+
+rescorrect &lt;- 
+  rbindlist(rescorrect)[term == &quot;period&quot;][, model := &quot;correct&quot;]
+
+resmisspec &lt;- 
+  rbindlist(resmisspec)[term == &quot;period&quot;][, model := &quot;misspec&quot;]</code></pre>
+<p>Here are the averages, standard deviation, and average standard error of the point estimates under the correct specification:</p>
+<pre class="r"><code>rescorrect[, c(mean(estimate), sd(estimate), mean(std.error))]</code></pre>
+<pre><code>## [1] 0.304 0.125 0.119</code></pre>
+<p>And for the incorrect specification:</p>
+<pre class="r"><code>resmisspec[, c(mean(estimate), sd(estimate), mean(std.error))]</code></pre>
+<pre><code>## [1] 0.303 0.126 0.121</code></pre>
+<p>The estimates of the time trend from both models are unbiased, and the observed standard error of the estimates are the same for each model, which in turn are not too far off from the estimated standard errors. This becomes quite clear when we look at the virtually identical densities of the estimates:</p>
+<p><img src="/post/2018-09-25-simstudy-update-to-version-0-1-10_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>As an added bonus, here is a conditional generalized mixed effects model of the larger data set generated earlier. The conditional estimates are quite different from the marginal GEE estimates, but this is <a href="https://www.rdatagen.net/post/mixed-effect-models-vs-gee/">not surprising</a> given the binary outcomes. (For comparison, the period coefficient was estimated using the marginal model to be 0.32)</p>
+<pre class="r"><code>library(lme4)
+
+glmerfit &lt;- glmer(X ~ period + (1 | id), data = dg, family = binomial)
+summary(glmerfit)</code></pre>
+<pre><code>## Generalized linear mixed model fit by maximum likelihood (Laplace
+##   Approximation) [glmerMod]
+##  Family: binomial  ( logit )
+## Formula: X ~ period + (1 | id)
+##    Data: dg
+## 
+##      AIC      BIC   logLik deviance df.resid 
+##     3595     3614    -1795     3589     3997 
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -1.437 -0.351 -0.284 -0.185  2.945 
+## 
+## Random effects:
+##  Groups Name        Variance Std.Dev.
+##  id     (Intercept) 2.38     1.54    
+## Number of obs: 4000, groups:  id, 1000
+## 
+## Fixed effects:
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)  -2.7338     0.1259   -21.7   &lt;2e-16 ***
+## period        0.4257     0.0439     9.7   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##        (Intr)
+## period -0.700</code></pre>
+</div>

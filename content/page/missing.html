@@ -26,30 +26,30 @@ missMat &lt;- genMiss(dtAct, defM, idvars = &quot;id&quot;)
 dtObs &lt;- genObs(dtAct, missMat, idvars = &quot;id&quot;)</code></pre>
 <pre class="r"><code>missMat</code></pre>
 <pre><code>##         id x1 x2 x3 u m
-##    1:    1  1  0  0 1 0
-##    2:    2  0  1  0 1 0
-##    3:    3  0  0  0 1 0
+##    1:    1  0  0  0 1 0
+##    2:    2  0  0  0 1 0
+##    3:    3  1  0  1 1 0
 ##    4:    4  0  0  0 1 0
-##    5:    5  0  1  1 1 0
+##    5:    5  1  0  0 1 0
 ##   ---                  
-##  996:  996  0  0  0 1 0
-##  997:  997  0  0  1 1 0
+##  996:  996  0  0  1 1 0
+##  997:  997  0  0  0 1 0
 ##  998:  998  0  1  0 1 0
 ##  999:  999  0  0  0 1 0
-## 1000: 1000  0  0  1 1 0</code></pre>
+## 1000: 1000  0  0  0 1 0</code></pre>
 <pre class="r"><code>dtObs</code></pre>
 <pre><code>##         id m  u       x1         x2        x3
-##    1:    1 0 NA       NA  0.6590805 -1.169202
-##    2:    2 1 NA 38.70711         NA 40.311065
-##    3:    3 1 NA 19.06413 19.9981987 22.187977
-##    4:    4 0 NA 22.71964 20.7525990 18.714869
-##    5:    5 1 NA 41.82288         NA        NA
+##    1:    1 1 NA 20.14811 17.6445216 19.543373
+##    2:    2 0 NA 22.03182 20.0530503 22.684190
+##    3:    3 1 NA       NA 39.6944740        NA
+##    4:    4 1 NA 39.59987 38.0281535 36.929048
+##    5:    5 0 NA       NA  0.1631253  1.949795
 ##   ---                                        
-##  996:  996 0 NA 20.03208 20.6907266 18.293667
-##  997:  997 0 NA 21.57096 20.4470133        NA
-##  998:  998 1 NA 17.41586         NA 20.668810
-##  999:  999 0 NA 19.68123 18.2006626 19.858793
-## 1000: 1000 0 NA 20.19783 22.0045577        NA</code></pre>
+##  996:  996 1 NA 18.47234 19.8239834        NA
+##  997:  997 0 NA 19.42042 19.3470431 20.215294
+##  998:  998 0 NA 20.47072         NA 17.530028
+##  999:  999 0 NA 22.28069 17.2332405 20.684126
+## 1000: 1000 1 NA 42.14420 39.8468313 37.940967</code></pre>
 <p>The impacts of the various data mechanisms on estimation can be seen with a simple calculation of means using both the “true” data set without missing data as a comparison for the “observed” data set. Since <code>x1</code> is MCAR, the averages for both data sets are roughly equivalent. However, we can see below that estimates for <code>x2</code> and <code>x3</code> are biased, as the difference between observed and actual is not close to 0:</p>
 <pre class="r"><code># Two functions to calculate means and compare them
 
@@ -70,26 +70,26 @@ meanObs &lt;- dtObs[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3))]
 
 showDif(meanAct, meanObs)</code></pre>
 <pre><code>##              x1   x2   x3
-## Actual     20.6 20.7 20.7
-## Observed   20.9 19.0 19.0
-## Difference -0.3  1.7  1.7</code></pre>
+## Actual     19.7 19.7 19.7
+## Observed   19.6 18.0 17.9
+## Difference  0.1  1.7  1.8</code></pre>
 <p>After adjusting for the measured covariate <code>m</code>, the bias for the estimate of the mean of <code>x2</code> is mitigated, but not for <code>x3</code>, since <code>u</code> is not observed:</p>
 <pre class="r"><code>meanActm &lt;- dtAct[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3)), keyby = m]
 meanObsm &lt;- dtObs[, .(x1 = rmean(x1), x2 = rmean(x2), x3 = rmean(x3)), keyby = m]</code></pre>
 <pre class="r"><code># compare observed and actual when m = 0
 
 showDif(meanActm[m == 0, .(x1, x2, x3)], meanObsm[m == 0, .(x1, x2, x3)])</code></pre>
-<pre><code>##              x1   x2   x3
-## Actual     10.8 10.8 10.7
-## Observed   10.8 10.8  9.5
-## Difference  0.0  0.0  1.2</code></pre>
+<pre><code>##             x1  x2  x3
+## Actual     9.8 9.9 9.9
+## Observed   9.8 9.9 7.9
+## Difference 0.0 0.0 2.0</code></pre>
 <pre class="r"><code># compare observed and actual when m = 1
 
 showDif(meanActm[m == 1, .(x1, x2, x3)], meanObsm[m == 1, .(x1, x2, x3)])</code></pre>
 <pre><code>##              x1   x2   x3
-## Actual     30.6 30.6 30.7
-## Observed   30.8 30.4 29.0
-## Difference -0.2  0.2  1.7</code></pre>
+## Actual     29.5 29.5 29.4
+## Observed   29.3 29.2 27.7
+## Difference  0.2  0.3  1.7</code></pre>
 </div>
 <div id="longitudinal-data-with-missingness" class="section level2">
 <h2>Longitudinal data with missingness</h2>
@@ -119,7 +119,7 @@ missMatLong &lt;- genMiss(dtTime, defMlong, idvars = c(&quot;id&quot;, &quot;rx&
 <p>Here is a conceptual plot that shows the pattern of missingness. Each row represents an individual, and each box represents a time period. A box that is colored reflects missing data; a box colored grey reflects observed. The missingness pattern is shown for two variables <code>x1</code> and <code>y</code>:</p>
 <p><img src="/page/missing_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
 <p>In the second case, missingness is monotonic; once a subject misses a measurement for <code>y</code>, there are no subsequent measurements:</p>
-<pre class="r"><code># missingness for y is not monotonic
+<pre class="r"><code># missingness for y is monotonic
 
 defMlong &lt;- defMiss(varname = &quot;x1&quot;, formula = 0.2, baseline = TRUE)
 defMlong &lt;- defMiss(defMlong, varname = &quot;y&quot;, formula = &quot;-1.8 - 1.5 * rx + .25*period&quot;, 

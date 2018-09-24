@@ -1,0 +1,186 @@
+---
+title: 
+  "simstudy update: improved correlated binary outcomes"
+author: ''
+date: '2018-09-25'
+slug: simstudy-update-to-version-0-1-10
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+An updated version of the `simstudy` package (0.1.10) is now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html). The impetus for this release was a series of requests about generating correlated binary outcomes. In the last [post](https://www.rdatagen.net/post/binary-beta-beta-binomial/), I described a beta-binomial data generating process that uses the recently added beta distribution. In addition to that update, I've added functionality to `genCorGen` and `addCorGen`, functions which generate correlated data from non-Gaussian or normally distributed data such as Poisson, Gamma, and binary data. Most significantly, there is a newly implemented algorithm based on the work of [Emrich & Piedmonte](https://www.tandfonline.com/doi/abs/10.1080/00031305.1991.10475828), which I mentioned the last time around.
+
+### Limitation of copula algorithm
+
+The existing copula algorithm is limited when generating correlated binary data. (I did acknowledge this when I first [introduced](https://www.rdatagen.net/post/simstudy-update-two-functions-for-correlation/) the new functions.) The generated marginal means are what we would expect. though the observed correlation on the binary scale is biased downwards towards zero. Using the copula algorithm, the specified correlation really pertains to the underlying normal data that is used in the data generation process. Information is lost when moving between the continuous and dichotomous distributions:
+
+```{r, message = FALSE}
+library(simstudy)
+
+set.seed(736258)
+d1 <- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = "binary", rho = 0.3, corstr = "cs", wide = TRUE,
+                method = "copula")
+
+d1
+
+d1[, .(V1 = mean(V1), V2 = mean(V2), 
+       V3 = mean(V3), V4 = mean(V4))]
+
+d1[, round(cor(cbind(V1, V2, V3, V4)), 2)]
+```
+
+
+### The *ep* option offers an improvement
+
+Data generated using the Emrich & Piedmonte algorithm, done by specifying the "*ep*" method, does much better; the observed correlation is much closer to what we specified. (Note that the E&P algorithm may restrict the range of possible correlations; if you specify a correlation outside of the range, an error message is issued.)
+
+```{r}
+set.seed(736258)
+d2 <- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = "binary", rho = 0.3, corstr = "cs", wide = TRUE,
+                method = "ep")
+
+d2[, .(V1 = mean(V1), V2 = mean(V2), 
+       V3 = mean(V3), V4 = mean(V4))]
+
+d2[, round(cor(cbind(V1, V2, V3, V4)), 2)]
+```
+
+If we generate the data using the "long" form, we can fit a *GEE* marginal model to recover the parameters used in the data generation process:
+
+```{r, message = FALSE}
+library(geepack)
+
+set.seed(736258)
+d3 <- genCorGen(n = 1000, nvars = 4, params1 = c(0.2, 0.5, 0.6, 0.7),
+                dist = "binary", rho = 0.3, corstr = "cs", wide = FALSE,
+                method = "ep")
+
+geefit3 <- geeglm(X ~ factor(period), id = id, data = d3, 
+                  family = binomial, corstr = "exchangeable")
+
+summary(geefit3)
+```
+
+And the point estimates for each variable on the probability scale:
+
+```{r}
+round(1/(1+exp(1.3926 - c(0, 1.4086, 1.8441, 2.2686))), 2)
+```
+
+### Longitudinal (repeated) measures
+
+One researcher wanted to generate individual-level longitudinal data that might be analyzed using a GEE model. This is not so different from what I just did, but incorporates a specific time trend to define the probabilities. In this case, the steps are to (1) generate longitudinal data using the `addPeriods` function, (2) define the longitudinal probabilities, and (3) generate correlated binary outcomes with an AR-1 correlation structure.
+
+```{r, message = FALSE}
+set.seed(393821)
+probform <- "-2 + 0.3 * period"
+ 
+def1 <- defDataAdd(varname = "p", formula = probform, 
+                   dist = "nonrandom", link = "logit")
+
+dx <- genData(1000)
+dx <- addPeriods(dx, nPeriods = 4)
+dx <- addColumns(def1, dx)
+
+dg <- addCorGen(dx, nvars = 4,   
+                corMatrix = NULL, rho = .4, corstr = "ar1", 
+                dist = "binary", param1 = "p", 
+                method = "ep", formSpec = probform, 
+                periodvar = "period")
+```
+
+The correlation matrix from the observed data is reasonably close to having an AR-1 structure, where $\rho = 0.4$, $\rho^2 = 0.16$,   $\rho^3 = 0.064$.
+
+```{r}
+cor(dcast(dg, id ~ period, value.var = "X")[,-1])
+```
+
+And again, the model recovers the time trend parameter defined in variable `probform` as well as the correlation parameter:
+
+```{r}
+geefit <- geeglm(X ~ period, id = id, data = dg, corstr = "ar1", 
+                 family = binomial)
+summary(geefit)
+```
+
+### Model mis-specification
+
+And just for fun, here is an example of how simulation might be used to investigate the performance of a model. Let's say we are interested in the implications of mis-specifying the correlation structure. In this case, we can fit two GEE models (one correctly specified and one mis-specified) and assess the sampling properties of the estimates from each:
+
+```{r}
+library(broom)
+
+dx <- genData(100)
+dx <- addPeriods(dx, nPeriods = 4)
+dx <- addColumns(def1, dx)
+
+iter <- 1000
+rescorrect <- vector("list", iter)
+resmisspec <- vector("list", iter)
+
+for (i in 1:iter) {
+  
+  dw <- addCorGen(dx, nvars = 4,   
+                  corMatrix = NULL, rho = .5, corstr = "ar1", 
+                  dist = "binary", param1 = "p", 
+                  method = "ep", formSpec = probform, 
+                  periodvar = "period")
+  
+  correctfit <- geeglm(X ~ period, id = id, data = dw, 
+                       corstr = "ar1", family = binomial)
+  
+  misfit     <- geeglm(X ~ period, id = id, data = dw, 
+                       corstr = "independence", family = binomial)
+    
+  rescorrect[[i]] <- data.table(i, tidy(correctfit))
+  resmisspec[[i]] <- data.table(i, tidy(misfit))
+}
+
+rescorrect <- 
+  rbindlist(rescorrect)[term == "period"][, model := "correct"]
+
+resmisspec <- 
+  rbindlist(resmisspec)[term == "period"][, model := "misspec"]
+```
+
+Here are the averages, standard deviation, and average standard error of the point estimates under the correct specification:
+
+```{r}
+rescorrect[, c(mean(estimate), sd(estimate), mean(std.error))]
+```
+
+And for the incorrect specification:
+
+```{r}
+resmisspec[, c(mean(estimate), sd(estimate), mean(std.error))]
+```
+
+The estimates of the time trend from both models are unbiased, and the observed standard error of the estimates are the same for each model, which in turn are not too far off from the estimated standard errors. This becomes quite clear when we look at the virtually identical densities of the estimates:
+
+```{r, echo = FALSE, fig.width=7, fig.height = 4}
+dplot <- rbind(rescorrect, resmisspec)
+
+ggplot(data = dplot, aes(x=estimate, group = model)) +
+  geom_density(aes(fill = model), alpha = .7) +
+  facet_grid(.~factor(model, labels=c("Correct correlation model", 
+                                      "Mis-specified correlation model"))) +
+  scale_x_continuous(breaks = c(0, .3, .6), name = "estimated period effect") +
+  theme(legend.position = "none",
+        panel.grid = element_blank()) +
+  scale_fill_manual(values = c("#4477AA", "#CC6677"))
+```
+
+### Addendum
+
+As an added bonus, here is a conditional generalized mixed effects model of the larger data set generated earlier. The conditional estimates are quite different from the marginal GEE estimates, but this is [not surprising](https://www.rdatagen.net/post/mixed-effect-models-vs-gee/) given the binary outcomes. (For comparison, the period coefficient was estimated using the marginal model to be 0.32)
+
+```{r, message = FALSE}
+library(lme4)
+
+glmerfit <- glmer(X ~ period + (1 | id), data = dg, family = binomial)
+summary(glmerfit)
+```
