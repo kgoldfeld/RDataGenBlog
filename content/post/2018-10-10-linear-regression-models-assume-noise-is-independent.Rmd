@@ -1,0 +1,215 @@
+---
+title: In regression, we assume noise is independent of all measured predictors. What happens if it isn't?
+author: ''
+date: '2018-10-09'
+slug: linear-regression-models-assume-noise-is-independent
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+A number of key assumptions underlie the linear regression model - among them linearity and normally distributed noise (error) terms with constant variance In this post, I consider an additional assumption: the unobserved noise is uncorrelated with any covariates or predictors in the model.
+
+In this simple model:
+
+$$Y_i = \beta_0 + \beta_1X_i + e_i,$$
+
+$Y_i$ has both a structural and stochastic (random) component. The structural component is the linear relationship of $Y$ with $X$. The random element is often called the $error$ term, but I prefer to think of it as $noise$. $e_i$ is not measuring something that has gone awry, but rather it is variation emanating from some unknown, unmeasurable source or sources for each individual $i$. It represents everything we haven't been able to measure.
+
+Our goal is to estimate $\beta_1$, which characterizes the structural linear relationship of $X$ and $Y$. When we estimate the model, we get a quantity $\hat{\beta_1}$, and we hope that on average we do pretty well (i.e. if we were to estimate $\beta_1$ repeatedly, $E[\hat{\beta_1}] = \beta_1$). In order for us to make sure that is the case, we need to assume that $e_i$ and $X_i$ are independent. In other words, the sources that comprise $e_i$ must not be related in way to whatever it is that $X_i$ is measuring.
+
+### Correlation without causation
+
+First, I'll generate $X's$ and $e's$ that are correlated with a using a data generation process that makes no assumptions about the underlying causal process. The provides a picture of how $\hat{\beta_1}$ might diverge from the true $\beta_1$.
+
+```{r}
+library(simstudy)
+set.seed(3222)
+
+dT <- genCorData(500, mu = c(0, 0), sigma = c(sqrt(1.25), 1), 
+                 rho = 0.446, corstr = "cs", cnames = c("X","eCor"))
+```
+
+Outcome $Y$ is based on $X$ and $e_{cor}$. For comparison's sake, I generate a parallel outcome that is also based on $X$ but the noise variable $e_{ind}$ is independent of $X$:
+
+```{r}
+def <- defDataAdd(varname = "Ycor", formula = "X + eCor",
+                  dist = "nonrandom")
+def <- defDataAdd(def, varname = "eInd", formula = 0, variance = 1,
+                  dist = "normal" )
+def <- defDataAdd(def, varname = "Yind", formula = "X + eInd",
+                  dist = "nonrandom")
+
+dT <- addColumns(def, dT)
+dT
+```
+
+The observed $X$ and $e_{cor}$ are correlated, but $X$ and $e_{ind}$ are not:
+
+```{r}
+dT[, cor(cbind(X, eCor))]
+dT[, cor(cbind(X, eInd))]
+```
+
+On the left below is a plot of outcome $Y_{ind}$ as a function of $X$. The red line is the true structural component defining the relationship between these two variables. The points are scattered around that line without any clear pattern, which is indicative of independent noise. 
+
+The plot on the right shows $Y_{cor}$ as a function of $X$. Since the stochastic component of $Y_{cor}$ is the correlated noise, the lower $X$ values are more likely to fall below the true line, and the larger $X$ values above. The red line does not appear to be a very good fit in this case; this is the bias induced by correlated noise.
+
+```{r, fig.width = 9.6, fig.height=4, echo = FALSE, warning = FALSE}
+
+blue <-  "#4477AA"
+red <- "#CC6677"
+
+pcor <- ggplot(data = dT, aes(y = Ycor, x = X)) +
+  geom_point(size = 1, alpha = .2) +
+  theme(panel.grid = element_blank()) +
+  geom_abline(intercept = 0, slope=1, color = red) +
+  scale_y_continuous(limits = c(-6, 6), name = "Y") +
+  scale_x_continuous(limits = c(-6, 6)) +
+  ggtitle("Correlated noise")
+
+pind <- ggplot(data = dT, aes(y = Yind, x = X)) +
+  geom_point(size = 1, alpha = .2) +
+  theme(panel.grid = element_blank()) +
+  geom_abline(intercept = 0, slope=1, color = red) +
+  scale_y_continuous(limits = c(-6, 6), name = "Y") +
+  scale_x_continuous(limits = c(-6, 6)) +
+  ggtitle("Uncorrelated noise")
+
+gridExtra::grid.arrange(pind, pcor, nrow = 1)
+```
+
+The model fits corroborate the visual inspection. $\hat{\beta_1}$ based on uncorrelated noise is close to 1, the true value:
+
+```{r}
+fit2 <- lm(Yind ~ X, data = dT)
+rndTidy(fit2)
+```
+
+$\hat{\beta_1}$ based on correlated noise is 1.42, larger than the true value:
+
+```{r}
+fit1 <- lm(Ycor ~ X, data = dT)
+rndTidy(fit1)
+```
+
+A plot of the fitted (blue) line based on the biased estimate clearly shows the problem of regression estimation in this context:
+
+```{r, fig.width=4.8, fig.height=4, echo = FALSE, warning=FALSE}
+ggplot(data = dT, aes(y = Ycor, x = X)) +
+  geom_point(size = 1, alpha = .2) +
+  theme(panel.grid = element_blank()) +
+  geom_abline(intercept = coef(fit1)[1], slope=coef(fit1)[2], color = blue) +
+  geom_abline(intercept = 0, slope=1, color = red) +
+  scale_y_continuous(limits = c(-6, 6), name = "Y") +
+  scale_x_continuous(limits = c(-6, 6)) +
+  ggtitle("Correlated noise")
+```
+
+### Thinking about underlying causality and noise
+
+Here is a pure thought exercise to consider this bias induced by the correlation. Fundamentally, the implications depend on the purpose of the model. If we are using the model for description or prediction, we may not care about the bias. For example, if we are *describing* how $Y$ changes as $X$ changes in some population, the underlying data generation process may not be of interest. Likewise, if our goal is predicting $Y$ based on an observed $X$, the biased estimate of $\beta_1$ may be adequate.
+
+However, if we are interested in understanding how *intervening* or *changing* the level of $X$ at the individual level effects the outcome $Y$ for that individual, then an unbiased estimate of $\beta_1$ becomes more important, and noise that is correlated with the predictor of interest could be problematic.
+
+However, in a causal context, all noise may not be created equally. Consider these two different causal models:
+
+![](/img/post-correrrors/confounding_mediation.png)
+
+We can generate identically distributed data based on these two mechanisms:
+
+```{r}
+# Confounding
+
+defc <- defData(varname = "U", formula=0, variance=1, dist="normal")
+defc <- defData(defc, "X", "0.5*U", 1, "normal")
+defc <- defData(defc, "Y", "X + U", dist = "nonrandom")
+
+dcon <- genData(1000, defc)
+```
+
+
+```{r}
+# Mediation
+
+defm <- defData(varname="X", formula=0, variance =1.25, dist="normal")
+defm <- defData(defm, "U", ".4*X", .8, "normal")
+defm <- defData(defm, "Y", "X + U", dist = "nonrandom")
+
+dmed <- genData(1000, defm)
+```
+
+The observed covariance between $X$ and $U$ (the noise) is similar for the two processes ... 
+
+```{r}
+dcon[, var(cbind(X,U))]
+dmed[, var(cbind(X,U))]
+```
+
+... as is the model fit for each:
+
+```{r, echo=FALSE, fig.width=9.6, fig.height=4, warning=FALSE}
+
+fitcon <- lm(Y ~ X, data = dcon)
+
+pcon <- ggplot(data = dcon, aes(x = X, y = Y)) +
+  geom_point(size = 1, alpha = .2) +
+  scale_x_continuous(limits = c(-6, 6)) +
+  scale_y_continuous(limits = c(-6, 6)) +
+  geom_abline(intercept = coef(fitcon)[1], slope=coef(fitcon)[2], color = blue) +
+  geom_abline(intercept = 0, slope = 1, color = red) +
+  theme(panel.grid = element_blank()) +
+  ggtitle("Confounding")
+
+fitmed <- lm(Y ~ X, data = dmed)
+
+pmed <- ggplot(data = dcon, aes(x = X, y = Y)) +
+  geom_point(size = 1, alpha = .2) +
+  scale_x_continuous(limits = c(-6, 6)) +
+  scale_y_continuous(limits = c(-6, 6)) +
+  geom_abline(intercept = coef(fitmed)[1], slope=coef(fitmed)[2], color = blue) +
+  geom_abline(intercept = 0, slope = 1, color = red) +
+  theme(panel.grid = element_blank()) +
+  ggtitle("Mediation")
+
+gridExtra::grid.arrange(pcon, pmed, nrow = 1 )
+```
+
+And here is a pair of histograms of estimated values of $\beta_1$ for each data generating process, based on 1000 replications of samples of 100 individuals. Again, pretty similar:
+
+```{r, echo = FALSE, fig.height = 3.5, fig.width=9}
+set.seed(3872)
+iter <- 1000
+
+rescon <- vector(mode = "list", length = iter)
+resmed <- vector(mode = "list", length = iter)
+
+for (i in 1:iter) {
+  
+  dcon <- genData(100, defc)
+  dmed<- genData(100, defm)
+  
+  fitcon <- lm(Y ~ X, data = dcon)
+  fitmed <- lm(Y ~ X, data = dmed)
+  
+  rescon[[i]] <- data.table(dgp = "confounding", i, est = rndTidy(fitcon)[2, estimate])
+  resmed[[i]] <- data.table(dgp = "mediation", i, est = rndTidy(fitmed)[2, estimate])
+  
+}
+
+res <- rbind(rbindlist(rescon), rbindlist(resmed))
+# res[, .(mean = round(mean(est),2), sd = round(sd(est),3)), keyby = dgp]
+
+ggplot(data = res, aes(x = est)) +
+  geom_histogram(aes(fill = dgp), binwidth = .05, alpha = .8) +
+  facet_grid(~dgp) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  scale_fill_manual(values = c(red, blue )) +
+  scale_x_continuous(name = expression(hat(beta)[1]))
+```
+
+Despite the apparent identical nature of the two data generating processes, I would argue that biased estimation is only a problem in the context of confounding noise. If we intervene on $X$ without changing $U$, which could occur in the context of unmeasured confounding, the causal effect of $X$ on $Y$ would be overestimated by the regression model. However, if we intervene on $X$ in the context of a process that involves mediation, it would be appropriate to consider all the post-intervention effects of changing $X$, so the "biased" estimate may in fact be the appropriate one.
+
+The key here, of course, is that we cannot verify this unobserved process. By definition, the noise is unobservable and stochastic. But, if we are developing models that involve causal relations of unmeasured quantities, we have to be explicit about the causal nature underlying these unmeasured quantities. That way, we know if we should be concerned about hidden correlation or not.

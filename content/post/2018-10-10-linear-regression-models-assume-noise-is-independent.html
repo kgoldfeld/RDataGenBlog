@@ -1,0 +1,112 @@
+---
+title: In regression, we assume noise is independent of all measured predictors. What happens if it isn't?
+author: ''
+date: '2018-10-09'
+slug: linear-regression-models-assume-noise-is-independent
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>A number of key assumptions underlie the linear regression model - among them linearity and normally distributed noise (error) terms with constant variance In this post, I consider an additional assumption: the unobserved noise is uncorrelated with any covariates or predictors in the model.</p>
+<p>In this simple model:</p>
+<p><span class="math display">\[Y_i = \beta_0 + \beta_1X_i + e_i,\]</span></p>
+<p><span class="math inline">\(Y_i\)</span> has both a structural and stochastic (random) component. The structural component is the linear relationship of <span class="math inline">\(Y\)</span> with <span class="math inline">\(X\)</span>. The random element is often called the <span class="math inline">\(error\)</span> term, but I prefer to think of it as <span class="math inline">\(noise\)</span>. <span class="math inline">\(e_i\)</span> is not measuring something that has gone awry, but rather it is variation emanating from some unknown, unmeasurable source or sources for each individual <span class="math inline">\(i\)</span>. It represents everything we haven’t been able to measure.</p>
+<p>Our goal is to estimate <span class="math inline">\(\beta_1\)</span>, which characterizes the structural linear relationship of <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span>. When we estimate the model, we get a quantity <span class="math inline">\(\hat{\beta_1}\)</span>, and we hope that on average we do pretty well (i.e. if we were to estimate <span class="math inline">\(\beta_1\)</span> repeatedly, <span class="math inline">\(E[\hat{\beta_1}] = \beta_1\)</span>). In order for us to make sure that is the case, we need to assume that <span class="math inline">\(e_i\)</span> and <span class="math inline">\(X_i\)</span> are independent. In other words, the sources that comprise <span class="math inline">\(e_i\)</span> must not be related in way to whatever it is that <span class="math inline">\(X_i\)</span> is measuring.</p>
+<div id="correlation-without-causation" class="section level3">
+<h3>Correlation without causation</h3>
+<p>First, I’ll generate <span class="math inline">\(X&#39;s\)</span> and <span class="math inline">\(e&#39;s\)</span> that are correlated with a using a data generation process that makes no assumptions about the underlying causal process. The provides a picture of how <span class="math inline">\(\hat{\beta_1}\)</span> might diverge from the true <span class="math inline">\(\beta_1\)</span>.</p>
+<pre class="r"><code>library(simstudy)
+set.seed(3222)
+
+dT &lt;- genCorData(500, mu = c(0, 0), sigma = c(sqrt(1.25), 1), 
+                 rho = 0.446, corstr = &quot;cs&quot;, cnames = c(&quot;X&quot;,&quot;eCor&quot;))</code></pre>
+<p>Outcome <span class="math inline">\(Y\)</span> is based on <span class="math inline">\(X\)</span> and <span class="math inline">\(e_{cor}\)</span>. For comparison’s sake, I generate a parallel outcome that is also based on <span class="math inline">\(X\)</span> but the noise variable <span class="math inline">\(e_{ind}\)</span> is independent of <span class="math inline">\(X\)</span>:</p>
+<pre class="r"><code>def &lt;- defDataAdd(varname = &quot;Ycor&quot;, formula = &quot;X + eCor&quot;,
+                  dist = &quot;nonrandom&quot;)
+def &lt;- defDataAdd(def, varname = &quot;eInd&quot;, formula = 0, variance = 1,
+                  dist = &quot;normal&quot; )
+def &lt;- defDataAdd(def, varname = &quot;Yind&quot;, formula = &quot;X + eInd&quot;,
+                  dist = &quot;nonrandom&quot;)
+
+dT &lt;- addColumns(def, dT)
+dT</code></pre>
+<pre><code>##       id          X       eCor       Ycor       eInd        Yind
+##   1:   1 -1.1955846 -0.1102777 -1.3058624  1.1369435 -0.05864113
+##   2:   2 -0.4056655 -0.6709221 -1.0765875 -0.8441431 -1.24980856
+##   3:   3 -0.5893938  1.2146488  0.6252550 -0.2666314 -0.85602516
+##   4:   4  0.9090881  0.3108645  1.2199526  0.3397857  1.24887377
+##   5:   5 -2.6139989 -1.7382986 -4.3522975 -0.1793858 -2.79338470
+##  ---                                                            
+## 496: 496  3.1615624  0.6160661  3.7776285  0.4658992  3.62746167
+## 497: 497  0.6416140  0.1031316  0.7447456 -0.1440062  0.49760784
+## 498: 498  0.1340967 -0.4029388 -0.2688421  0.6165793  0.75067604
+## 499: 499 -1.2381040  0.8197002 -0.4184038  0.6717294 -0.56637463
+## 500: 500 -0.7159373 -0.0905287 -0.8064660  0.9148175  0.19888019</code></pre>
+<p>The observed <span class="math inline">\(X\)</span> and <span class="math inline">\(e_{cor}\)</span> are correlated, but <span class="math inline">\(X\)</span> and <span class="math inline">\(e_{ind}\)</span> are not:</p>
+<pre class="r"><code>dT[, cor(cbind(X, eCor))]</code></pre>
+<pre><code>##              X      eCor
+## X    1.0000000 0.4785528
+## eCor 0.4785528 1.0000000</code></pre>
+<pre class="r"><code>dT[, cor(cbind(X, eInd))]</code></pre>
+<pre><code>##                X        eInd
+## X     1.00000000 -0.02346812
+## eInd -0.02346812  1.00000000</code></pre>
+<p>On the left below is a plot of outcome <span class="math inline">\(Y_{ind}\)</span> as a function of <span class="math inline">\(X\)</span>. The red line is the true structural component defining the relationship between these two variables. The points are scattered around that line without any clear pattern, which is indicative of independent noise.</p>
+<p>The plot on the right shows <span class="math inline">\(Y_{cor}\)</span> as a function of <span class="math inline">\(X\)</span>. Since the stochastic component of <span class="math inline">\(Y_{cor}\)</span> is the correlated noise, the lower <span class="math inline">\(X\)</span> values are more likely to fall below the true line, and the larger <span class="math inline">\(X\)</span> values above. The red line does not appear to be a very good fit in this case; this is the bias induced by correlated noise.</p>
+<p><img src="/post/2018-10-10-linear-regression-models-assume-noise-is-independent_files/figure-html/unnamed-chunk-4-1.png" width="921.6" /></p>
+<p>The model fits corroborate the visual inspection. <span class="math inline">\(\hat{\beta_1}\)</span> based on uncorrelated noise is close to 1, the true value:</p>
+<pre class="r"><code>fit2 &lt;- lm(Yind ~ X, data = dT)
+rndTidy(fit2)</code></pre>
+<pre><code>##           term estimate std.error statistic p.value
+## 1: (Intercept)     0.06      0.05      1.37    0.17
+## 2:           X     0.98      0.04     25.75    0.00</code></pre>
+<p><span class="math inline">\(\hat{\beta_1}\)</span> based on correlated noise is 1.42, larger than the true value:</p>
+<pre class="r"><code>fit1 &lt;- lm(Ycor ~ X, data = dT)
+rndTidy(fit1)</code></pre>
+<pre><code>##           term estimate std.error statistic p.value
+## 1: (Intercept)    -0.01      0.04     -0.25     0.8
+## 2:           X     1.42      0.03     41.28     0.0</code></pre>
+<p>A plot of the fitted (blue) line based on the biased estimate clearly shows the problem of regression estimation in this context:</p>
+<p><img src="/post/2018-10-10-linear-regression-models-assume-noise-is-independent_files/figure-html/unnamed-chunk-7-1.png" width="460.8" /></p>
+</div>
+<div id="thinking-about-underlying-causality-and-noise" class="section level3">
+<h3>Thinking about underlying causality and noise</h3>
+<p>Here is a pure thought exercise to consider this bias induced by the correlation. Fundamentally, the implications depend on the purpose of the model. If we are using the model for description or prediction, we may not care about the bias. For example, if we are <em>describing</em> how <span class="math inline">\(Y\)</span> changes as <span class="math inline">\(X\)</span> changes in some population, the underlying data generation process may not be of interest. Likewise, if our goal is predicting <span class="math inline">\(Y\)</span> based on an observed <span class="math inline">\(X\)</span>, the biased estimate of <span class="math inline">\(\beta_1\)</span> may be adequate.</p>
+<p>However, if we are interested in understanding how <em>intervening</em> or <em>changing</em> the level of <span class="math inline">\(X\)</span> at the individual level effects the outcome <span class="math inline">\(Y\)</span> for that individual, then an unbiased estimate of <span class="math inline">\(\beta_1\)</span> becomes more important, and noise that is correlated with the predictor of interest could be problematic.</p>
+<p>However, in a causal context, all noise may not be created equally. Consider these two different causal models:</p>
+<p><img src="/img/post-correrrors/confounding_mediation.png" /></p>
+<p>We can generate identically distributed data based on these two mechanisms:</p>
+<pre class="r"><code># Confounding
+
+defc &lt;- defData(varname = &quot;U&quot;, formula=0, variance=1, dist=&quot;normal&quot;)
+defc &lt;- defData(defc, &quot;X&quot;, &quot;0.5*U&quot;, 1, &quot;normal&quot;)
+defc &lt;- defData(defc, &quot;Y&quot;, &quot;X + U&quot;, dist = &quot;nonrandom&quot;)
+
+dcon &lt;- genData(1000, defc)</code></pre>
+<pre class="r"><code># Mediation
+
+defm &lt;- defData(varname=&quot;X&quot;, formula=0, variance =1.25, dist=&quot;normal&quot;)
+defm &lt;- defData(defm, &quot;U&quot;, &quot;.4*X&quot;, .8, &quot;normal&quot;)
+defm &lt;- defData(defm, &quot;Y&quot;, &quot;X + U&quot;, dist = &quot;nonrandom&quot;)
+
+dmed &lt;- genData(1000, defm)</code></pre>
+<p>The observed covariance between <span class="math inline">\(X\)</span> and <span class="math inline">\(U\)</span> (the noise) is similar for the two processes …</p>
+<pre class="r"><code>dcon[, var(cbind(X,U))]</code></pre>
+<pre><code>##           X         U
+## X 1.2516199 0.5807696
+## U 0.5807696 1.0805321</code></pre>
+<pre class="r"><code>dmed[, var(cbind(X,U))]</code></pre>
+<pre><code>##           X         U
+## X 1.2365285 0.5401577
+## U 0.5401577 1.0695366</code></pre>
+<p>… as is the model fit for each:</p>
+<p><img src="/post/2018-10-10-linear-regression-models-assume-noise-is-independent_files/figure-html/unnamed-chunk-11-1.png" width="921.6" /></p>
+<p>And here is a pair of histograms of estimated values of <span class="math inline">\(\beta_1\)</span> for each data generating process, based on 1000 replications of samples of 100 individuals. Again, pretty similar:</p>
+<p><img src="/post/2018-10-10-linear-regression-models-assume-noise-is-independent_files/figure-html/unnamed-chunk-12-1.png" width="864" /></p>
+<p>Despite the apparent identical nature of the two data generating processes, I would argue that biased estimation is only a problem in the context of confounding noise. If we intervene on <span class="math inline">\(X\)</span> without changing <span class="math inline">\(U\)</span>, which could occur in the context of unmeasured confounding, the causal effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span> would be overestimated by the regression model. However, if we intervene on <span class="math inline">\(X\)</span> in the context of a process that involves mediation, it would be appropriate to consider all the post-intervention effects of changing <span class="math inline">\(X\)</span>, so the “biased” estimate may in fact be the appropriate one.</p>
+<p>The key here, of course, is that we cannot verify this unobserved process. By definition, the noise is unobservable and stochastic. But, if we are developing models that involve causal relations of unmeasured quantities, we have to be explicit about the causal nature underlying these unmeasured quantities. That way, we know if we should be concerned about hidden correlation or not.</p>
+</div>
