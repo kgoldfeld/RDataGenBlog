@@ -1,0 +1,218 @@
+---
+title: Cross-over study design with a major constraint
+author: ''
+date: '2018-10-23'
+slug: when-the-research-question-doesn-t-fit-nicely-into-a-standard-study-design
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>Every new study presents its own challenges. (I would have to say that one of the great things about being a biostatistician is the immense variety of research questions that I get to wrestle with.) Recently, I was approached by a group of researchers who wanted to evaluate an intervention. Actually, they had two, but the second one was a minor tweak added to the first. They were trying to figure out how to design the study to answer two questions: (1) is intervention <span class="math inline">\(A\)</span> better than doing nothing and (2) is <span class="math inline">\(A^+\)</span>, the slightly augmented version of <span class="math inline">\(A\)</span>, better than just <span class="math inline">\(A\)</span>?</p>
+<p>It was clear in this context (and it is certainly not usually the case) that exposure to <span class="math inline">\(A\)</span> on one day would have <em>no</em> effect on the outcome under <span class="math inline">\(A^+\)</span> the next day (or <em>vice versa</em>). That is, spillover risks were minimal. Given this, the study was an ideal candidate for a cross-over design, where each study participant would receive both versions of the intervention and the control. This design can be much more efficient than a traditional RCT, because we can control for variability across patients.</p>
+<p>While a cross-over study is interesting and challenging in its own right, the researchers had a pretty serious constraint: they did not feel they could assign intervention <span class="math inline">\(A^+\)</span> until <span class="math inline">\(A\)</span> had been applied, which would be necessary in a proper cross-over design. So, we had to come up with something a little different.</p>
+<p>This post takes a look at how to generate data for and analyze data from a more standard cross-over trial, and then presents the solution we came up with for the problem at hand.</p>
+<div id="cross-over-design-with-three-exposures" class="section level3">
+<h3>Cross-over design with three exposures</h3>
+<p>If we are free to assign any intervention on any day, one possible randomization scheme involving three interventions could look like this:
+<img src="/img/post-crossover/3way.png" /></p>
+<p>Key features of this scheme are: (1) all individuals are exposed to each intervention over three days, (2) on any given day, each intervention is applied to one group of participants (just in case the specific day has an impact on the outcome), and (3) not every permutation is included (for example, <span class="math inline">\(A\)</span> does not immediately proceed <span class="math inline">\(Control\)</span> in any sequence), because the relative ordering of interventions in this case is assumed not to matter. (We might need to expand to six groups to rectify this.)</p>
+</div>
+<div id="data-simulation" class="section level3">
+<h3>Data simulation</h3>
+<p>In this simulation, we will assume (1) that the outcome is slightly elevated on days two and three, (2) <span class="math inline">\(A\)</span> is an improvement over <span class="math inline">\(Control\)</span>, (3) <span class="math inline">\(A^+\)</span> is an improvement over <span class="math inline">\(A\)</span>, (4) there is strong correlation of outcomes within each individual, and (5) group membership has no bearing on the outcome.</p>
+<p>First, I define the data, starting with the different sources of variation. I have specified a fairly high intra-class coefficient (ICC), because it is reasonable to assume that there will be quite a bit of variation across individuals:</p>
+<pre class="r"><code>vTotal = 1
+vAcross &lt;- iccRE(ICC = 0.5, varTotal = vTotal, &quot;normal&quot;)
+vWithin &lt;- vTotal - vAcross
+
+### Definitions
+
+b &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = vAcross, 
+             dist = &quot;normal&quot;)
+
+d &lt;- defCondition(condition = &quot;rxlab == &#39;C&#39;&quot;, 
+       formula = &quot;0 + b + (day == 2) * 0.5 + (day == 3) * 0.25&quot;, 
+       variance = vWithin, dist = &quot;normal&quot;)
+d &lt;- defCondition(d, &quot;rxlab == &#39;A&#39;&quot;,  
+       formula = &quot;0.4 + b + (day == 2) * 0.5 + (day == 3) * 0.25&quot;, 
+       variance = vWithin, dist = &quot;normal&quot;)
+d &lt;- defCondition(d, &quot;rxlab == &#39;A+&#39;&quot;, 
+       formula = &quot;1.0 + b + (day == 2) * 0.5 + (day == 3) * 0.25&quot;, 
+       variance = vWithin, dist = &quot;normal&quot;)</code></pre>
+<p>Next, I generate the data, assigning three groups, each of which is tied to one of the three treatment sequences.</p>
+<pre class="r"><code>set.seed(39217)
+
+db &lt;- genData(240, b)
+dd &lt;- trtAssign(db, 3, grpName = &quot;grp&quot;)
+dd &lt;- addPeriods(dd, 3)
+
+dd[grp == 1, rxlab := c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;)]
+dd[grp == 2, rxlab := c(&quot;A+&quot;, &quot;C&quot;, &quot;A&quot;)]
+dd[grp == 3, rxlab := c(&quot;A&quot;, &quot;A+&quot;, &quot;C&quot;)]
+
+dd[, rxlab := factor(rxlab, levels = c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;))]
+dd[, day := factor(period + 1)]
+
+dd &lt;- addCondition(d, dd, newvar = &quot;Y&quot;)
+dd</code></pre>
+<pre><code>##      timeID         Y  id period grp         b rxlab day
+##   1:      1 0.9015848   1      0   2 0.2664571    A+   1
+##   2:      2 1.2125919   1      1   2 0.2664571     C   2
+##   3:      3 0.7578572   1      2   2 0.2664571     A   3
+##   4:      4 2.0157066   2      0   3 1.1638244     A   1
+##   5:      5 2.4948799   2      1   3 1.1638244    A+   2
+##  ---                                                    
+## 716:    716 1.9617832 239      1   1 0.3340201     A   2
+## 717:    717 1.9231570 239      2   1 0.3340201    A+   3
+## 718:    718 1.0280355 240      0   3 1.4084395     A   1
+## 719:    719 2.5021319 240      1   3 1.4084395    A+   2
+## 720:    720 0.4610550 240      2   3 1.4084395     C   3</code></pre>
+<p>Here is a plot of the treatment averages each day for each of the three groups:</p>
+<pre class="r"><code>dm &lt;- dd[, .(Y = mean(Y)), keyby = .(grp, period, rxlab)]
+ngrps &lt;- nrow(dm[, .N, keyby = grp])
+nperiods &lt;- nrow(dm[, .N, keyby = period])
+
+ggplot(data = dm, aes(y=Y, x = period + 1)) +
+  geom_jitter(data = dd, aes(y=Y, x = period + 1), 
+              width = .05, height = 0, color=&quot;grey70&quot;, size = 1 ) +
+  geom_line(color = &quot;grey50&quot;) +
+  geom_point(aes(color = rxlab), size = 2.5) +
+  scale_color_manual(values = c(&quot;#4477AA&quot;, &quot;#DDCC77&quot;, &quot;#CC6677&quot;)) +
+  scale_x_continuous(name = &quot;day&quot;, limits = c(0.9, nperiods + .1), 
+                     breaks=c(1:nperiods)) +
+  facet_grid(~ factor(grp, labels = paste(&quot;Group&quot;, 1:ngrps))) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank())</code></pre>
+<p><img src="/post/2018-10-23-when-the-research-question-doesn-t-fit-nicely-into-a-standard-study-design_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="estimating-the-effects" class="section level3">
+<h3>Estimating the effects</h3>
+<p>To estimate the treatment effects, I will use this mixed effects linear regression model:</p>
+<p><span class="math display">\[Y_{it} = \alpha_0 +  \gamma_{t} D_{it} + \beta_1 A_{it} + \beta_2 P_{it}  + b_i + e_i\]</span></p>
+<p>where <span class="math inline">\(Y_{it}\)</span> is the outcome for individual <span class="math inline">\(i\)</span> on day <span class="math inline">\(t\)</span>, <span class="math inline">\(t \in (1,2,3)\)</span>. <span class="math inline">\(A_{it}\)</span> is an indicator for treatment <span class="math inline">\(A\)</span> in time <span class="math inline">\(t\)</span>; likewise <span class="math inline">\(P_{it}\)</span> is an indicator for <span class="math inline">\(A^+\)</span>. <span class="math inline">\(D_{it}\)</span> is an indicator that the outcome was recorded on day <span class="math inline">\(t\)</span>. <span class="math inline">\(b_i\)</span> is an individual (latent) random effect, <span class="math inline">\(b_i \sim N(0, \sigma_b^2)\)</span>. <span class="math inline">\(e_i\)</span> is the (also latent) noise term, <span class="math inline">\(e_i \sim N(0, \sigma_e^2)\)</span>.</p>
+<p>The parameter <span class="math inline">\(\alpha_0\)</span> is the mean outcome on day 1 under <span class="math inline">\(Control\)</span>. The <span class="math inline">\(\gamma\)</span>’s are the day-specific effects for days 2 and 3, with <span class="math inline">\(\gamma_1\)</span> fixed at 0. <span class="math inline">\(\beta_1\)</span> is the effect of <span class="math inline">\(A\)</span> (relative to <span class="math inline">\(Control\)</span>) and <span class="math inline">\(\beta_2\)</span> is the effect of <span class="math inline">\(A^+\)</span>. In this case, the researchers were primarily interested in <span class="math inline">\(\beta_1\)</span> and <span class="math inline">\(\beta_2 - \beta_1\)</span>, which is the incremental change from <span class="math inline">\(A\)</span> to <span class="math inline">\(A^+\)</span>.</p>
+<pre class="r"><code>library(lme4)
+lmerfit &lt;- lmer(Y ~ day + rxlab + (1|id), data = dd)
+rndTidy(lmerfit)</code></pre>
+<pre><code>##                       term estimate std.error statistic    group
+## 1:             (Intercept)    -0.14      0.08     -1.81    fixed
+## 2:                    day2     0.63      0.06      9.82    fixed
+## 3:                    day3     0.38      0.06      5.97    fixed
+## 4:                  rxlabA     0.57      0.06      8.92    fixed
+## 5:                 rxlabA+     0.98      0.06     15.35    fixed
+## 6:       sd_(Intercept).id     0.74        NA        NA       id
+## 7: sd_Observation.Residual     0.70        NA        NA Residual</code></pre>
+<p>As to why we would want to bother with this complex design if we could just randomize individuals to one of three treatment groups, this little example using a more standard parallel design might provide a hint:</p>
+<pre class="r"><code>def2 &lt;- defDataAdd(varname = &quot;Y&quot;, 
+            formula = &quot;0 + (frx == &#39;A&#39;) * 0.4 + (frx == &#39;A+&#39;) * 1&quot;,
+            variance = 1, dist = &quot;normal&quot;)
+
+dd &lt;- genData(240)
+dd &lt;- trtAssign(dd, nTrt = 3, grpName = &quot;rx&quot;)
+
+dd &lt;- genFactor(dd, &quot;rx&quot;, labels = c(&quot;C&quot;,&quot;A&quot;,&quot;A+&quot;), replace = TRUE)
+dd &lt;- addColumns(def2, dd)
+
+lmfit &lt;- lm(Y~frx, data = dd)
+rndTidy(lmfit)</code></pre>
+<pre><code>##           term estimate std.error statistic p.value
+## 1: (Intercept)    -0.12      0.10     -1.15    0.25
+## 2:        frxA     0.64      0.15      4.38    0.00
+## 3:       frxA+     1.01      0.15      6.86    0.00</code></pre>
+<p>If we compare the standard error for the effect of <span class="math inline">\(A^+\)</span> in the two studies, the cross-over design is much more efficient (i.e. standard error is considerably smaller: 0.06 vs. 0.15). This really isn’t so surprising since we have collected a lot more data and modeled variation across individuals in the cross-over study.</p>
+</div>
+<div id="constrained-cross-over-design" class="section level3">
+<h3>Constrained cross-over design</h3>
+<p>Unfortunately, the project was not at liberty to implement the three-way/three-day design just simulated. We came up with this approach that would provide some cross-over, but with an added day of treatment and measurement:</p>
+<p><img src="/img/post-crossover/4constrained.png" /></p>
+<p>The data generation is slightly modified, though the original definitions can still be used:</p>
+<pre class="r"><code>db &lt;- genData(240, b)
+dd &lt;- trtAssign(db, 2, grpName = &quot;grp&quot;)
+dd &lt;- addPeriods(dd, 4)
+
+dd[grp == 0, rxlab := c(&quot;C&quot;, &quot;C&quot;, &quot;A&quot;, &quot;A+&quot;)]
+dd[grp == 1, rxlab := c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;, &quot;A&quot;)]
+
+dd[, rxlab := factor(rxlab, levels = c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;))]
+dd[, day := factor(period + 1)]
+
+dd &lt;- addCondition(d, dd, &quot;Y&quot;)</code></pre>
+<p><img src="/post/2018-10-23-when-the-research-question-doesn-t-fit-nicely-into-a-standard-study-design_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>The model estimates indicate slightly higher standard errors than in the pure cross-over design:</p>
+<pre class="r"><code>lmerfit &lt;- lmer(Y ~ day + rxlab + (1|id), data = dd)
+rndTidy(lmerfit)</code></pre>
+<pre><code>##                       term estimate std.error statistic    group
+## 1:             (Intercept)     0.15      0.06      2.36    fixed
+## 2:                    day2     0.48      0.08      6.02    fixed
+## 3:                    day3     0.16      0.12      1.32    fixed
+## 4:                    day4    -0.12      0.12     -1.02    fixed
+## 5:                  rxlabA     0.46      0.10      4.70    fixed
+## 6:                 rxlabA+     1.14      0.12      9.76    fixed
+## 7:       sd_(Intercept).id     0.69        NA        NA       id
+## 8: sd_Observation.Residual     0.68        NA        NA Residual</code></pre>
+<p>Here are the key parameters of interest (refit using package <code>lmerTest</code> to get the contrasts). The confidence intervals include the true values (<span class="math inline">\(\beta_1 = 0.4\)</span> and <span class="math inline">\(\beta_2 - \beta_1 = 0.6\)</span>):</p>
+<pre class="r"><code>library(lmerTest)
+lmerfit &lt;- lmer(Y ~ day + rxlab + (1|id), data = dd)
+
+L &lt;- matrix(c(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, -1, 1), 
+        nrow = 2, ncol = 6, byrow = TRUE)
+
+con &lt;- data.table(contest(lmerfit, L, confint = TRUE, joint = FALSE))
+round(con[, .(Estimate, `Std. Error`, lower, upper)], 3)</code></pre>
+<pre><code>##    Estimate Std. Error lower upper
+## 1:    0.462      0.098 0.269 0.655
+## 2:    0.673      0.062 0.551 0.795</code></pre>
+</div>
+<div id="exploring-bias" class="section level3">
+<h3>Exploring bias</h3>
+<p>A single data set does not tell us if the proposed approach is indeed unbiased. Here, I generate 1000 data sets and fit the mixed effects model. In addition, I fit a model that ignores the day factor to see if it will induce bias (of course it will).</p>
+<pre class="r"><code>iter &lt;- 1000
+ests &lt;- vector(&quot;list&quot;, iter)
+xests &lt;- vector(&quot;list&quot;, iter)
+
+for (i in 1:iter) {
+  
+  db &lt;- genData(240, b)
+  dd &lt;- trtAssign(db, 2, grpName = &quot;grp&quot;)
+  dd &lt;- addPeriods(dd, 4)
+
+  dd[grp == 0, rxlab := c(&quot;C&quot;, &quot;C&quot;, &quot;A&quot;, &quot;A+&quot;)]
+  dd[grp == 1, rxlab := c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;, &quot;A&quot;)]
+
+  dd[, rxlab := factor(rxlab, levels = c(&quot;C&quot;, &quot;A&quot;, &quot;A+&quot;))]
+  dd[, day := factor(period + 1)]
+
+  dd &lt;- addCondition(d, dd, &quot;Y&quot;)
+  
+  lmerfit &lt;- lmer(Y ~ day + rxlab + (1|id), data = dd)
+  xlmerfit &lt;- lmer(Y ~ rxlab + (1|id), data = dd)
+  
+  ests[[i]] &lt;- data.table(estA = fixef(lmerfit)[5], 
+      estAP = fixef(lmerfit)[6] - fixef(lmerfit)[5])
+  
+  xests[[i]] &lt;-  data.table(estA = fixef(xlmerfit)[2], 
+      estAP = fixef(xlmerfit)[3] - fixef(xlmerfit)[2])
+
+}
+
+ests &lt;- rbindlist(ests)
+xests &lt;- rbindlist(xests)</code></pre>
+<p>The results for the correct model estimation indicate that there is no bias (and that the standard error estimates from the model fit above were correct):</p>
+<pre class="r"><code>ests[, .(A.est =  round(mean(estA), 3), 
+         A.se =   round(sd(estA), 3), 
+         AP.est = round(mean(estAP), 3), 
+         AP.se =  round(sd(estAP), 3))]</code></pre>
+<pre><code>##    A.est  A.se AP.est AP.se
+## 1: 0.407 0.106  0.602  0.06</code></pre>
+<p>In contrast, the estimates that ignore the day or period effect are in fact biased (as predicted):</p>
+<pre class="r"><code>xests[, .(A.est =  round(mean(estA), 3), 
+         A.se =   round(sd(estA), 3), 
+         AP.est = round(mean(estAP), 3), 
+         AP.se =  round(sd(estAP), 3))]</code></pre>
+<pre><code>##    A.est  A.se AP.est AP.se
+## 1: 0.489 0.053  0.474 0.057</code></pre>
+</div>
