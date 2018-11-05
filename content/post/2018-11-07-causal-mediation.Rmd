@@ -1,0 +1,330 @@
+---
+title: Causal mediation estimation measures the unobservable
+author: ''
+date: '2018-11-06'
+slug: causal-mediation
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+I put together a series of demos for a group of epidemiology students who are studying causal mediation analysis. Since mediation analysis is not always so clear or intuitive, I thought, of course, that going through some examples of simulating data for this process could clarify things a bit. 
+
+Quite often we are interested in understanding the relationship between an exposure or intervention on an outcome. Does exposure $A$ (could be randomized or not) have an effect on outcome $Y$?
+
+![](/img/post-mediation/Model_1.png)
+
+But sometimes we are interested in understanding *more* than whether or not $A$ causes or influences $B$; we might want to have some insight into the mechanisms *underlying* that influence. And this is where mediation analysis can be useful. (If you want to delve deeply into the topic, I recommend you check out this [book](https://global.oup.com/academic/product/explanation-in-causal-inference-9780199325870?cc=us&lang=en&) by Tyler VanderWeele, or this nice [website](https://www.mailman.columbia.edu/research/population-health-methods/causal-mediation) developed at Columbia University.)
+
+In the example here, I am using the simplest possible scenario of an exposure $A$, a mediator $M$, and an outcome $Y$, without any confounding:
+
+![](/img/post-mediation/Model_2.png)
+
+A key challenge of understanding and conducting a mediation analysis is how we should *quantify* this concept of mediation. Sure, $A$ has an effect on $M$, which in turn has an effect on $Y$, and $A$ also may have an effect on $Y$ through other pathways. But how can we make sense of all of this? One approach, which is a relatively recent development, is to use the *potential outcome* framework of causal inference to define the various estimands (or quantities) that arise in a mediation analysis. (I draw on a [paper](https://www.jstor.org/stable/41058997?seq=1#metadata_info_tab_contents) by Imai, Keele and Yamamoto for the terminology, as there is not complete agreement on what to call various quantities. The estimation methods and software used here are also described in the paper.)
+
+### Defining the potential outcomes 
+
+In an earlier [post](https://www.rdatagen.net/post/be-careful/), I described the concept of potential outcomes. I extend that a bit here to define the quantities we are interested in. In this case, we have two effects of the possible exposure: $M$ and $Y$. Under this framework, each individual has a potential outcome for each level of $A$ (I am assuming $A$ is binary). So, for the mediator, $M_{i0}$ and $M_{i1}$ are the values of $M$ we would observe for individual $i$ without and with exposure, respectively. That is pretty straightforward. (From here on out, I will remove the subscript $i$, because it gets a little unwieldy.)
+
+The potential outcomes under $Y$ are less intuitive, as there are four of them. First, there is $Y_{0M_0}$, which is the potential outcome of $Y$ *without* exposure for $A$ and whatever the potential outcome for $M$ is *without* exposure for $A$. This is what we observe when $A=0$ for an individual. $Y_{1M_1}$ is the potential outcome of $Y$ *with* exposure for $A$ and whatever the potential outcome for $M$ is *with* exposure for $A$. This is what we observe when $A=1$ for an individual. That's all fine.
+
+But we also have $Y_{0M_1}$, which can never be observed unless we can intervene on the mediator $M$ somehow. This is the potential outcome of $Y$ *without* exposure for $A$ and whatever the mediator would have been had the individual been exposed. This potential outcome is controversial, because it is defined across two different universes of exposure to $A$. Finally, there is $Y_{1M_0}$. It is analogously defined across two universes, but in reverse.
+
+### Defining the causal mediation effects and direct effects
+
+The estimands or quantities that we are interested are defined in terms of the potential outcomes. The ***causal mediation effects*** for an individual are
+
+$$
+\begin{aligned}
+CME_0 &= Y_{0M_1} - Y_{0M_0} \\
+CME_1 &= Y_{1M_1} - Y_{1M_0}, 
+\end{aligned}
+$$
+
+and the ***causal direct effects*** are 
+
+$$
+\begin{aligned}
+CDE_0 &= Y_{1M_0} - Y_{0M_0} \\
+CDE_1 &= Y_{1M_1} - Y_{0M_1}. 
+\end{aligned}
+$$
+
+A few important points. (1) Since we are in the world of potential outcomes, we do not observe these quantities for everyone. In fact, we don't observe these quantities for anyone, since some of the measures are across two universes. (2) The two causal mediation effects under do not need to be the same. The same goes for the two causal direct effects. (3) Under a set of pretty strong assumptions related to unmeasured confounding,  independence, and consistency (see [*Imai et al*](https://www.jstor.org/stable/41058997?seq=1#metadata_info_tab_contents) for the details),  the average causal mediation effects and average causal direct effects can be estimated using *observed* data only. Before I simulate some data to demonstrate all of this, here is the definition for the ***total causal effect*** (and its decomposition into mediation and direct effects):
+
+$$
+\begin{aligned}
+TCE &= Y_{1M_1} - Y_{0M_0} \\
+    &= CME_1 + CDE_0 \\
+    &= CME_0 + CDE_1
+\end{aligned}
+$$
+
+### Generating the data
+
+I'm using the `simstudy` package to generate the data. I'll start by generating the binary potential outcomes for the mediator, $M_0$ and $M_1$, which are correlated in this example. $P(M_1=1) > P(M_0=1)$, implying that exposure to $A$ does indeed have an effect on $M$. Note that it is possible that for an individual $M_0 = 1$ and $M_1 = 0$, so that exposure to $A$ has an effect contrary to what we see in the population generally. (We don't need to make this assumption in the data generation process; we could force $M_1$ to be 1 if $M_0$ is 1.)
+
+```{r, echo=FALSE, message=FALSE}
+library(simstudy)
+library(formattable)
+
+options(digits = 3)
+```
+
+```{r}
+set.seed(3872672)
+dd <- genCorGen(n=5000, nvars = 2,  params1 = c(.2, .6), 
+                dist = "binary", rho = .3, corstr = "cs", 
+                wide = TRUE, cnames = c("M0", "M1"))
+```
+
+Observe treatment:
+
+```{r}
+dd <- trtObserve(dd, 0.6, grpName = "A")
+```
+
+Initial data set:
+
+```{r}
+dd
+```
+
+$Y_{0M_0}$ is a function of $M_0$ and some noise $e_0$, and $Y_{0M_1}$ is a function of $M_1$ and the same noise (this is not a requirement). However, if $M_0 = M_1$ (i.e. the mediator is not affected by exposure status), then I am setting $Y_{0M_1} = Y_{0M_0}$. In this case, $CME_0$ for an individual is $2(M_1 - M_0)$, so $CME_0 \in \{-2, 0, 2\}$, and the population average $CME_0$ will depend on the mixture of potential outcomes $M_0$ and $M_1$.
+
+```{r}
+def <- defDataAdd(varname = "e0", formula = 0, 
+                  variance = 1, dist = "normal")
+def <- defDataAdd(def, varname = "Y0M0", formula = "2 + M0*2 + e0", 
+                  dist = "nonrandom")
+def <- defDataAdd(def, varname = "Y0M1", formula = "2 + M1*2 + e0", 
+                  variance = 1, dist = "nonrandom")
+```
+
+The same logic holds for $Y_{1M_0}$ and $Y_{1M_1}$, though at the individual level $CME_1 \in \{-5, 0, 5\}$: 
+
+```{r}
+def <- defDataAdd(def, varname = "e1", formula = 0, 
+                  variance = 1, dist = "normal")
+def <- defDataAdd(def, varname = "Y1M0", formula = "8 + M0*5 + e1", 
+                  dist = "nonrandom")
+def <- defDataAdd(def, varname = "Y1M1", formula = "8 + M1*5 + e1", 
+                  dist = "nonrandom")
+```
+
+The *observed* mediator ($M$) and outcome ($Y$) are determined by the observed exposure ($A$).
+
+```{r}
+def <- defDataAdd(def, varname = "M", 
+          formula = "(A==0) * M0 + (A==1) * M1", dist = "nonrandom")
+def <- defDataAdd(def, varname = "Y", 
+          formula = "(A==0) * Y0M0 + (A==1) * Y1M1", dist = "nonrandom")
+```
+
+Here is the entire data definitions table:
+
+```{r, echo = FALSE}
+setsize <- function(size = 16) {
+  
+  px <- paste0(size, "px")
+  formatter("span", style = ~ style("font-size" = px))
+}
+format_table(def, 
+             list(formula = setsize(16), 
+                  varname = setsize(16),
+                  variance = setsize(16),
+                  dist = setsize(16),
+                  link = setsize(16))
+             )
+```
+
+Based on the parameters used to generate the data, we can calculate the expected causal mediation effects:
+
+$$
+\begin{aligned}
+E[CME_0] &= E[2 + 2M_1 + e_0] - E[2+2M_0+e_0] \\
+         &= E[2(M_1 - M_0)] \\
+         &= 2(E[M_1] - E[M_0]) \\
+         &= 2(0.6 - 0.2) \\
+         &= 0.8
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+E[CME_1] &= E[8 + 5M_1 + e_1] - E[8+5M_0+e_1] \\
+         &= E[5(M_1 - M_0)] \\
+         &= 5(E[M_1] - E[M_0]) \\
+         &= 5(0.6 - 0.2) \\
+         &= 2.0
+\end{aligned}
+$$
+
+Likewise, the expected values of the causal direct effects can be calculated:
+
+$$
+\begin{aligned}
+E[CDE_0] &= E[8 + 5M_0 + e_1] - E[2+2M_0+e_0] \\
+         &= E[6 + 5M_0 - 2M_0)] \\
+         &= 6 + 3M_0 \\
+         &= 6 + 3*0.2 \\
+         &= 6.6
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+E[CDE_1] &= E[8 + 5M_1 + e_1] - E[2+2M_1+e_0] \\
+         &= E[6 + 5M_1 - 2M_1)] \\
+         &= 6 + 3M_1 \\
+         &= 6 + 3*0.6 \\
+         &= 7.8
+\end{aligned}
+$$
+
+Finally, the expected total causal effect is:
+
+$$
+\begin{aligned}
+ATCE &= E[CDE_0] + E[CME_1] = 6.6 + 2.0 \\
+     &= E[CDE_1] + E[CME_0] = 7.8 + 0.8 \\
+     &= 8.6
+\end{aligned}
+$$
+And now, the complete data set can be generated.
+
+```{r}
+dd <- addColumns(def, dd)
+dd <- delColumns(dd, c("e0", "e1")) # these are not needed
+dd
+```
+
+
+### Looking at the "observed" potential outcomes
+
+The advantage of simulating data is that we can see what the average causal effects are based on the potential outcomes. Here are the average potential outcomes in the generated data set:
+
+```{r}
+dd[,.( Y0M0 = mean(Y0M0), Y0M1 = mean(Y0M1), 
+       Y1M0 = mean(Y1M0), Y1M1 = mean(Y1M1))]
+```
+
+The four average causal effects based on the data are quite close to the expected values:
+
+```{r}
+dd[, .(ACME0 = mean(Y0M1 - Y0M0), ACME1= mean(Y1M1 - Y1M0),
+       ACDE0 = mean(Y1M0 - Y0M0), ACDE1= mean(Y1M1 - Y0M1))]
+```
+
+And the here is the average total causal effect from the data set:
+
+```{r}
+dd[, mean(Y1M1 - Y0M0)]
+```
+
+All of these quantities can be visualized in this figure. The lengths of the solid vertical lines are the mediated effects. The lengths of the dotted vertical lines are the direct effects. And the sums of these vertical lines (by color) each represent the total effect:
+
+```{r, echo = FALSE}
+means <- dd[, .(Y0M0 = mean(Y0M0),
+       Y0M1 = mean(Y0M1),
+       Y1M0 = mean(Y1M0),
+       Y1M1 = mean(Y1M1))]
+
+m <- unlist(means)
+
+dm <- data.table(var = names(means), avg = m)
+
+dlCME <- data.table(y = c(m[1], m[1], m[3], m[3]), yend = m,
+                    x = 1:4, xend = c(2, 2, 4, 4),
+                    grp = c(0, 0, 1, 1))
+
+dlNDE <- data.table(y = c(m[2], m[4], m[1], m[3]), yend = c(m[4], m[4], m[3], m[3]),
+                    x = c(2, 2, 1, 1), xend = c(2, 4, 1, 3), 
+                    grp = c(0, 0, 1, 1))
+
+
+ggplot(data = dm, aes(x = var, y = avg)) +
+  geom_point(size = 3) +
+  scale_y_continuous(limits = c(0, ceiling(max(dm$avg))), breaks = 0:ceiling(max(dm$avg))) +
+  geom_segment(data = dlCME, aes(x=x, xend = xend, y=y, yend = yend, color = factor(grp)), size = .8) +
+  geom_segment(data = dlNDE, aes(x=x, xend = xend, y=y, yend = yend, color = factor(grp)), lty = 2) +
+  theme(panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        legend.position = "none",
+        axis.title.x = element_blank()) +
+  scale_color_manual(values =  c("#4477AA", "#CC6677"))
+```
+
+### Estimated causal mediation effect from observed data
+
+Clearly, the real interest is in estimating the causal effects from data that we can actually observe. And that, of course, is where things start to get challenging. I will not go into the important details here (again, [*Imai et al*](https://www.jstor.org/stable/41058997?seq=1#metadata_info_tab_contents) provide these), but here are formulas that have been derived to estimate the effects (simplified since there are no confounders in this example) and the calculations using the observed data:
+
+$$\small
+\hat{CME_0} =\sum_{m\in0,1}E[Y|A=0, M=m][P(M=m|A=1)-P(M=m|A=0)]
+$$
+
+```{r}
+# Estimate CME0
+
+dd[M == 0 & A == 0, mean(Y)] * 
+  (dd[A == 1, mean(M == 0)] - dd[A == 0, mean(M == 0)]) +
+dd[M == 1 & A == 0, mean(Y)] * 
+  (dd[A == 1, mean(M == 1)] - dd[A == 0, mean(M == 1)])
+```
+
+$$\small
+\hat{CME_1} =\sum_{m\in0,1}E[Y|A=1, M=m][P(M=m|A=1)-P(M=m|A=0)]
+$$
+
+```{r}
+# Estimate CME1
+
+dd[M == 0 & A == 1, mean(Y)] * 
+  (dd[A == 1, mean(M == 0)] - dd[A == 0, mean(M == 0)]) +
+dd[M == 1 & A == 1, mean(Y)] * 
+  (dd[A == 1, mean(M == 1)] - dd[A == 0, mean(M == 1)])
+```
+
+$$\small
+\hat{CDE_0} =\sum_{m\in0,1}(E[Y|A=1, M=m] - E[Y|A=0, M=m])P(M=m|A=0)
+$$
+
+```{r}
+# Estimate CDE0
+
+(dd[M == 0 & A == 1, mean(Y)] -  dd[M == 0 & A == 0, mean(Y)]) * 
+  dd[A == 0, mean(M == 0)] +
+(dd[M == 1 & A == 1, mean(Y)] -  dd[M == 1 & A == 0, mean(Y)]) * 
+  dd[A == 0, mean(M == 1)]
+```
+
+$$\small
+\hat{CDE_1} =\sum_{m\in0,1}(E[Y|A=1, M=m] - E[Y|A=0, M=m])P(M=m|A=1)
+$$
+
+```{r}
+# Estimate CDE1
+
+(dd[M == 0 & A == 1, mean(Y)] -  dd[M == 0 & A == 0, mean(Y)]) * 
+  dd[A == 1, mean(M == 0)] +
+(dd[M == 1 & A == 1, mean(Y)] -  dd[M == 1 & A == 0, mean(Y)]) * 
+  dd[A == 1, mean(M == 1)]
+```
+
+### Estimation with mediation package
+
+Fortunately, there is software available to provide these estimates (and more importantly measures of uncertainty). In `R`, one such package is `mediation`, which is available on [CRAN](https://cran.r-project.org/web/packages/mediation/index.html). This package implements the formulas derived in the *Imai et al* paper.
+
+Not surprisingly, the model estimates are in line with expected values, true underlying effects, and the previous estimates conducted by hand:
+
+```{r, message = FALSE}
+library(mediation)
+
+med.fit <- glm(M ~ A, data = dd, family = binomial("logit"))
+out.fit <- lm(Y ~ M*A, data = dd)
+
+med.out <- mediate(med.fit, out.fit, treat = "A", mediator = "M",
+                   robustSE = TRUE, sims = 1000)
+summary(med.out)
+```
