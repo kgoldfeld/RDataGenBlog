@@ -1,0 +1,168 @@
+---
+title: Generating data to explore the myriad causal effects that can be estimated in observational data analysis
+author: ''
+date: '2018-11-20'
+slug: generating-data-to-explore-the-myriad-causal-effects
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I’ve been inspired by two recent talks describing the challenges of using instrumental variable (IV) methods. IV methods are used to estimate the causal effects of an exposure or intervention when there is unmeasured confounding. This estimated causal effect is very specific: the complier average causal effect (CACE). But, the CACE is just one of several possible causal estimands that we might be interested in. For example, there’s the average causal effect (ACE) that represents a population average (not just based the subset of compliers). Or there’s the average causal effect for the exposed or treated (ACT) that allows for the fact that the exposed could be different from the unexposed.</p>
+<p>I thought it would be illuminating to analyze a single data set using different causal inference methods, including IV as well as propensity score matching and inverse probability weighting. Each of these methods targets different causal estimands, which may or may not be equivalent depending on the subgroup-level causal effects and underlying population distribution of those subgroups.</p>
+<p>This is the first of a two-part post. In this first part, I am focusing entirely on the data generation process (DGP). In the follow-up, I will get to the model estimation.</p>
+<div id="underlying-assumptions-of-the-dgp" class="section level3">
+<h3>Underlying assumptions of the DGP</h3>
+<p>Since the motivation here is instrumental variable analysis, it seems natural that the data generation process include a possible instrument. (Once again, I am going to refer to elsewhere in case you want more details on the theory and estimation of IV models. Here is an excellent in-depth tutorial by <a href="https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4201653/"><em>Baiocchi et al</em></a> that provides great background. I’ve even touched on the topic of CACE in an earlier series of <a href="https://www.rdatagen.net/post/cace-explored/">posts</a>. Certainly, there is no lack of discussion on this topic, as a quick search around the internet will make readily obvious.)</p>
+<p>The figure below is a variation on the directed acyclic graph (DAG) that is often very useful in laying out causal assumptions of a DGP. This particular figure is a type of SWIG: single world intervention graph. SWIGs, <a href="https://pdfs.semanticscholar.org/07bb/cb458109d2663acc0d098e8913892389a2a7.pdf">developed by Robins and Richardson</a>, fuse the worlds of potential outcomes and DAGs.</p>
+<p><img src="/img/post-ivdgp/IV_SWIT.png" /></p>
+<p>Important things to note here:</p>
+<ol style="list-style-type: decimal">
+<li><p>There is an instrumental variable <span class="math inline">\(A\)</span> that has a direct causal relationship only to the exposure of interest, <span class="math inline">\(T\)</span>. If the exposure is a particular medical intervention, think of the instrument as some kind of encouragement to get that treatment. Some people get the encouragement, others don’t - though on average folks who are encouraged are no different from folks who are not (at least not in ways that relate to the outcome.)</p></li>
+<li><p>There is a confounder <span class="math inline">\(U\)</span>, possibly unmeasured, that is related both to potential outcomes and the exposure, but not to the encouragement (the instrument)! In the example below, we conceive of <span class="math inline">\(U\)</span> as an underlying health status.</p></li>
+<li><p>Exposure variable <span class="math inline">\(T\)</span> (that, in this case, is binary, just to keep things simpler) indicates whether a person gets the treatment or not.</p></li>
+<li><p>Each individual will have two <em>potential treatments</em> <span class="math inline">\(T^0\)</span> and <span class="math inline">\(T^1\)</span>, where <span class="math inline">\(T^0\)</span> is the treatment when there is no encouragement (i.e. A = 0), and <span class="math inline">\(T^1\)</span> is the treatment when <span class="math inline">\(A = 1\)</span>. For any individual, we actually only observe one of these treatments (depending on the actual value of <span class="math inline">\(A\)</span>. The population of interest consists of <strong>always-takers</strong>, <strong>compliers</strong>, and <strong>never-takers</strong>. <em>Never-takers</em> always reject the treatment regardless of whether or not they get encouragement - that is, <span class="math inline">\(T^0 = T^1 = 0\)</span>. <em>Compliers</em> only seek out the treatment when they are encouraged, otherwise they don’t: <span class="math inline">\(T^0 = 0\)</span> and <span class="math inline">\(T^1 = 1\)</span>. And <em>always-takers</em> always (of course) seek out the treatment: <span class="math inline">\(T^0 = T^1 = 1\)</span>. (In order for the model to be identifiable, we need to make a not-so-crazy assumption that there are no so-called <em>deniers</em>, where <span class="math inline">\(T^0 = 1\)</span> and <span class="math inline">\(T^1 = 0\)</span>.) An individual may have a different complier status depending on the instrument and exposure (<em>i.e.</em>, one person might be a never-taker in one scenario but a complier in another). In this simulation, larger values of the confounder <span class="math inline">\(U\)</span> will increase <span class="math inline">\(P(T^a = 1)\)</span> for both <span class="math inline">\(a \in (0,1)\)</span>.</p></li>
+<li><p>Each individual will have two <em>potential outcomes</em>, only one of which is observed. <span class="math inline">\(Y_i^0\)</span> is the outcome for person <span class="math inline">\(i\)</span> when they are unexposed or do not receive the treatment. <span class="math inline">\(Y_i^1\)</span> is the outcome for that same person when they are exposed or do receive the treatment. In this case, the confounder <span class="math inline">\(U\)</span> can affect the potential outcomes. (This diagram is technically a SWIT, which is template, since I have generically referred to the potential treatment <span class="math inline">\(T^a\)</span> and potential outcome <span class="math inline">\(Y^t\)</span>.)</p></li>
+<li><p>Not shown in this diagram are the observed <span class="math inline">\(T_i\)</span> and <span class="math inline">\(Y_i\)</span>; we assume that <span class="math inline">\(T_i = (T_i^a | A = a)\)</span> and <span class="math inline">\(Y_i = (Y_i^t | T = t)\)</span></p></li>
+<li><p>Also not shown on the graph is the causal estimand of an exposure for individual <span class="math inline">\(i\)</span>, which can be defined as <span class="math inline">\(CE_i \equiv Y^1_i - Y^0_i\)</span>. We can calculate the average causal effect, <span class="math inline">\(E[CE]\)</span>, for the sample as a whole as well as for subgroups.</p></li>
+</ol>
+</div>
+<div id="dgp-for-potential-outcomes" class="section level3">
+<h3>DGP for potential outcomes</h3>
+<p>The workhorse of this data generating process is a logistic sigmoid function that represents the mean potential outcome <span class="math inline">\(Y^t\)</span> at each value of <span class="math inline">\(u\)</span>. This allows us to easily generate homogeneous or heterogeneous causal effects. The function has four parameters, <span class="math inline">\(M\)</span>, <span class="math inline">\(\gamma\)</span>, <span class="math inline">\(\delta\)</span>, and <span class="math inline">\(\alpha\)</span>:</p>
+<p><span class="math display">\[
+Y^t = f(u) = M/[1 + exp(-\gamma(u - \delta))] + \alpha,
+\]</span>
+where <span class="math inline">\(M\)</span> is the maximum of the function (assuming the minimum is <span class="math inline">\(0\)</span>), <span class="math inline">\(\gamma\)</span> is the steepness of the curve, <span class="math inline">\(\delta\)</span> is the inflection point of the curve, and <span class="math inline">\(\alpha\)</span> is a vertical shift of the entire curve. This function is easily implemented in R:</p>
+<pre class="r"><code>fYt &lt;- function(x, max, grad, inflect = 0, offset = 0) {
+  ( max / (1 + exp( -grad * (x - inflect) ) ) ) + offset
+}</code></pre>
+<p>Here is a single curve based on an arbitrary set of parameters:</p>
+<pre class="r"><code>ggplot(data = data.frame(x = 0), mapping = aes(x = x)) +
+  stat_function(fun = fYt,  size = 2,
+    args = list(max = 1.5, grad = 5, inflect = 0.2)) +
+  xlim(-1.5, 1.5)</code></pre>
+<p><img src="/post/2018-11-20-generating-data-to-explore-the-myriad-causal-effects_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>The figures below show the mean of the potential outcomes <span class="math inline">\(Y^0\)</span> and <span class="math inline">\(Y^1\)</span> under two different scenarios. On the left, the causal effect at each level of <span class="math inline">\(u\)</span> is constant, and on the right, the causal effect changes over the different values of <span class="math inline">\(u\)</span>, increasing rapidly when <span class="math inline">\(0 &lt; u &lt; 0.2\)</span>.</p>
+<p><img src="/post/2018-11-20-generating-data-to-explore-the-myriad-causal-effects_files/figure-html/unnamed-chunk-5-1.png" width="1056" /></p>
+</div>
+<div id="homogeneous-causal-effect" class="section level3">
+<h3>Homogeneous causal effect</h3>
+<p>Here’s a closer look at the the different causal effects under the first scenario of homogeneous causal effects across values of <span class="math inline">\(u\)</span> by generating some data. The data definitions are provided in three steps. In the first step, the confounder <span class="math inline">\(U\)</span> is generated. Think of this as health status, which can take on values ranging from <span class="math inline">\(-0.5\)</span> to <span class="math inline">\(0.5\)</span>, where lower scores indicate worse health.</p>
+<p>Next up are the definitions of the potential outcomes of treatment and outcome, both of which are dependent on the unmeasured confounder.</p>
+<p>(Though technically not a definition step, the instrument assignment (variable <span class="math inline">\(A\)</span>) is generated later using <code>trtAssign</code>.)</p>
+<p>In the final steps, we generate the observed treatment <span class="math inline">\(T\)</span> (a function of both <span class="math inline">\(A\)</span> and complier status <span class="math inline">\(S\)</span>), and observed outcome <span class="math inline">\(Y\)</span> (which is determined by <span class="math inline">\(T\)</span>). A complier status is determined based on the potential outcomes of treatment.</p>
+<pre class="r"><code>library(simstudy)
+
+### Potential treatments U and outcomes Y
+
+def &lt;- defData(varname = &quot;U&quot;, formula = &quot;-0.5;0.5&quot;, 
+               dist = &quot;uniform&quot;)
+def &lt;- defData(def, varname = &quot;T0&quot;, 
+               formula = &quot;-2 + 4 * U&quot;,
+               dist = &quot;binary&quot;, link = &quot;logit&quot;)
+def &lt;- defData(def, varname = &quot;T1x&quot;, 
+               formula = &quot;4 * U &quot;,
+               dist = &quot;binary&quot;, link = &quot;logit&quot;)
+
+# This prevents any deniers:
+
+def &lt;- defData(def, varname = &quot;T1&quot;,
+               formula = &quot;(T0 == 0) * T1x + (T0 == 1) * 1&quot;,
+               dist = &quot;nonrandom&quot;)
+
+def &lt;- defData(def, varname = &quot;Y0&quot;, 
+               formula = &quot;fYt(U, 5, 15, 0.02)&quot;,
+               variance = 0.25)
+def &lt;- defData(def, varname = &quot;Y1&quot;, 
+               formula = &quot;fYt(U, 5.0, 15, 0.02, 1)&quot;,
+               variance = 0.25)
+
+### Observed treatments
+
+defA &lt;- defDataAdd(varname = &quot;T&quot;,
+                   formula = &quot;(A == 0) * T0 + (A == 1) * T1&quot;)
+defA &lt;- defDataAdd(defA, varname = &quot;Y&quot;, 
+                   formula = &quot;(T == 0) * Y0 + (T == 1) * Y1&quot;,
+                   dist = &quot;nonrandom&quot;)
+defA &lt;- defDataAdd(defA, varname = &quot;Y.r&quot;, 
+                   formula = &quot;(A == 0) * Y0 + (A == 1) * Y1&quot;,
+                   dist = &quot;nonrandom&quot;)
+
+### Complier status
+
+defC &lt;- defCondition(condition = &quot;T0 == 0 &amp; T1 == 0&quot;, formula = 1,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;T0 == 0 &amp; T1 == 1&quot;, formula = 2,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;T0 == 1 &amp; T1 == 1&quot;, formula = 3,
+                     dist = &quot;nonrandom&quot;)</code></pre>
+<p>Once all the definitions are set, it is quite simple to generate the data:</p>
+<pre class="r"><code>set.seed(383726)
+
+# Step 1 - generate U and potential outcomes for T and Y
+
+dx &lt;- genData(500, def)
+
+# Step 2 - randomly assign instrument
+
+dx &lt;- trtAssign(dx, nTrt = 2, grpName = &quot;A&quot; )
+
+# Step 3 - generate observed T and Y
+
+dx &lt;- addColumns(defA, dx)
+  
+# Step 4 - determine complier status
+
+dx &lt;- addCondition(defC, dx, &quot;S&quot;)
+dx &lt;- genFactor(dx, &quot;S&quot;, labels = c(&quot;Never&quot;, &quot;Complier&quot;, &quot;Always&quot;))</code></pre>
+</div>
+<div id="looking-at-the-data" class="section level3">
+<h3>Looking at the data</h3>
+<p>Here are a few records from the generated dataset:</p>
+<pre class="r"><code>dx</code></pre>
+<pre><code>##       id S A      U T0 T1x T1     Y0   Y1 T      Y  Y.r       fS
+##   1:   1 1 1  0.282  0   0  0 5.5636 6.01 0 5.5636 6.01    Never
+##   2:   2 3 0  0.405  1   1  1 4.5534 5.83 1 5.8301 4.55   Always
+##   3:   3 3 1  0.487  1   1  1 6.0098 5.82 1 5.8196 5.82   Always
+##   4:   4 2 1  0.498  0   1  1 5.2695 6.43 1 6.4276 6.43 Complier
+##   5:   5 1 1 -0.486  0   0  0 0.0088 1.02 0 0.0088 1.02    Never
+##  ---                                                            
+## 496: 496 3 0 -0.180  1   0  1 0.8384 1.10 1 1.0966 0.84   Always
+## 497: 497 3 1  0.154  1   1  1 4.9118 5.46 1 5.4585 5.46   Always
+## 498: 498 1 1  0.333  0   0  0 5.4800 5.46 0 5.4800 5.46    Never
+## 499: 499 1 1  0.049  0   0  0 3.4075 5.15 0 3.4075 5.15    Never
+## 500: 500 1 1 -0.159  0   0  0 0.4278 0.96 0 0.4278 0.96    Never</code></pre>
+<p>The various average causal effects, starting with the (marginal) average causal effect and ending with the average causal effect for those treated are all close to <span class="math inline">\(1\)</span>:</p>
+<pre class="r"><code>ACE &lt;- dx[, mean(Y1 - Y0)]
+AACE &lt;- dx[fS == &quot;Always&quot;, mean(Y1 - Y0)]
+CACE &lt;- dx[fS == &quot;Complier&quot;, mean(Y1 - Y0)]
+NACE &lt;- dx[fS == &quot;Never&quot;, mean(Y1 - Y0)]
+ACT &lt;- dx[T == 1, mean(Y1 - Y0)]</code></pre>
+<pre><code>##    ceType   ce
+## 1:    ACE 0.97
+## 2:   AACE 0.96
+## 3:   CACE 1.00
+## 4:   NACE 0.96
+## 5:    ACT 1.05</code></pre>
+<p>Here is a visual summary of the generated data. The upper left shows the underlying data generating functions for the potential outcomes and the upper right plot shows the various average causal effects: average causal effect for the population (ACE), average causal effect for always-takers (AACE), complier average causal effect (CACE), average causal effect for never-takers (NACE), and the average causal effect for the treated (ACT).</p>
+<p>The true individual-specific causal effects color-coded based on complier status (that we could never observe in the real world, but we can here in simulation world) are on the bottom left, and the true individual causal effects for those who received treatment are on the bottom right. These figures are only remarkable in that all average causal effects and individual causal effects are close to <span class="math inline">\(1\)</span>, reflecting the homogeneous causal effect data generating process.</p>
+<p><img src="/post/2018-11-20-generating-data-to-explore-the-myriad-causal-effects_files/figure-html/unnamed-chunk-11-1.png" width="1056" /></p>
+</div>
+<div id="heterogenous-causal-effect-1" class="section level3">
+<h3>Heterogenous causal effect #1</h3>
+<p>Here is a set of figures for a heterogeneous data generating process (which can be seen on the upper left). Now, the average causal effects are quite different from each other. In particular <span class="math inline">\(ACE &lt; CACE &lt; ACT\)</span>. Obviously, none of these quantities is wrong, they are just estimating the average effect for different groups of people that are characterized by different levels of health status <span class="math inline">\(U\)</span>:</p>
+<p><img src="/post/2018-11-20-generating-data-to-explore-the-myriad-causal-effects_files/figure-html/unnamed-chunk-12-1.png" width="1056" /></p>
+</div>
+<div id="heterogenous-causal-effect-2" class="section level3">
+<h3>Heterogenous causal effect #2</h3>
+<p>Finally, here is one more scenario, also with heterogeneous causal effects. In this case <span class="math inline">\(ACE \approx CACE\)</span>, but the other effects are quite different, actually with different signs.</p>
+<p><img src="/post/2018-11-20-generating-data-to-explore-the-myriad-causal-effects_files/figure-html/unnamed-chunk-13-1.png" width="1056" /></p>
+</div>
+<div id="next-up-estimating-the-causal-effects" class="section level3">
+<h3>Next up: estimating the causal effects</h3>
+<p>In the second part of this post, I will use this DGP and estimate these effects using various modeling techniques. It will hopefully become apparent that different modeling approaches provide estimates of different causal estimands.</p>
+</div>
