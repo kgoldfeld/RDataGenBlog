@@ -1,0 +1,433 @@
+---
+title: Horses for courses, or to each model its own (causal effect)
+author: ''
+date: '2018-11-28'
+slug: different-models-estimate-different-causal-effects-part-ii
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+In my previous [post](https://www.rdatagen.net/post/generating-data-to-explore-the-myriad-causal-effects/), I described a (relatively) simple way to simulate observational data in order to compare different methods to estimate the causal effect of some exposure or treatment on an outcome. The underlying data generating process (DGP) included a possibly unmeasured confounder and an instrumental variable. (If you haven't already, you should probably take a quick [look](https://www.rdatagen.net/post/generating-data-to-explore-the-myriad-causal-effects/).)
+
+A key point in considering causal effect estimation is that the average causal effect depends on the individuals included in the average. If we are talking about the causal effect for the population - that is, comparing the average outcome if *everyone* in the population received treatment against the average outcome if *no one* in the population received treatment - then we are interested in the average causal effect (ACE).
+
+However, if we have an instrument, and we are talking about *only the compliers* (those who don't get the treatment when *not* encouraged but do get it when they *are* encouraged) - then we will be measuring the complier average causal effect (CACE). The CACE is a comparison of the average outcome when *all compliers* receive the treatment with the average outcome when *none of the compliers* receive the treatment.
+
+And the third causal effect I will consider here is the average causal effect for the treated (ACT). This population is defined by those who actually received the treatment (regardless of instrument or complier status). Just like the other causal effects, the ACT is a comparison of the average outcome when all those who were actually treated did get treatment (this is actually what we observe) with the average outcome if all those who were actually treated didn't get the treatment (the counterfactual of the treated).
+
+As we will see in short order, three different estimation methods using (almost) the same data set provide estimates for each of these three different causal estimands.
+
+### The data generating process
+
+For the purposes of this illustration, I am generating data with heterogeneous causal effects that depend on an measured or unmeasured underlying health status $U$. (I'm skipping over the details of the DGP that I laid out in [part I](https://www.rdatagen.net/post/generating-data-to-explore-the-myriad-causal-effects/).) Higher values of $U$ indicate a sicker patient. Those patients are more likely to have stronger effects, and are more likely to seek treatment (independent of the instrument).
+
+Here is a set of plots that show the causal effects by health status $U$ and various distributions of the causal effects:
+
+```{r, echo = FALSE}
+options(digits = 3)
+
+fYt <- function(x, max, grad, inflect = 0, offset = 0) {
+  ( max / (1 + exp( -grad * (x - inflect) ) ) ) + offset
+}
+
+fCE <- function(x, l0, l1) {
+  do.call(fYt, c(list(x), l1)) - do.call(fYt, c(list(x=x), l0))
+}
+
+# Generate data
+
+genIVdata <- function(n, def, defA, defC) {
+  
+  dx <- genData(n, def)
+  dx <- trtAssign(dx, nTrt = 2, grpName = "A" )
+  dx <- addColumns(defA, dx)
+  dx <- addCondition(defC, dx, "S")
+  dx <- genFactor(dx, "S", labels = c("Never", "Complier", "Always"))
+
+  dx[]
+}
+
+# Plot data
+
+library(inlmisc)
+
+pCE <- function(l0, l1, addTitle = NULL) {
+  
+  cols <- c(Effect="grey50", Y0="grey98", Y1="black" )
+  labs <- factor(c("CE = Y1 - Y0", "Y0", "Y1"))
+  
+  p <- ggplot(data = data.frame(x = 0), mapping = aes(x = x)) +
+    geom_hline(yintercept = 0, color = "white") +
+    stat_function(fun = fYt, 
+        aes(color = "Y1"), size = 2,
+        args = l1) + 
+    stat_function(fun = fYt, 
+        aes(color = "Y0"), size = 2,
+        args = l0) + 
+    stat_function(fun = fCE, 
+        aes(color = "Effect"), size = .5, lty = 2,
+        args = list(l0, l1)) + 
+    scale_x_continuous(limits = c(-.5, .5), name = "U") +
+    scale_y_continuous(limits = c(-2, 7), breaks=seq(-2, 6, 2), 
+        name = "potential outcome") +
+    theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(.20, .80),
+        legend.key = element_blank(),
+        legend.background = element_blank()) +
+    scale_colour_manual(values= cols,
+        labels = labs,
+        guide = guide_legend(reverse = TRUE))
+  
+    if (!is.null(addTitle)) p + ggtitle(addTitle)
+    else p
+}
+
+actCE <- function(dx) {
+  
+  ACE <- dx[, mean(Y1 - Y0)]
+  AACE <- dx[fS == "Always", mean(Y1 - Y0)]
+  CACE <- dx[fS == "Complier", mean(Y1 - Y0)]
+  NACE <- dx[fS == "Never", mean(Y1 - Y0)]
+  ACT <- dx[T == 1, mean(Y1 - Y0)]
+  
+  dce <- data.table(ceType = factor(c("ACT", "NACE", "CACE", "AACE", "ACE"),
+           levels = c("ACT", "NACE", "CACE", "AACE", "ACE")), 
+           ce = c(ACT, NACE, CACE, AACE, ACE))
+  
+  dce[]
+}
+
+plot4 <- function(dx, l0, l1) {
+  
+  dp <- dx[, .(Y1, Y0, U, fS)]
+  dp[, ce := Y1 - Y0]
+
+  pind <- ggplot(data = dp, aes(x=U, y = ce)) +
+    geom_hline(yintercept = 0, color = "white") +
+    geom_point(aes(color = fS), size = 1) +
+    theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(.85, .13),
+        legend.background = element_blank(),
+        legend.key = element_blank(),
+        legend.spacing.y = unit(0.01, 'cm'), 
+        legend.key.size = unit(.5, "cm")) +
+    ylab("causal effect") +
+    scale_color_manual(values = 
+        as.vector(GetTolColors(3, scheme = "muted"))) +
+    scale_y_continuous(limits = c(-1.5, 3)) +
+    ggtitle("Individual causal effects") 
+
+  dtrt <- dx[T == 1, .(U, Y0, Y1, ce = Y1 - Y0)]
+
+  ptrt <- ggplot(data = dtrt, aes(x=U, y = ce)) +
+    geom_hline(yintercept = 0, color = "white") +
+    geom_point(size = 1) +
+    theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+    ylab("causal effect") +
+    scale_y_continuous(limits = c(-1.5, 3)) +
+    ggtitle("Individual causal effect - treated only")
+  
+  dce <- actCE(dx)
+
+  tol3 <- as.vector(GetTolColors(3, scheme = "muted"))
+  cols <- c("black", tol3, "grey50")
+
+  pavg <- ggplot(data = dce, aes(y = ce, x = ceType)) +
+    geom_bar(aes(fill = ceType), stat = "identity", width = .20) +
+    geom_hline(yintercept = 0, color = "white") +
+    coord_flip() +
+    scale_fill_manual(values = cols) +
+    scale_y_continuous(limits = c(-1, 3), name = "causal effect") +
+    theme(panel.grid = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "none") +
+    ggtitle("Average causal effects")
+
+  pDGP <- pCE(l0, l1, "Mean potential outcomes for DGP")
+
+  gridExtra::grid.arrange(pDGP, pavg, pind, ptrt,  nrow = 2)
+  
+}
+
+# Define DGP
+
+def <- defData(varname = "U", formula = "-0.5;0.5", 
+               dist = "uniform")
+def <- defData(def, varname = "T0", 
+               formula = "-2 + 4 * U",
+               dist = "binary", link = "logit")
+def <- defData(def, varname = "T1x", 
+               formula = "4 * U ",
+               dist = "binary", link = "logit")
+def <- defData(def, varname = "T1",
+               formula = "(T0 == 0) * T1x + (T0 == 1) * 1",
+               dist = "nonrandom")
+def <- defData(def, varname = "Y0", 
+               formula = "fYt(U, 2.5, 8, 0)",
+               variance = 0.25)
+def <- defData(def, varname = "Y1", 
+               formula = "fYt(U, 5.0, 15, 0.04)",
+               variance = 0.25)
+
+defA <- defDataAdd(varname = "T",
+                   formula = "(A == 0) * T0 + (A == 1) * T1")
+defA <- defDataAdd(defA, varname = "Y", 
+                   formula = "(T == 0) * Y0 + (T == 1) * Y1",
+                   dist = "nonrandom")
+defA <- defDataAdd(defA, varname = "Y.r", 
+                   formula = "(A == 0) * Y0 + (A == 1) * Y1",
+                   dist = "nonrandom")
+
+defC <- defCondition(condition = "T0 == 0 & T1 == 0", formula = 1, 
+                     dist = "nonrandom")
+defC <- defCondition(defC, condition = "T0 == 0 & T1 == 1", formula = 2, 
+                     dist = "nonrandom")
+defC <- defCondition(defC, condition = "T0 == 1 & T1 == 1", formula = 3,
+                     dist = "nonrandom")
+
+set.seed(31972)
+
+DT <- genIVdata(1001, def, defA, defC)
+```
+
+```{r, fig.height = 8, fig.width = 11, warning=FALSE, message=FALSE, echo = FALSE}
+l0 <- list(max = 2.5, grad = 8, inflect = 0.0)
+l1 <- list(max = 5, grad = 15, inflect = 0.04)
+
+plot4(DT, l0, l1)
+```
+
+### Instrumental variable
+
+First up is IV estimation. The two-stage least squares regression method has been implemented in the R package `ivpack`. In case you didn't check out the IV reference last time, here is an excellent [tutorial](https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4201653/) that describes IV methods in great, accessible detail. The model specification requires the intervention or exposure variable (in this case $T$) and the instrument ($A$).
+
+```{r, message = FALSE}
+library(ivpack)
+
+ivmodel <- ivreg(formula = Y ~ T | A, data = DT)
+broom::tidy(ivmodel)
+```
+
+The causal effect that IV methods is often called the local area treatment effect (LATE), which is just another way to talk about the CACE. Essentially, IV is estimating the causal effect for people whose behavior is modified (or would be modified) by the instrument. If we calculate the average CACE using the (unobservable) potential outcomes data for the compliers, the estimate is quite close to the IV estimate of 1.52:
+
+```{r}
+DT[fS == "Complier", mean(Y1 - Y0)]
+```
+
+### Propensity score matching
+
+If we were somehow able to measure $U$, the underlying health status, we would be in a position to estimate the average causal effect for the treated, what I have been calling ACT, using propensity score matching. The idea here is to create a comparison group from the untreated sample that looks similar to the treated in every way except for treatment. This control is designed to be the counterfactual for the treated. 
+
+One way to do this is by matching on the propensity score - the probability of treatment. (See this [article](https://www.tandfonline.com/doi/abs/10.1080/00273171.2011.568786) on propensity score methods for a really nice overview on the topic.)
+
+To estimate the probability of treatment, we fit a "treatment" model, in this case a logistic generalized linear model since the treatment is binary. From this model, we can generate a predicted value for each individual. We can use software, in this case the R package `Matching`, to find individuals in the untreated group who share the exact or very similar propensity for treatment. Actually in this case, I will "match with replacement" so that while each treated individual will be included once, some controls might be matched with more than one treated (and those that are included repeatedly will be counted multiple times in the data).
+
+It turns out that when we do this, the two groups will be balanced on everything that matters. In this case, the "everything"" that matters is only health status $U$. (We actually could have matched directly on $U$ here, but I wanted to show propensity score matching, which is useful when there are many confounders that matter, and matching on them separately would be extremely difficult or impossible.)
+
+Once we have the two groups, all we need to do is take the difference of the means of the two groups and that will give us an estimate for ACT. We could use bootstrapping methods to estimate the standard error. Below, we will use Monte Carlo simulation, so that will give us sense of the variability.
+
+```{r, message = FALSE}
+library(Matching)
+
+# Treatment model and ps estimation
+
+glm.fit <- glm(T ~ U, family=binomial, data=DT)
+DT$ps = predict(glm.fit,type="response")
+
+setkey(DT, T, id)
+
+TR = DT$T
+X = DT$ps
+
+# Matching with replacement
+
+matches <- Match(Y = NULL, Tr = TR, X = X, ties = FALSE, replace = TRUE)
+
+# Select matches from original dataset
+
+dt.match <- DT[c(matches$index.treated, matches$index.control)]
+
+# ACT estimate 
+
+dt.match[T == 1, mean(Y)] - dt.match[T == 0, mean(Y)]
+```
+
+Once again, the matching estimate is quite close to the "true" value of the ACT calculated using the potential outcomes:
+
+```{r}
+DT[T == 1, mean(Y1 - Y0)]
+```
+
+### Inverse probability weighting
+
+This last method also uses the propensity score, but as a weight, rather than for the purposes of matching. Each individual weight is the inverse probability of receiving the treatment they actually received. (I wrote a series of posts on IPW; you can look [here](https://www.rdatagen.net/post/inverse-probability-weighting-when-the-outcome-is-binary/) if you want to see a bit more.)
+
+To implement IPW in this simple case, we just calculate the weight based on the propensity score, and use that weight in a simple linear regression model:
+
+```{r}
+DT[, ipw :=  1 / ((ps * T) + ( (1 - ps) * (1 - T) ))]
+
+lm.ipw <- lm(Y ~ T, weights = DT$ipw, data = DT)
+broom::tidy(lm.ipw)
+```
+
+The IPW estimate is quite close to the estimate of the average causal effect (ACE). That is, the IPW is the marginal average:
+
+```{r}
+DT[, mean(Y1 - Y0)]
+```
+
+### Randomized clinical trial
+
+If we can make the assumption that $A$ is not the instrument but is the actual randomization *and* that everyone is a complier (i.e. everyone follows the randomized protocol), then the estimate we get from comparing treated with controls will also be quite close to the ACE of 1.1. So, the randomized trial in its ideal execution provides an estimate of the average causal effect for the entire sample.
+
+```{r}
+randtrial <- lm(Y.r ~ A, data = DT)
+broom::tidy(randtrial)
+```
+
+### Intention-to-treat from RCT
+
+Typically, however, in a randomized trial, there isn't perfect compliance, so randomization is more like strong encouragement. Studies are typically analyzed using an intent-to-treat approach, doing the analysis *as if* protocol was followed correctly. This method is considered conservative (in the sense that the estimated effect is closer to 0 than true ACE is), because many of those assumed to have been treated were not actually treated, and *vice versa*. In this case, the estimated ITT quantity is quite a bit smaller than the estimate from a perfectly executed RCT (which is the ACE):
+
+```{r}
+itt.fit <- lm(Y ~ A, data = DT)
+broom::tidy(itt.fit)
+```
+
+### Per protocol analysis from RCT
+
+Yet another approach to analyzing the data is to consider only those cases that followed protocol. So, for those randomized to treatment, we would look only at those who actually were treated. And for those randomized to control, we would only look at those who did not get treatment. It is unclear what this is actually measuring since the two groups are not comparable: the treated group includes both compliers and always-takers, whereas the control group includes both compliers and never-takers. If always-takers have larger causal effects on average and never-takers have smaller causal effects on average, the per protocol estimate will be larger than the average causal effect (ACE), and will not represent any other obvious quantity.
+
+And with this data set, this is certainly the case:
+
+```{r}
+DT[A == 1 & T == 1, mean(Y)] - DT[A == 0 & T == 0, mean(Y)] 
+```
+
+### Monte Carlo simulation
+
+I leave you with a figure that shows the point estimates and 95% confidence intervals for each of these methods. Based on 1000 replications of the data set, this series of plots underscores the relationship of the methods to the various causal estimands.
+
+```{r, echo = FALSE}
+psEst <- function(dx) {
+  
+  glm.fit <- glm(T ~ U, family=binomial, data=dx)
+  dx$ps = predict(glm.fit,type="response")
+
+  setkey(dx, T, id)
+
+  TR = dx$T
+  X = dx$ps
+
+  # Matching with replacement
+
+  matches <- Match(Y = NULL, Tr = TR, X = X, ties = FALSE, replace = TRUE)
+
+  # Select matches from original dataset
+
+  dt.match <- dx[c(matches$index.treated, matches$index.control)]
+  
+  dt.match[T == 1, mean(Y)] - dt.match[T == 0, mean(Y)]
+  
+}
+
+ipwEst <- function(dx) {
+  
+  glm.fit <- glm(T ~ U, family=binomial, data=dx)
+  dx$ps = predict(glm.fit,type="response")
+
+  dx[, ipw :=  1 / (ps * T + (1-ps) * (1 - T))]
+
+  lm.ipw <- lm(Y ~ T, weights = dx$ipw, data = dx)
+  broom::tidy(lm.ipw)[2, 2]
+}
+
+rctEst <- function(dx) {
+  randtrial <- lm(Y.r ~ A, data = dx)
+  broom::tidy(randtrial)[2, 2]
+}
+
+ittEst <- function(dx) {
+  itt.fit <- lm(Y ~ A, data = dx)
+  broom::tidy(itt.fit)[2, 2]
+}
+
+ppEst <- function(dx) {
+  dx[A == 1 & T == 1, mean(Y)] - DT[A == 0 & T == 0, mean(Y)] 
+}
+
+regEst <- function(dx) {
+  regfit <- lm(Y ~ T + U, data = dx) 
+  broom::tidy(regfit)[2, 2]
+}
+
+genEsts <- function() {
+  
+  DT <- genIVdata(1000, def, defA, defC)
+  
+  ivmodel <- broom::tidy(ivreg(formula = Y ~ T | A, data = DT, x = TRUE))[2,2]
+  psmodel <- psEst(DT)
+  ipwmodel <- ipwEst(DT)
+  rct <- rctEst(DT)
+  itt <- ittEst(DT)
+  pp <- ppEst(DT)
+
+  trueCE <- actCE(DT)
+  
+  data.table(iv = ivmodel, ps = psmodel, ipw = ipwmodel,
+             rct = rct, itt = itt, pp = pp,
+             CACE = trueCE[ceType == "CACE", ce],
+             ACT = trueCE[ceType == "ACT", ce],
+             ACE = trueCE[ceType == "ACE", ce])
+}
+```
+
+```{r, echo = FALSE, fig.height = 4.5}
+library(parallel)
+library(ggthemes)
+
+result <- mclapply(1:1000, function(x) genEsts(), mc.cores = 4)
+dt.result <- rbindlist(result)
+
+sumx <- function(x) {
+  mu <- mean(x)
+  sd <- sd(x)
+  l95 <- quantile(x, 0.025)
+  u95 <- quantile(x, 0.975)
+  
+  data.table(mu, sd, l95, u95)
+}
+
+lsum <- lapply(dt.result, function(x) sumx(x))
+sumtab <- rbindlist(lsum, id = "id")
+
+sumtab[, ce := c("CACE", "ACT", "ACE", "ACE", "Other", "Other",
+                 "CACE", "ACT", "ACE" )]
+sumtab[, ce := factor(ce, levels = c("ACE", "CACE", "ACT", "Other"))]
+sumtab[, est := c("IV", "Propensity score", "IPW", "RCT", "ITT", "Per protocol",
+                  "Truth", "Truth", "Truth" )]
+
+p <- ggplot(data = sumtab, aes(x = mu, y = est)) +
+  geom_point() +
+  geom_segment(aes(y = est, yend = est, x = l95, xend = u95, 
+                   color = est=="Truth")) +
+  facet_grid(ce ~ ., scales = "free_y") +
+  scale_x_continuous(limits = c(0, 3), 
+                     name = "Effect estimate with 95% CI") +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.title.y = element_blank(),
+        legend.position = "none") +
+  scale_color_ptol()
+  
+p
+```
+
+
+
