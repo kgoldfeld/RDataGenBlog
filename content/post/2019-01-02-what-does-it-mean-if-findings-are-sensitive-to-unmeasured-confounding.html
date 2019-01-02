@@ -1,0 +1,279 @@
+---
+title: 
+  "Considering sensitivity to unmeasured confounding: part 1"
+author: ''
+date: '2019-01-02'
+slug: what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>Principled causal inference methods can be used to compare the effects of different exposures or treatments we have observed in non-experimental settings. These methods, which include matching (with or without propensity scores), inverse probability weighting, and various g-methods, help us create comparable groups to simulate a randomized experiment. All of these approaches rely on a key assumption of <em>no unmeasured confounding</em>. The problem is, short of subject matter knowledge, there is no way to test this assumption empirically.</p>
+<p>The general approach to this problem has been to posit a level of unmeasured confounding that would be necessary to alter the conclusions of a study. The classic example (which also is probably the first) comes from the debate on the effects of smoking on lung cancer. There were some folks who argued that there was a genetic factor that was leading people to smoke and was simultaneously the cause of cancer. The great statistician Jerome Cornfield (who, I just saw on <a href="https://en.wikipedia.org/wiki/Jerome_Cornfield">Wikipedia</a>, happens to have shared my birthday), showed that an unobserved confounder (like a particular genetic factor) would need to lead to a 9-fold increase in the odds of smoking to explain away the association between smoking and cancer. Since such a strong factor was not likely to exist, he argued, the observed association was most likely real. (For a detailed discussion on various approaches to these kinds of sensitivity analyses, look at this paper by <a href="https://link.springer.com/content/pdf/10.1007%2Fs11121-012-0339-5.pdf"><em>Liu, Kuramoto, and Stuart</em></a>.)</p>
+<p>My goal here is to think a bit more about what it means for a measured association to be sensitive to unmeasured confounding. When I originally started thinking about this, I thought that an association will be sensitive to unmeasured confounding if the underlying data generation process (DGP) <em>actually includes</em> an unmeasured confounder. Sure, if this is the case - that there actually is unmeasured confounding - then it is more likely that a finding will be sensitive to unmeasured confounding. But, this isn’t really that interesting, because we can’t observe the underlying DGP. And it is not necessarily the case that data sensitive to unmeasured confounding was in fact generated through some process with an unmeasured confounder.</p>
+<div id="is-there-room-for-an-alternative-data-generation-process" class="section level3">
+<h3>Is there room for an alternative data generation process?</h3>
+<p>When considering sensitivity, it may be more useful to talk about the plausibility of alternative models. In this context, sensitivity is inherently related to the (1) the strength of the association of the observed exposure and outcome, and (2) the uncertainty (i.e. variability) around that association. Put succinctly, a relatively weak association with a lot of variability will be much more sensitive to unmeasured confounding than a strong association with little uncertainty. If you think in visual terms, when thinking about sensitivity, you might ask “do the data provide room for an alternative model?”</p>
+</div>
+<div id="an-alternative-model" class="section level3">
+<h3>An alternative model</h3>
+<p>Let’s say we observe some exposure <span class="math inline">\(D\)</span> and we are interested in its causal relationship with an outcome <span class="math inline">\(Y\)</span>, which we also observe. I am assuming <span class="math inline">\(D\)</span> and <span class="math inline">\(Y\)</span> are both continuous and normally distributed, which makes all of this work, but also limits how far I can take this. (To be more general, we will ultimately need more powerful tools, such as the <code>R</code> package <code>treatSens</code>, but more on that later.) Also, let’s assume for simplicity’s sake that there are no <em>measured</em> confounders - though that is not a requirement here.</p>
+<p>With this observed data, we can go ahead and fit a simple linear regression model:</p>
+<p><span class="math display">\[ Y = k_0 + k_1D,\]</span>
+where <span class="math inline">\(k_1\)</span> is the parameter of interest, the measured association of exposure <span class="math inline">\(D\)</span> with the outcome <span class="math inline">\(Y\)</span>. (Again for simplicity, I am assuming <span class="math inline">\(k_1 &gt; 0\)</span>.)</p>
+<p>The question is, is there a possible underlying data generating process where <span class="math inline">\(D\)</span> plays a minor role or none at all? For example, is there a possible DGP that looks like this:</p>
+<p><span class="math display">\[ 
+\begin{aligned}
+D &amp;= \alpha_0 + \alpha_1 U + \epsilon_d \\
+Y &amp;= \beta_0 + \beta_1 D + \beta_2 U + \epsilon_y,
+\end{aligned}
+\]</span></p>
+<p>where <span class="math inline">\(\beta_1 &lt;&lt; k_1\)</span>, or perhaps <span class="math inline">\(\beta_1 = 0\)</span>? That is, is there a process that generates the same observed distribution even though <span class="math inline">\(D\)</span> is not a cause of <span class="math inline">\(Y\)</span>? If so, how can we characterize that process, and is it plausible?</p>
+</div>
+<div id="simulation" class="section level3">
+<h3>Simulation</h3>
+<p>The observed DGP can be defined using <code>simstudy</code>. We can assume that the continuous exposure <span class="math inline">\(D\)</span> can always be normalized (by centering and dividing by the standard deviation). In this example, the coefficients <span class="math inline">\(k_0 = 0\)</span> and <span class="math inline">\(k_1 = 1.5\)</span>, so that a unit change in the normalized exposure leads, on average, to a positive change in <span class="math inline">\(Y\)</span> of 1.5 units:</p>
+<pre class="r"><code>defO &lt;- defData(varname = &quot;D&quot;, formula = 0, variance = 1)
+defO &lt;- defData(defO, varname = &quot;ey&quot;, formula = 0, variance = 25)
+defO &lt;- defData(defO, varname = &quot;Y&quot;, formula = &quot;1.5 * D + ey&quot;, 
+             dist = &quot;nonrandom&quot;)</code></pre>
+<p>We can generate the data and take a look at it:</p>
+<pre class="r"><code>set.seed(20181201)
+dtO &lt;- genData(1200, defO)</code></pre>
+<p> </p>
+<p><img src="/post/2019-01-02-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding_files/figure-html/unnamed-chunk-4-1.png" width="336" /></p>
+<p>Can we specify another DGP that removes <span class="math inline">\(D\)</span> from the process that defines <span class="math inline">\(Y\)</span>? The answer in this case is “yes.” Here is one such example where both <span class="math inline">\(D\)</span> and <span class="math inline">\(Y\)</span> are a function of some unmeasured confounder <span class="math inline">\(U\)</span>, but <span class="math inline">\(Y\)</span> is a function of <span class="math inline">\(U\)</span> alone. The variance and coefficient specifications for this DGP may seem a bit arbitrary (and maybe even lucky), but how I arrived at these quantities will be the focus of the second part of this post, coming soon. (My real goal here is to pique your interest.)</p>
+<pre class="r"><code>defA1 &lt;- defData(varname = &quot;U&quot;, formula = 0, variance = 1)
+defA1 &lt;- defData(defA1, varname = &quot;ed&quot;, formula = 0, variance = 0.727)
+defA1 &lt;- defData(defA1, varname = &quot;D&quot;,  formula = &quot;0.513 * U + ed&quot;, 
+              dist = &quot;nonrandom&quot;)
+defA1 &lt;- defData(defA1, varname = &quot;ey&quot;, formula = 0, variance = 20.412)
+defA1 &lt;- defData(defA1, varname = &quot;Y&quot;, formula = &quot;2.715 * U + ey&quot;, 
+              dist = &quot;nonrandom&quot;)</code></pre>
+<p>After generating this second data set, we can see that they look pretty similar to each other:</p>
+<pre class="r"><code>set.seed(20181201)
+
+dtO &lt;- genData(1200, defO)
+dtA1 &lt;- genData(1200, defA1)</code></pre>
+<p><img src="/post/2019-01-02-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>If the data are indeed similar, the covariance matrices generated by each of the data sets should also be similar, and they do appear to be:</p>
+<pre class="r"><code>dtO[, round(var(cbind(Y, D)), 1)]</code></pre>
+<pre><code>##      Y   D
+## Y 27.8 1.4
+## D  1.4 1.0</code></pre>
+<pre class="r"><code>dtA1[, round(var(cbind(Y, D)), 1)]</code></pre>
+<pre><code>##      Y   D
+## Y 26.8 1.3
+## D  1.3 1.0</code></pre>
+</div>
+<div id="non-unique-data-generating-process" class="section level3">
+<h3>Non-unique data generating process</h3>
+<p>The DGP defined by <code>defA1</code> is not a unique alternative. There are actually an infinite number of alternatives - here are two more, what I am calling “Alternative 2” and “Alternative 3” to go along with the first.</p>
+<pre class="r"><code>defA2 &lt;- defData(varname = &quot;U&quot;, formula = 0, variance = 1)
+defA2 &lt;- defData(defA2, varname = &quot;ed&quot;, formula = 0, variance = 0.794)
+defA2 &lt;- defData(defA2, varname = &quot;D&quot;,  formula = &quot;0.444 * U + ed&quot;, 
+              dist = &quot;nonrandom&quot;)
+defA2 &lt;- defData(defA2, varname = &quot;ey&quot;, formula = 0, variance = 17.939)
+defA2 &lt;- defData(defA2, varname = &quot;Y&quot;, formula = &quot;3.138 * U + ey&quot;, 
+              dist = &quot;nonrandom&quot;)</code></pre>
+<pre class="r"><code>defA3 &lt;- defData(varname = &quot;U&quot;, formula = 0, variance = 1)
+defA3 &lt;- defData(defA3, varname = &quot;ed&quot;, formula = 0, variance = 0.435)
+defA3 &lt;- defData(defA3, varname = &quot;D&quot;,  formula = &quot;0.745 * U + ed&quot;, 
+              dist = &quot;nonrandom&quot;)
+defA3 &lt;- defData(defA3, varname = &quot;ey&quot;, formula = 0, variance = 24.292)
+defA3 &lt;- defData(defA3, varname = &quot;Y&quot;, formula = &quot;1.869 * U + ey&quot;, 
+              dist = &quot;nonrandom&quot;)</code></pre>
+<p>Rather than looking at plots of the four data sets generated by these equivalent processes, I fit four linear regression models based on the observed <span class="math inline">\(D\)</span> and <span class="math inline">\(Y\)</span>. The parameter estimates and residual standard error estimates are quite close for all four:</p>
+<table style="text-align:center">
+<caption>
+<strong>Comparison of different data generating processes</strong>
+</caption>
+<tr>
+<td colspan="5" style="border-bottom: 1px solid black">
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+</td>
+<td>
+Observed
+</td>
+<td>
+Alt 1
+</td>
+<td>
+Alt 2
+</td>
+<td>
+Alt 3
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+D
+</td>
+<td>
+1.41<sup></sup>
+</td>
+<td>
+1.41<sup></sup>
+</td>
+<td>
+1.41<sup></sup>
+</td>
+<td>
+1.37<sup></sup>
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+</td>
+<td>
+(0.15)
+</td>
+<td>
+(0.15)
+</td>
+<td>
+(0.15)
+</td>
+<td>
+(0.15)
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+</td>
+<td>
+</td>
+<td>
+</td>
+<td>
+</td>
+<td>
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+Constant
+</td>
+<td>
+0.38<sup></sup>
+</td>
+<td>
+-0.33<sup></sup>
+</td>
+<td>
+-0.32<sup></sup>
+</td>
+<td>
+-0.33<sup></sup>
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+</td>
+<td>
+(0.15)
+</td>
+<td>
+(0.14)
+</td>
+<td>
+(0.14)
+</td>
+<td>
+(0.15)
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+</td>
+<td>
+</td>
+<td>
+</td>
+<td>
+</td>
+<td>
+</td>
+</tr>
+<tr>
+<td colspan="5" style="border-bottom: 1px solid black">
+</td>
+</tr>
+<tr>
+<td style="text-align:left">
+Residual Std. Error (df = 1198)
+</td>
+<td>
+5.08
+</td>
+<td>
+4.99
+</td>
+<td>
+4.98
+</td>
+<td>
+5.02
+</td>
+</tr>
+<tr>
+<td colspan="5" style="border-bottom: 1px solid black">
+</td>
+</tr>
+</table>
+<p> </p>
+</div>
+<div id="characterizing-each-data-generation-process" class="section level3">
+<h3>Characterizing each data generation process</h3>
+<p>While each of the alternate DGPs lead to the same (or very similar) observed data distribution, the underlying relationships between <span class="math inline">\(U\)</span>, <span class="math inline">\(D\)</span>, and <span class="math inline">\(Y\)</span> are quite different. In particular, if we inspect the correlations, we can see that they are quite different for each of the three alternatives. In fact, as you will see next time, all we need to do is specify a range of correlations for <span class="math inline">\(U\)</span> and <span class="math inline">\(D\)</span> to derive a curve that defines all the alternatives for a particular value of <span class="math inline">\(\beta_1\)</span>.</p>
+<pre class="r"><code>dtA1[, .(cor(U, D), cor(U, Y))]</code></pre>
+<pre><code>##       V1    V2
+## 1: 0.511 0.496</code></pre>
+<pre class="r"><code>dtA2[, .(cor(U, D), cor(U, Y))]</code></pre>
+<pre><code>##       V1    V2
+## 1: 0.441 0.579</code></pre>
+<pre class="r"><code>dtA3[, .(cor(U, D), cor(U, Y))]</code></pre>
+<pre><code>##       V1    V2
+## 1: 0.748 0.331</code></pre>
+</div>
+<div id="less-sensitivity" class="section level3">
+<h3>Less sensitivity</h3>
+<p>So, what does it mean for an observed data set to be sensitive to unmeasured confounding? I would suggest that if an equivalent derived alternative DGP is based on “lower” correlations of <span class="math inline">\(U\)</span> and <span class="math inline">\(D\)</span> and/or <span class="math inline">\(U\)</span> and <span class="math inline">\(Y\)</span>, then the observed data are more sensitive. What “low” correlation is will probably depend on the subject matter. I would say that the data we have been looking at above is moderately sensitive to unmeasured confounding.</p>
+<p>Here is an example of an observed data that might be considerably less sensitive:</p>
+<pre class="r"><code>defS &lt;- updateDef(defO, changevar = &quot;ey&quot;, newvariance = 4)
+
+defAS &lt;- defData(varname = &quot;U&quot;, formula = 0, variance = 1)
+defAS &lt;- defData(defAS, varname = &quot;ed&quot;, formula = 0, variance = 0.414)
+defAS &lt;- defData(defAS, varname = &quot;D&quot;,  formula = &quot;0.759 * U + ed&quot;, 
+              dist = &quot;nonrandom&quot;)
+defAS &lt;- defData(defAS, varname = &quot;ey&quot;, formula = 0, variance = 2.613)
+defAS &lt;- defData(defAS, varname = &quot;Y&quot;, formula = &quot;1.907 * U + ey&quot;, 
+              dist = &quot;nonrandom&quot;)
+
+set.seed(20181201)
+
+dtS &lt;- genData(1200, defS)
+dtAS &lt;- genData(1200, defAS)</code></pre>
+<p><img src="/post/2019-01-02-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>The plots look similar, as do the covariance matrix describing the observed data:</p>
+<pre class="r"><code>dtS[, round(var(cbind(Y, D)), 1)]</code></pre>
+<pre><code>##     Y   D
+## Y 6.3 1.4
+## D 1.4 1.0</code></pre>
+<pre class="r"><code>dtAS[, round(var(cbind(Y, D)), 1)]</code></pre>
+<pre><code>##     Y   D
+## Y 6.0 1.4
+## D 1.4 1.0</code></pre>
+<p>In this case, the both the correlations in the alternative DGP are quite high, suggesting a higher bar is needed to remove the association between <span class="math inline">\(D\)</span> and <span class="math inline">\(Y\)</span> entirely:</p>
+<pre class="r"><code>dtAS[, .(cor(U, D), cor(U, Y))]</code></pre>
+<pre><code>##       V1    V2
+## 1: 0.762 0.754</code></pre>
+<p>In the second part of this post I will show how I derived the alternative DGPs, and then use that derivation to create an <code>R</code> function to generate sensitivity curves that allow us to visualize sensitivity in terms of the correlation parameters <span class="math inline">\(\rho_{UD}\)</span> and <span class="math inline">\(\rho_{UY}\)</span>.</p>
+</div>
