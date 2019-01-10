@@ -1,0 +1,326 @@
+---
+title: 
+  "Considering sensitivity to unmeasured confounding: part 2"
+author: ''
+date: '2019-01-10'
+slug: what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding-ii
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In <a href="https://www.rdatagen.net/post/what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding/">part 1</a> of this 2-part series, I introduced the notion of <em>sensitivity to unmeasured confounding</em> in the context of an observational data analysis. I argued that an estimate of an association between an observed exposure <span class="math inline">\(D\)</span> and outcome <span class="math inline">\(Y\)</span> is sensitive to unmeasured confounding if we can conceive of a reasonable alternative data generating process (DGP) that includes some unmeasured confounder that will generate the same observed distribution the observed data. I further argued that reasonableness can be quantified or parameterized by the two correlation coefficients <span class="math inline">\(\rho_{UD}\)</span> and <span class="math inline">\(\rho_{UY}\)</span>, which measure the strength of the relationship of the unmeasured confounder <span class="math inline">\(U\)</span> with each of the observed measures. Alternative DGPs that are characterized by high correlation coefficients can be viewed as less realistic, and the observed data could be considered less sensitive to unmeasured confounding. On the other hand, DGPs characterized by lower correlation coefficients would be considered more sensitive.</p>
+<p>I need to pause here for a moment to point out that something similar has been described much more thoroughly by a group at NYU’s <a href="https://steinhardt.nyu.edu/priism/">PRIISM</a> (see <a href="https://www.tandfonline.com/doi/abs/10.1080/19345747.2015.1078862">Carnegie, Harada &amp; Hill</a> and <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.6973">Dorie et al</a>). In fact, this group of researchers has actually created an <code>R</code> package called <a href="https://cran.r-project.org/web/packages/treatSens/index.html">treatSens</a> to facilitate sensitivity analysis. I believe the discussion in these posts here is consistent with the PRIISM methodology, except <code>treatSens</code> is far more flexible (e.g. it can handle binary exposures) and provides more informative output than what I am describing. I am hoping that the examples and derivation of an equivalent DGP that I show here provide some additional insight into what sensitivity means.</p>
+<p>I’ve been wrestling with these issues for a while, but the ideas for the derivation of an alternative DGP were actually motivated by this recent <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.7904">note</a> by <em>Fei Wan</em> on an unrelated topic. (Wan shows how a valid instrumental variable may appear to violate a key assumption even though it does not.) The key element of Wan’s argument for my purposes is how the coefficient estimates of an observed model relate to the coefficients of an alternative (possibly true) data generation process/model.</p>
+<p>OK - now we are ready to walk through the derivation of alternative DGPs for an observed data set.</p>
+<div id="two-dgps-same-data" class="section level3">
+<h3>Two DGPs, same data</h3>
+<p>Recall from Part 1 that we have an observed data model</p>
+<p><span class="math display">\[ Y = k_0 + k_1D + \epsilon_Y\]</span>
+where <span class="math inline">\(\epsilon_Y \sim N\left(0, \sigma^2_Y\right)\)</span>. We are wondering if there is another DGP that could have generated the data that we have actually observed:</p>
+<p><span class="math display">\[ 
+\begin{aligned}
+D &amp;= \alpha_0 + \alpha_1 U + \epsilon_D \\
+Y &amp;= \beta_0 + \beta_1 D + \beta_2 U + \epsilon_{Y^*},
+\end{aligned}
+\]</span></p>
+<p>where <span class="math inline">\(U\)</span> is some unmeasured confounder, and <span class="math inline">\(\epsilon_D \sim N\left(0, \sigma^2_D\right)\)</span> and <span class="math inline">\(\epsilon_{Y^*} \sim N\left(0, \sigma^2_{Y^*}\right)\)</span>. Can we go even further and find an alternative DGP where <span class="math inline">\(D\)</span> has no direct effect on <span class="math inline">\(Y\)</span> at all?</p>
+<p><span class="math display">\[ 
+\begin{aligned}
+D &amp;= \alpha_0 + \alpha_1 U + \epsilon_D \\
+Y &amp;= \beta_0 + \beta_2 U + \epsilon_{Y^*},
+\end{aligned}
+\]</span></p>
+</div>
+<div id="alpha_1-and-sigma_epsilon_d2-derived-from-rho_ud" class="section level3">
+<h3><span class="math inline">\(\alpha_1\)</span> (and <span class="math inline">\(\sigma_{\epsilon_D}^2\)</span>) derived from <span class="math inline">\(\rho_{UD}\)</span></h3>
+<p>In a simple linear regression model with a single predictor, the coefficient <span class="math inline">\(\alpha_1\)</span> can be specified directly in terms <span class="math inline">\(\rho_{UD}\)</span>, the correlation between <span class="math inline">\(U\)</span> and <span class="math inline">\(D\)</span>:</p>
+<p><span class="math display">\[ \alpha_1 = \rho_{UD} \frac{\sigma_D}{\sigma_U}\]</span>
+We can estimate <span class="math inline">\(\sigma_D\)</span> from the observed data set, and we can reasonably assume that <span class="math inline">\(\sigma_U = 1\)</span> (since we could always normalize the original measurement of <span class="math inline">\(U\)</span>). Finally, we can specify a range of <span class="math inline">\(\rho_{UD}\)</span> (I am keeping everything positive here for simplicity), such that <span class="math inline">\(0 &lt; \rho_{UD} &lt; 0.90\)</span> (where I assume a correlation of <span class="math inline">\(0.90\)</span> is at or beyond the realm of reasonableness). By plugging these three parameters into the formula, we can generate a range of <span class="math inline">\(\alpha_1\)</span>’s.</p>
+<p>Furthermore, we can derive an estimate of the variance for <span class="math inline">\(\epsilon_D\)</span> ( <span class="math inline">\(\sigma_{\epsilon_D}^2\)</span>) at each level of <span class="math inline">\(\rho_{UD}\)</span>:</p>
+<p><span class="math display">\[ 
+\begin{aligned}
+Var(D) &amp;= Var(\alpha_0 + \alpha_1 U + \epsilon_D) \\
+\\
+\sigma_D^2 &amp;= \alpha_1^2 \sigma_U^2 + \sigma_{\epsilon_D}^2 \\
+\\
+\sigma_{\epsilon_D}^2 &amp;= \sigma_D^2 - \alpha_1^2 \; \text{(since } \sigma_U^2=1)
+\end{aligned}
+\]</span></p>
+<p>So, for each value of <span class="math inline">\(\rho_{UD}\)</span> that we generated, there is a corresponding pair <span class="math inline">\((\alpha_1, \; \sigma_{\epsilon_D}^2)\)</span>.</p>
+</div>
+<div id="determine-beta_2" class="section level3">
+<h3>Determine <span class="math inline">\(\beta_2\)</span></h3>
+<p>In the <a href="#addendum">addendum</a> I go through a bit of an elaborate derivation of <span class="math inline">\(\beta_2\)</span>, the coefficient of <span class="math inline">\(U\)</span> in the alternative outcome model. Here is the bottom line:</p>
+<p><span class="math display">\[
+\beta_2 = \frac{\alpha_1}{1-\frac{\sigma_{\epsilon_D}^2}{\sigma_D^2}}\left( k_1 - \beta_1\right) 
+\]</span></p>
+<p>In the equation, we have <span class="math inline">\(\sigma^2_D\)</span> and <span class="math inline">\(k_1\)</span>, which are both estimated from the observed data and the pair of derived parameters <span class="math inline">\(\alpha_1\)</span> and <span class="math inline">\(\sigma_{\epsilon_D}^2\)</span> based on <span class="math inline">\(\rho_{UD}\)</span>. <span class="math inline">\(\beta_1\)</span>, the coefficient of <span class="math inline">\(D\)</span> in the outcome model is a free parameter, set externally. That is, we can choose to evaluate all <span class="math inline">\(\beta_2\)</span>’s the are generated when <span class="math inline">\(\beta_1 = 0\)</span>. More generally, we can set <span class="math inline">\(\beta_1 = pk_1\)</span>, where <span class="math inline">\(0 \le p \le 1\)</span>. (We could go negative if we want, though I won’t do that here.) If <span class="math inline">\(p=1\)</span> , <span class="math inline">\(\beta_1 = k_1\)</span> and <span class="math inline">\(\beta_2 = 0\)</span>; we end up with the original model with no confounding.</p>
+<p>So, once we specify <span class="math inline">\(\rho_{UD}\)</span> and <span class="math inline">\(p\)</span>, we get the corresponding triplet <span class="math inline">\((\alpha_1, \; \sigma_{\epsilon_D}^2, \; \beta_2)\)</span>.</p>
+</div>
+<div id="determine-rho_uy" class="section level3">
+<h3>Determine <span class="math inline">\(\rho_{UY}\)</span></h3>
+<p>In this last step, we can identify the correlation of <span class="math inline">\(U\)</span> and <span class="math inline">\(Y\)</span>, <span class="math inline">\(\rho_{UY}\)</span>, that is associated with all the observed, specified, and derived parameters up until this point. We start by writing the alternative outcome model, and then replace <span class="math inline">\(D\)</span> with the alternative exposure model, and do some algebraic manipulation to end up with a re-parameterized alternative outcome model that has a single predictor:</p>
+<p><span class="math display">\[
+\begin{aligned}
+Y &amp;= \beta_0 + \beta_1 D + \beta_2 U + \epsilon_Y^* \\
+&amp;= \beta_0 + \beta_1 \left( \alpha_0 + \alpha_1 U + \epsilon_D \right) + \beta_2 U + \epsilon_Y^* \\
+&amp;=\beta_0 + \beta_1 \alpha_0 + \beta_1 \alpha_1 U + \beta_1 \epsilon_D + \beta_2 U +
+\epsilon_Y^* \\
+&amp;=\beta_0^* + \left( \beta_1 \alpha_1 + \beta_2 \right)U + \epsilon_Y^+ \\
+&amp;=\beta_0^* + \beta_1^*U + \epsilon_Y^+ , \\
+\end{aligned}
+\]</span></p>
+<p>where <span class="math inline">\(\beta_0^* = \beta_0 + \beta_1 \alpha_0\)</span>, <span class="math inline">\(\beta_1^* = \left( \beta_1 \alpha_1 + \beta_2 \right)\)</span>, and <span class="math inline">\(\epsilon_Y^+ = \beta_1 \epsilon_D + \epsilon_Y*\)</span>.</p>
+<p>As before, the coefficient in a simple linear regression model with a single predictor is related to the correlation of the two variables as follows:</p>
+<p><span class="math display">\[
+\beta_1^* = \rho_{UY} \frac{\sigma_Y}{\sigma_U}
+\]</span></p>
+<p>Since <span class="math inline">\(\beta_1^* = \left( \beta_1 \alpha_1 + \beta_2 \right)\)</span>,</p>
+<p><span class="math display">\[
+\begin{aligned}
+\beta_1 \alpha_1 + \beta_2 &amp;= \rho_{UY} \frac{\sigma_Y}{\sigma_U} \\
+\\
+\rho_{UY} &amp;= \frac{\sigma_U}{\sigma_Y} \left( \beta_1 \alpha_1 + \beta_2 \right) \\ 
+\\
+&amp;= \frac{\left( \beta_1 \alpha_1 + \beta_2 \right)}{\sigma_Y} 
+\end{aligned}
+\]</span></p>
+</div>
+<div id="determine-sigma2_y" class="section level3">
+<h3>Determine <span class="math inline">\(\sigma^2_{Y*}\)</span></h3>
+<p>In order to simulate data from the alternative DGPs, we need to derive the variation for the noise of the alternative model. That is, we need an estimate of <span class="math inline">\(\sigma^2_{Y*}\)</span>.</p>
+<p><span class="math display">\[
+\begin{aligned}
+Var(Y) &amp;= Var(\beta_0 + \beta_1 D + \beta_2 U + \epsilon_{Y^*}) \\
+\\
+&amp;= \beta_1^2 Var(D) + \beta_2^2 Var(U) + 2\beta_1\beta_2Cov(D, U) + Var(\epsilon_{y*}) \\
+\\
+&amp;= \beta_1^2 \sigma^2_D + \beta_2^2 + 2\beta_1\beta_2\rho_{UD}\sigma_D + \sigma^2_{Y*} \\
+\end{aligned}
+\]</span></p>
+<p>So,</p>
+<p><span class="math display">\[
+\sigma^2_{Y*} = Var(Y) - (\beta_1^2 \sigma^2_D + \beta_2^2 + 2\beta_1\beta_2\rho_{UD}\sigma_D),
+\]</span></p>
+<p>where <span class="math inline">\(Var(Y)\)</span> is the variation of <span class="math inline">\(Y\)</span> from the observed data. Now we are ready to implement this in R.</p>
+</div>
+<div id="implementing-in-r" class="section level3">
+<h3>Implementing in <code>R</code></h3>
+<p>If we have an observed data set with observed <span class="math inline">\(D\)</span> and <span class="math inline">\(Y\)</span>, and some target <span class="math inline">\(\beta_1\)</span> determined by <span class="math inline">\(p\)</span>, we can calculate/generate all the quantities that we just derived.</p>
+<p>Before getting to the function, I want to make a brief point about what we do if we have other <em>measured</em> confounders. We can essentially eliminate measured confounders by regressing the exposure <span class="math inline">\(D\)</span> on the confounders and conducting the entire sensitivity analysis with the residual exposure measurements derived from this initial regression model. I won’t be doing this here, but if anyone wants to see an example of this, let me know, and I can do a short post.</p>
+<p>OK - here is the function, which essentially follows the path of the derivation above:</p>
+<pre class="r"><code>altDGP &lt;- function(dd, p) {
+  
+  # Create values of rhoUD
+  
+  dp &lt;- data.table(p = p, rhoUD = seq(0.0, 0.9, length = 1000))
+  
+  # Parameters estimated from data
+  
+  dp[, `:=`(sdD = sd(dd$D), s2D = var(dd$D), sdY = sd(dd$Y))] 
+  dp[, k1:= coef(lm(Y ~ D, data = dd))[2]]
+  
+  # Generate b1 based on p
+  
+  dp[, b1 := p * k1]
+  
+  # Determine a1
+  
+  dp[, a1 := rhoUD * sdD ]
+  
+  # Determine s2ed
+  
+  dp[, s2ed := s2D - (a1^2)]
+  
+  # Determine b2
+  
+  dp[, g:= s2ed/s2D]
+  dp &lt;- dp[g != 1]
+  dp[, b2 := (a1 / (1 - g) ) * ( k1 - b1 )]
+  
+  # Determine rhoUY
+  
+  dp[, rhoUY := ( (b1 * a1) + b2 ) / sdY ]
+  
+  # Eliminate impossible correlations
+  
+  dp &lt;- dp[rhoUY &gt; 0 &amp; rhoUY &lt;= .9]
+  
+  # Determine s2eyx
+  
+  dp[, s2eyx := sdY^2 - (b1^2 * s2D + b2^2 + 2 * b1 * b2 * rhoUD * sdD)]
+  dp &lt;- dp[s2eyx &gt; 0]
+  
+  # Determine standard deviations
+  
+  dp[, sdeyx := sqrt(s2eyx)]
+  dp[, sdedx := sqrt(s2ed)]
+  
+  # Finished
+  
+  dp[]
+  
+}</code></pre>
+</div>
+<div id="assessing-sensitivity" class="section level3">
+<h3>Assessing sensitivity</h3>
+<p>If we generate the same data set we started out with last post, we can use the function to assess the sensitivity of this association.</p>
+<pre class="r"><code>defO &lt;- defData(varname = &quot;D&quot;, formula = 0, variance = 1)
+defO &lt;- defData(defO, varname = &quot;Y&quot;, formula = &quot;1.5 * D&quot;, variance = 25)
+
+set.seed(20181201)
+dtO &lt;- genData(1200, defO)</code></pre>
+<p>In this first example, I am looking for the DGP with <span class="math inline">\(\beta_1 = 0\)</span>, which is implemented as <span class="math inline">\(p = 0\)</span> in the call to function <code>altDGP</code>. Each row of output represents an alternative set of parameters that will result in a DGP with <span class="math inline">\(\beta_1 = 0\)</span>.</p>
+<pre class="r"><code>dp &lt;- altDGP(dtO, p = 0)
+dp[, .(rhoUD, rhoUY, k1, b1, a1, s2ed, b2, s2eyx)]</code></pre>
+<pre><code>##      rhoUD rhoUY   k1 b1    a1  s2ed   b2 s2eyx
+##   1: 0.295 0.898 1.41  0 0.294 0.904 4.74  5.36
+##   2: 0.296 0.896 1.41  0 0.295 0.903 4.72  5.50
+##   3: 0.297 0.893 1.41  0 0.296 0.903 4.71  5.63
+##   4: 0.298 0.890 1.41  0 0.297 0.902 4.69  5.76
+##   5: 0.299 0.888 1.41  0 0.298 0.902 4.68  5.90
+##  ---                                           
+## 668: 0.896 0.296 1.41  0 0.892 0.195 1.56 25.35
+## 669: 0.897 0.296 1.41  0 0.893 0.193 1.56 25.35
+## 670: 0.898 0.296 1.41  0 0.894 0.191 1.56 25.36
+## 671: 0.899 0.295 1.41  0 0.895 0.190 1.56 25.36
+## 672: 0.900 0.295 1.41  0 0.896 0.188 1.55 25.37</code></pre>
+<p>Now, I am creating a data set that will be based on four levels of <span class="math inline">\(\beta_1\)</span>. I do this by creating a vector <span class="math inline">\(p = \; &lt;0.0, \; 0.2, \; 0.5, \; 0.8&gt;\)</span>. The idea is to create a plot that shows the curve for each value of <span class="math inline">\(p\)</span>. The most extreme curve (in this case, the curve all the way to the right, since we are dealing with positive associations only) represents the scenario where <span class="math inline">\(p = 0\)</span> (i.e. <span class="math inline">\(\beta_1 = 0\)</span>). The curves moving to the left reflect increasing sensitivity as <span class="math inline">\(p\)</span> increases.</p>
+<pre class="r"><code>dsenO &lt;- rbindlist(lapply(c(0.0, 0.2, 0.5, 0.8), 
+                     function(x) altDGP(dtO, x)))</code></pre>
+<p><img src="/post/2019-01-10-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding-ii_files/figure-html/unnamed-chunk-6-1.png" width="720" /></p>
+<p>I would say that in this first case the observed association is moderately sensitive to unmeasured confounding, as correlations as low as 0.5 would enough to erase the association.</p>
+<p>In the next case, if the association remains unchanged but the variation of <span class="math inline">\(Y\)</span> is considerably reduced, the observed association is much less sensitive. However, it is still quite possible that the observed overestimation is at least partially overstated, as relatively low levels of correlation could reduce the estimated association.</p>
+<pre class="r"><code>defA1 &lt;- updateDef(defO, changevar = &quot;Y&quot;, newvariance = 4)</code></pre>
+<p><img src="/post/2019-01-10-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding-ii_files/figure-html/unnamed-chunk-8-1.png" width="720" /></p>
+<p>In this last scenario, variance is the same as the initial scenario, but the association is considerably weaker. Here, we see that the estimate of the association is extremely sensitive to unmeasured confounding, as low levels of correlation are required to entirely erase the association.</p>
+<pre class="r"><code>defA2 &lt;- updateDef(defO, changevar = &quot;Y&quot;, newformula = &quot;0.25 * D&quot;)</code></pre>
+<p><img src="/post/2019-01-10-what-does-it-mean-if-findings-are-sensitive-to-unmeasured-confounding-ii_files/figure-html/unnamed-chunk-10-1.png" width="720" /></p>
+</div>
+<div id="treatsens-package" class="section level3">
+<h3><code>treatSens</code> package</h3>
+<p>I want to show output generated by the <code>treatSens</code> package I referenced earlier. <code>treatSens</code> requires a formula that includes an outcome vector <span class="math inline">\(Y\)</span>, an exposure vector <span class="math inline">\(Z\)</span>, and at least one vector of measured of confounders <span class="math inline">\(X\)</span>. In my examples, I have included no measured confounders, so I generate a vector of independent noise that is not related to the outcome.</p>
+<pre class="r"><code>library(treatSens)
+
+X &lt;- rnorm(1200)
+Y &lt;- dtO$Y
+Z &lt;- dtO$D
+
+testsens &lt;- treatSens(Y ~ Z + X, nsim = 5)
+sensPlot(testsens)</code></pre>
+<p>Once <code>treatSens</code> has been executed, it is possible to generate a sensitivity plot, which looks substantively similar to the ones I have created. The package uses sensitivity parameters <span class="math inline">\(\zeta^Z\)</span> and <span class="math inline">\(\zeta^Y\)</span>, which represent the coefficients of <span class="math inline">\(U\)</span>, the unmeasured confounder. Since <code>treatSens</code> normalizes the data (in the default setting), these coefficients are actually equivalent to the correlations <span class="math inline">\(\rho_{UD}\)</span> and <span class="math inline">\(\rho_{UY}\)</span> that are the basis of my sensitivity analysis. A important difference in the output is that <code>treatSens</code> provides uncertainty bands, and extends into regions of negative correlation. (And of course, a more significant difference is that <code>treatSens</code> is flexible enough to handle binary exposures, whereas I have not yet extended my analytic approach in that direction, and I suspect it is no possible for me to do so due to non-collapsibility of logistic regression estimands - I hope to revisit this in the future.)</p>
+<div id="observed-data-scenario-1-smally-sim-n1.50z-25" class="section level4">
+<h4>Observed data scenario 1: <span class="math inline">\(\small{Y \sim N(1.50Z, \; 25)}\)</span></h4>
+<p><img src="/img/post-treatSens/Var25.png" width="550" /></p>
+</div>
+<div id="observed-data-scenario-2-smally-sim-n1.50z-4" class="section level4">
+<h4>Observed data scenario 2: <span class="math inline">\(\small{Y \sim N(1.50Z, \; 4)}\)</span></h4>
+<p><img src="/img/post-treatSens/Var04.png" width="550" /></p>
+</div>
+<div id="observed-data-scenario-3-smally-sim-n0.25z-25" class="section level4">
+<h4>Observed data scenario 3: <span class="math inline">\(\small{Y \sim N(0.25Z, \; 25)}\)</span></h4>
+<p><img src="/img/post-treatSens/V25025.png" width="550" /></p>
+<p><a name="addendum"></a></p>
+</div>
+</div>
+<div id="addendum-derivation-of-beta_2" class="section level2">
+<h2>Addendum: Derivation of <span class="math inline">\(\beta_2\)</span></h2>
+<p>In case you want more detail on how we derive <span class="math inline">\(\beta_2\)</span> from the observed data model and assumed correlation parameters, here it is. We start by specifying the simple observed outcome model:</p>
+<p><span class="math display">\[ Y = k_0 + k_1D + \epsilon_Y\]</span></p>
+<p>We can estimate the parameters <span class="math inline">\(k_0\)</span> and <span class="math inline">\(k_1\)</span> using this standard matrix solution:</p>
+<p><span class="math display">\[ &lt;k_0, \; k_1&gt; \; = (W^TW)^{-1}W^TY,\]</span></p>
+<p>where <span class="math inline">\(W\)</span> is the <span class="math inline">\(n \times 2\)</span> design matrix:</p>
+<p><span class="math display">\[ W = [\mathbf{1}, D]_{n \times 2}.\]</span></p>
+<p>We can replace <span class="math inline">\(Y\)</span> with the alternative outcome model:</p>
+<p><span class="math display">\[
+\begin{aligned}
+&lt;k_0, \; k_1&gt; \; &amp;= (W^TW)^{-1}W^T(\beta_0 + \beta_1 D + \beta_2 U + \epsilon_Y^*) \\
+&amp;= \;&lt;\beta_0, 0&gt; + &lt;0, \beta_1&gt; +\; (W^TW)^{-1}W^T(\beta_2U) + \mathbf{0} \\
+&amp;= \;&lt;\beta_0, \beta_1&gt; +\; (W^TW)^{-1}W^T(\beta_2U)
+\end{aligned}
+\]</span></p>
+<p>Note that</p>
+<p><span class="math display">\[
+\begin{aligned}
+(W^TW)^{-1}W^T(\beta_0) &amp;= \; &lt;\beta_0,\; 0&gt; \; \; and\\
+\\ 
+(W^TW)^{-1}W^T(\beta_1D) &amp;= \; &lt;0,\; \beta_1&gt;.
+\end{aligned}
+\]</span></p>
+<p>Now, we need to figure out what <span class="math inline">\((W^TW)^{-1}W^T(\beta_2U)\)</span> is. First, we rearrange the alternate exposure model:
+<span class="math display">\[
+\begin{aligned}
+D &amp;= \alpha_0 + \alpha_1 U + \epsilon_D \\
+\alpha_1 U &amp;= D - \alpha_0 - \epsilon_D \\
+U &amp;= \frac{1}{\alpha_1} \left( D - \alpha_0 - \epsilon_D \right) \\
+\beta_2 U &amp;= \frac{\beta_2}{\alpha_1} \left( D - \alpha_0 - \epsilon_D \right)
+\end{aligned}
+\]</span></p>
+<p>We can replace <span class="math inline">\(\beta_2 U\)</span>:</p>
+<p><span class="math display">\[
+\begin{aligned}
+(W^TW)^{-1}W^T(\beta_2U) &amp;= (W^TW)^{-1}W^T \left[ \frac{\beta_2}{\alpha_1} \left( D - \alpha_0 - \epsilon_D \right) \right] \\
+&amp;= &lt;-\frac{\beta_2}{\alpha_1}\alpha_0, 0&gt; + &lt;0,\frac{\beta_2}{\alpha_1}&gt;-\;\frac{\beta_2}{\alpha_1}(W^TW)^{-1}W^T \epsilon_D \\
+&amp;= &lt;-\frac{\beta_2}{\alpha_1}\alpha_0, \frac{\beta_2}{\alpha_1}&gt;-\;\frac{\beta_2}{\alpha_1}(W^TW)^{-1}W^T \epsilon_D \\
+\end{aligned}
+\]</span></p>
+<p>And now we get back to <span class="math inline">\(&lt;k_0,\; k_1&gt;\)</span> :</p>
+<p><span class="math display">\[
+\begin{aligned}
+&lt;k_0,\; k_1&gt; \; &amp;= \;&lt;\beta_0,\; \beta_1&gt; +\; (W^TW)^{-1}W^T(\beta_2U) \\
+&amp;= \;&lt;\beta_0-\frac{\beta_2}{\alpha_1}\alpha_0, \; \beta_1 + \frac{\beta_2}{\alpha_1}&gt;-\;\frac{\beta_2}{\alpha_1}(W^TW)^{-1}W^T \epsilon_D \\
+&amp;= \;&lt;\beta_0-\frac{\beta_2}{\alpha_1}\alpha_0, \; \beta_1 + \frac{\beta_2}{\alpha_1}&gt;-\;\frac{\beta_2}{\alpha_1}&lt;\gamma_0, \; \gamma_1&gt;
+\end{aligned}
+\]</span></p>
+<p>where <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> come from regressing <span class="math inline">\(\epsilon_D\)</span> on <span class="math inline">\(D\)</span>:</p>
+<p><span class="math display">\[ \epsilon_D = \gamma_0 + \gamma_1 D\]</span>
+so,</p>
+<p><span class="math display">\[
+\begin{aligned}
+&lt;k_0,\; k_1&gt; \; &amp;= \;&lt;\beta_0-\frac{\beta_2}{\alpha_1}\alpha_0 - \frac{\beta_2}{\alpha_1}\gamma_0, \; \beta_1 + \frac{\beta_2}{\alpha_1} - \frac{\beta_2}{\alpha_1}\gamma_1 &gt; \\
+&amp;=  \;&lt;\beta_0-\frac{\beta_2}{\alpha_1}\left(\alpha_0 + \gamma_0\right), \; \beta_1 + \frac{\beta_2}{\alpha_1}\left(1 - \gamma_1 \right) &gt;
+\end{aligned}
+\]</span></p>
+<p>Since we can center all the observed data, we can easily assume that <span class="math inline">\(k_0 = 0\)</span>. All we need to worry about is <span class="math inline">\(k_1\)</span>:</p>
+<p><span class="math display">\[
+\begin{aligned}
+k_1 &amp;= \beta_1 + \frac{\beta_2}{\alpha_1}\left(1 - \gamma_1 \right) \\
+\frac{\beta_2}{\alpha_1}\left(1 - \gamma_1 \right) &amp;= k_1 - \beta_1 \\
+\beta_2 &amp;= \frac{\alpha_1}{1-\gamma_1}\left( k_1 - \beta_1\right)
+\end{aligned}
+\]</span></p>
+<p>We have generated <span class="math inline">\(\alpha_1\)</span> based on <span class="math inline">\(\rho_{UD}\)</span>, <span class="math inline">\(k_1\)</span> is a estimated from the data, and <span class="math inline">\(\beta_1\)</span> is fixed based on some <span class="math inline">\(p, \; 0 \le p \le 1\)</span> such that <span class="math inline">\(\beta_1 = pk_1\)</span>. All that remains is <span class="math inline">\(\gamma_1\)</span>:</p>
+<p><span class="math display">\[
+\gamma_1 = \rho_{\epsilon_D D} \frac{\sigma_{\epsilon_D}}{\sigma_D}
+\]</span></p>
+<p>Since <span class="math inline">\(D = \alpha_0 + \alpha_1 U + \epsilon_D\)</span> (and <span class="math inline">\(\epsilon_D \perp \! \! \! \perp U\)</span>)</p>
+<p><span class="math display">\[
+\begin{aligned}
+ \rho_{\epsilon_D D} &amp;= \frac{Cov(\epsilon_D, D)}{\sigma_{\epsilon_D} \sigma_D} \\
+ \\
+ &amp;=\frac{Cov(\epsilon_D, \;\alpha_0 + \alpha_1 U + \epsilon_D )}{\sigma_{\epsilon_D} \sigma_D} \\
+ \\
+ &amp;= \frac{\sigma_{\epsilon_D}^2}{\sigma_{\epsilon_D} \sigma_D} \\
+ \\
+ &amp;= \frac{\sigma_{\epsilon_D}}{\sigma_D}
+\end{aligned}
+\]</span></p>
+<p>It follows that</p>
+<p><span class="math display">\[
+\begin{aligned}
+\gamma_1 &amp;= \rho_{\epsilon_D D} \frac{\sigma_{\epsilon_D}}{\sigma_D} \\
+\\
+&amp;=\frac{\sigma_{\epsilon_D}}{\sigma_D} \times \frac{\sigma_{\epsilon_D}}{\sigma_D} \\
+\\
+&amp;=\frac{\sigma_{\epsilon_D}^2}{\sigma_D^2}
+\end{aligned}
+\]</span></p>
+<p>So, now, we have all the elements to generate <span class="math inline">\(\beta_2\)</span> for a range of <span class="math inline">\(\alpha_1\)</span>’s and <span class="math inline">\(\sigma_{\epsilon_D}^2\)</span>’s:</p>
+<p><span class="math display">\[
+\beta_2 = \frac{\alpha_1}{1-\frac{\sigma_{\epsilon_D}^2}{\sigma_D^2}}\left( k_1 - \beta_1\right) 
+\]</span></p>
+</div>
