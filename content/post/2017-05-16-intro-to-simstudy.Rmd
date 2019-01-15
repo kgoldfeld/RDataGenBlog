@@ -67,14 +67,18 @@ knitr::kable(def)
 ```
 
 Here's the code that is used to generate this definition, which is stored as a <a href = https://github.com/Rdatatable/data.table/wiki>data.table </a>:
-```{r, tidy = TRUE}
+
+```{r}
 def <- defData(varname = "nr", dist = "nonrandom", formula=7, id = "idnum")
 def <- defData(def,varname="x1",dist="uniform",formula="10;20")
 def <- defData(def,varname="y1",formula="nr + x1 * 2",variance=8)
-def <- defData(def,varname="y2",dist="poisson",formula="nr - 0.2 * x1",link="log")
+def <- defData(def,varname="y2",dist="poisson",
+               formula="nr - 0.2 * x1",link="log")
 def <- defData(def,varname="xCat",formula = "0.3;0.2;0.5",dist="categorical")
-def <- defData(def,varname="g1", dist="gamma", formula = "5+xCat", variance = 1, link = "log")
-def <- defData(def, varname = "a1", dist = "binary" , formula="-3 + xCat", link="logit")
+def <- defData(def,varname="g1", dist="gamma", 
+               formula = "5+xCat", variance = 1, link = "log")
+def <- defData(def, varname = "a1", dist = "binary" , 
+               formula="-3 + xCat", link="logit")
 ```
 
 To create a simple data set based on these definitions, all one needs to do is execute a single `genData` command. In this example, we generate 500 records that are based on the definition in the `def`table:
@@ -91,13 +95,16 @@ There's a lot more functionality in the package, and I'll be writing about that 
 The question was, can we simulate a study with two arms, say a control and treatment, with repeated measures at three time points: baseline, after 1 month, and after 2 months? Of course. 
 
 This was what I sent back to my correspondent:
-```{r, tidy = TRUE}
+```{r}
 
 # Define the outcome
 
-ydef <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T", variance = 3)
+ydef <- defDataAdd(varname = "Y", dist = "normal", 
+                   formula = "5 + 2.5*period + 1.5*T + 3.5*period*T", 
+                   variance = 3)
 
-# Generate a "blank" data.table with 24 observations and assign them to groups
+# Generate a "blank" data.table with 24 observations and 
+# assign them to groups
 
 set.seed(1234)
 
@@ -113,15 +120,15 @@ longData[, T := factor(T, labels = c("No", "Yes"))]
 
 # Let's look at the data
 
-ggplot(data = longData, aes(x = factor(period), y = Y)) + 
+ggplot(data = longData, aes(x = factor(period), y = Y)) +
   geom_line(aes(color = T, group = id)) +
   scale_color_manual(values = c("#e38e17", "#8e17e3")) +
   xlab("Time")
 ```
-```{r, tidy = TRUE, include=FALSE}
+
+```{r, include=FALSE}
 
 # Define the outcome
-
 
 # Generate a "blank" data.table with 24 observations and assign them to groups
 
@@ -136,21 +143,25 @@ longData <- addColumns(dtDefs = ydef, longData)
 longData[, T := factor(T, labels = c("No", "Yes"))]
 ```
 If we generate a data set based on 1,000 indviduals and estimate a linear regression model we see that the parameter estimates are quite good. However, my correspondent wrote back saying she wanted correlated data, which makes sense. We can see from the alpha estimate of approximately 0.02 (at the bottom of the output), we don't have much correlation:
-```{r, tidy = TRUE, include=TRUE}
+
+```{r, include=TRUE}
 # Fit a GEE model to the data
 
-fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family= gaussian(link= "identity"),
-               data=longData, id=id, corstr = "exchangeable") 
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  
+              family= gaussian(link= "identity"),
+              data=longData, id=id, corstr = "exchangeable") 
 summary(fit)
 ```
+
 ## One way to generate correlated data
 
 The first way to approach this is to use the simstudy function `genCorData` to generate correlated errors that are normally distributed with mean 0, variance of 3, and and common correlation coeffcient of 0.7. This approach is a bit mysterious, because we are acknowledging that we don't know what is driving the relationship between the three outcomes, just that they have a common cause.
 
-```{r, tidy = TRUE, include=TRUE}
+```{r, include=TRUE}
 
 # define the outcome
-ydef <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + e")
+ydef <- defDataAdd(varname = "Y", dist = "normal", 
+            formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + e")
 
 # define the correlated errors
 
@@ -169,7 +180,8 @@ longData <- addColumns(ydef, longData)
 
 longData[, T := factor(T, labels = c("No", "Yes"))]
 
-# look at the data, outcomes should appear more correlated, lines a bit straighter
+# look at the data, outcomes should appear more correlated, 
+# lines a bit straighter
 
 ggplot(data = longData, aes(x = factor(period), y = Y)) + 
   geom_line(aes(color = T, group = id)) +
@@ -177,8 +189,7 @@ ggplot(data = longData, aes(x = factor(period), y = Y)) +
   xlab("Time")
 ```
 
-
-```{r, tidy = TRUE, include=FALSE}
+```{r, include=FALSE}
 
 # generate correlated data for each id and assign treatment
 
@@ -194,11 +205,12 @@ longData[, T := factor(T, labels = c("No", "Yes"))]
 
 ```
 
-
 Again, we recover the true parameters. And this time, if we look at the estimated correlation, we see that indeed the outcomes are correlated within each indivdual. The estimate is 0.77, close to the our specified value of 0.7.
-```{r, tidy = TRUE, include=TRUE}
-fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family = gaussian(link= "identity"),
-               data = longData, id = id, corstr = "exchangeable")
+
+```{r, include=TRUE}
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  
+              family = gaussian(link= "identity"),
+              data = longData, id = id, corstr = "exchangeable")
 
 summary(fit)
 ```
@@ -207,9 +219,13 @@ summary(fit)
 
 A second way to generate correlatd data is through an individual level random-effect or random intercept. This could be considered some unmeasured characteristic of the individuals (which happens to have a convenient normal distribution with mean zero). This random effect contributes equally to all instances of an individuals outcomes, but the outcomes for a particular individual deviate slightly from the hypothetical straight line as a result of unmeasured noise.
 
-```{r, tidy = TRUE, include=TRUE}
-ydef1 <- defData(varname = "randomEffect", dist = "normal", formula = 0, variance = sqrt(3))
-ydef2 <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", variance = 1)
+```{r, include=TRUE}
+ydef1 <- defData(varname = "randomEffect", dist = "normal", 
+                 formula = 0, variance = sqrt(3))
+
+ydef2 <- defDataAdd(varname = "Y", dist = "normal", 
+    formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", 
+    variance = 1)
 
 indData <- genData(24, ydef1)
 indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
@@ -227,9 +243,11 @@ ggplot(data = longData, aes(x = factor(period), y = Y)) +
   xlab("Time")
 ```
 
-```{r, tidy = TRUE, include=FALSE}
+```{r, include=FALSE}
 ydef1 <- defData(varname = "randomEffect", dist = "normal", formula = 0, variance = sqrt(3))
-ydef2 <- defDataAdd(varname = "Y", dist = "normal", formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", variance = 1)
+ydef2 <- defDataAdd(varname = "Y", dist = "normal", 
+    formula = "5 + 2.5*period + 1.5*T + 3.5*period*T + randomEffect", 
+    variance = 1)
 
 indData <- genData(1000, ydef1)
 indData <- trtAssign(indData, nTrt = 2, balanced = TRUE, grpName = "T")
@@ -242,9 +260,10 @@ longData <- addColumns(dtDefs = ydef2, longData)
 longData[, T := factor(T, labels = c("No", "Yes"))]
 ```
 
-```{r, tidy = TRUE, include=TRUE}
-fit <- geeglm(Y~factor(T)+period+factor(T)*period,  family= gaussian(link= "identity"),
-               data = longData, id = id, corstr = "exchangeable")
+```{r, include=TRUE}
+fit <- geeglm(Y~factor(T)+period+factor(T)*period,  
+              family= gaussian(link= "identity"),
+              data = longData, id = id, corstr = "exchangeable")
 summary(fit)
 ```
 
