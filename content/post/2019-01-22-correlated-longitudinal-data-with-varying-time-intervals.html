@@ -1,0 +1,83 @@
+---
+title: Correlated longitudinal data with varying time intervals
+author: ''
+date: '2019-01-22'
+slug: correlated-longitudinal-data-with-varying-time-intervals
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I was recently contacted to see if <code>simstudy</code> can create a data set of correlated outcomes that are measured over time, but at different intervals for each individual. The quick answer is there is no specific function to do this. However, if you are willing to assume an “exchangeable” correlation structure, where measurements far apart in time are just as correlated as measurements taken close together, then you could just generate individual-level random effects (intercepts and/or slopes) and pretty much call it a day. Unfortunately, the researcher had something more challenging in mind: he wanted to generate auto-regressive correlation, so that proximal measurements are more strongly correlated than distal measurements.</p>
+<p>As is always the case with <code>R</code>, there are certainly multiple ways to do tackle this problem. I came up with this particular solution, which I thought I’d share. The idea is pretty simple: first, generate the time data with varying intervals, which <em>can</em> be done using <code>simstudy</code>; second, create an alternate data set of “latent” observations that include all time points, also doable with <code>simstudy</code>; last, merge the two in a way that gives you what you want.</p>
+<div id="step-1-varying-time-intervals" class="section level3">
+<h3>Step 1: varying time intervals</h3>
+<p>The function <code>addPeriods</code> can create intervals of varying lengths. The function determines if the input data set includes the special fields <code>mInterval</code> and <code>vInterval</code>. If so, a <code>time</code> value is generated from a gamma distribution with mean <code>mInterval</code> and dispersion <code>vInterval</code>.</p>
+<pre class="r"><code>maxTime &lt;- 180 # limit follow-up time to 180 days
+
+def1 &lt;- defData(varname = &quot;nCount&quot;, dist = &quot;noZeroPoisson&quot;, 
+                formula = 20)
+def1 &lt;- defData(def1, varname = &quot;mInterval&quot;, dist = &quot;nonrandom&quot;, 
+                formula = 20)
+def1 &lt;- defData(def1, varname = &quot;vInterval&quot;, dist = &quot;nonrandom&quot;, 
+                formula = 0.4)
+
+set.seed(20190101)
+dt &lt;- genData(1000, def1)
+dtPeriod &lt;- addPeriods(dt)
+dtPeriod &lt;- dtPeriod[time &lt;= maxTime]</code></pre>
+<p>Here is a plot if time intervals for a small sample of the data set:</p>
+<p><img src="/post/2019-01-22-correlated-longitudinal-data-with-varying-time-intervals_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="step-2-generate-correlated-data" class="section level3">
+<h3>Step 2: generate correlated data</h3>
+<p>In this step, I am creating 181 records for each individual (from period = 0 to period = 180). In order to create correlated data, I need to specify the mean and variance for each observation; in this example, the mean is a quadratic function of <code>time</code> and the variance is fixed at 9. I generate the correlated data using the <code>addCorGen</code> function, and specify an <em>AR-1</em> correlation structure with <span class="math inline">\(\rho = 0.4\)</span>,</p>
+<pre class="r"><code>def2 &lt;- defDataAdd(varname = &quot;mu&quot;, dist = &quot;nonrandom&quot;, 
+    formula = &quot;2 + (1/500) * (time) * (180 - time)&quot;)
+def2 &lt;- defDataAdd(def2, varname = &quot;var&quot;, dist = &quot;nonrandom&quot;, formula = 9)
+
+dtY &lt;- genData(1000)
+dtY &lt;- addPeriods(dtY, nPeriod = (maxTime + 1) ) 
+setnames(dtY, &quot;period&quot;, &quot;time&quot;)
+dtY &lt;- addColumns(def2, dtY)
+
+dtY &lt;- addCorGen(dtOld = dtY, idvar = &quot;id&quot;, nvars = (maxTime + 1), 
+                  rho = .4, corstr = &quot;ar1&quot;, dist = &quot;normal&quot;, 
+                  param1 = &quot;mu&quot;, param2 = &quot;var&quot;, cnames = &quot;Y&quot;)
+
+dtY[, `:=`(timeID = NULL, var = NULL, mu = NULL)]</code></pre>
+<p>Here is a plot of a sample of individuals that shows the values of <span class="math inline">\(Y\)</span> at every single time point (not just the time points generated in step 1). The <span class="math inline">\(Y\)</span>’s are correlated within individual.</p>
+<p><img src="/post/2019-01-22-correlated-longitudinal-data-with-varying-time-intervals_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+</div>
+<div id="step-3" class="section level3">
+<h3>Step 3</h3>
+<p>Now we just do an inner-join, or perhaps it is a left join - hard to tell, because one data set is a subset of the other. In any case, the new data set includes all the rows from step 1 and the ones that match from step 2.</p>
+<pre class="r"><code>setkey(dtY, id, time)
+setkey(dtPeriod, id, time)
+finalDT &lt;- mergeData(dtY, dtPeriod, idvars = c(&quot;id&quot;, &quot;time&quot;))</code></pre>
+<p>Here is a plot of the observed data for a sample of individuals:</p>
+<p><img src="/post/2019-01-22-correlated-longitudinal-data-with-varying-time-intervals_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>To verify that the data are indeed correlated with an <em>AR-1</em> structure, I first convert the complete (latent) data from step 2 from its <em>long</em> format to a <em>wide</em> format. The correlation is calculated from this <span class="math inline">\(1000 \times 181\)</span> matrix, where each row is an individual and each column is a value of <span class="math inline">\(Y\)</span> at a different time point. And since the correlation matrix, which has dimensions <span class="math inline">\(181 \times 181\)</span>, is too big to show, what you see is only the upper left hand corner of the matrix:</p>
+<pre class="r"><code>round(cor(as.matrix(dcast(dtY, id ~ time, 
+    value.var = &quot;Y&quot;)[, -1]))[1:13, 1:13], 1)</code></pre>
+<pre><code>##      0   1   2   3   4   5   6   7   8   9  10  11  12
+## 0  1.0 0.4 0.2 0.1 0.0 0.0 0.1 0.0 0.0 0.0 0.1 0.0 0.0
+## 1  0.4 1.0 0.4 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+## 2  0.2 0.4 1.0 0.4 0.2 0.1 0.0 0.0 0.1 0.0 0.0 0.0 0.0
+## 3  0.1 0.1 0.4 1.0 0.4 0.2 0.1 0.0 0.0 0.0 0.0 0.0 0.1
+## 4  0.0 0.0 0.2 0.4 1.0 0.4 0.2 0.1 0.0 0.1 0.0 0.0 0.0
+## 5  0.0 0.0 0.1 0.2 0.4 1.0 0.4 0.2 0.1 0.0 0.0 0.0 0.0
+## 6  0.1 0.0 0.0 0.1 0.2 0.4 1.0 0.4 0.2 0.0 0.0 0.0 0.0
+## 7  0.0 0.0 0.0 0.0 0.1 0.2 0.4 1.0 0.4 0.2 0.1 0.1 0.0
+## 8  0.0 0.0 0.1 0.0 0.0 0.1 0.2 0.4 1.0 0.4 0.1 0.0 0.0
+## 9  0.0 0.0 0.0 0.0 0.1 0.0 0.0 0.2 0.4 1.0 0.4 0.2 0.0
+## 10 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.1 0.4 1.0 0.4 0.2
+## 11 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.1 0.0 0.2 0.4 1.0 0.4
+## 12 0.0 0.0 0.0 0.1 0.0 0.0 0.0 0.0 0.0 0.0 0.2 0.4 1.0</code></pre>
+</div>

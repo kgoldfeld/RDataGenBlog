@@ -1,0 +1,128 @@
+---
+title: Correlated longitudinal data with varying time intervals
+author: ''
+date: '2019-01-22'
+slug: correlated-longitudinal-data-with-varying-time-intervals
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+```{r, echo = FALSE}
+options(digits = 2)
+```
+
+I was recently contacted to see if `simstudy` can create a data set of correlated outcomes that are measured over time, but at different intervals for each individual. The quick answer is there is no specific function to do this. However, if you are willing to assume an "exchangeable" correlation structure, where measurements far apart in time are just as correlated as measurements taken close together, then you could just generate individual-level random effects (intercepts and/or slopes) and pretty much call it a day.  Unfortunately, the researcher had something more challenging in mind: he wanted to generate auto-regressive correlation, so that proximal measurements are more strongly correlated than distal measurements.
+
+As is always the case with `R`, there are certainly multiple ways to do tackle this problem. I came up with this particular solution, which I thought I'd share. The idea is pretty simple: first, generate the time data with varying intervals, which *can* be done using `simstudy`; second, create an alternate data set of "latent" observations that include all time points, also doable with `simstudy`; last, merge the two in a way that gives you what you want.
+
+### Step 1: varying time intervals
+
+The function `addPeriods` can create intervals of varying lengths. The function determines if the input data set includes the special fields `mInterval` and `vInterval`. If so, a `time` value is generated from a gamma distribution with mean `mInterval` and dispersion `vInterval`.
+
+```{r}
+
+maxTime <- 180 # limit follow-up time to 180 days
+
+def1 <- defData(varname = "nCount", dist = "noZeroPoisson", 
+                formula = 20)
+def1 <- defData(def1, varname = "mInterval", dist = "nonrandom", 
+                formula = 20)
+def1 <- defData(def1, varname = "vInterval", dist = "nonrandom", 
+                formula = 0.4)
+
+set.seed(20190101)
+dt <- genData(1000, def1)
+dtPeriod <- addPeriods(dt)
+dtPeriod <- dtPeriod[time <= maxTime]
+```
+
+Here is a plot if time intervals for a small sample of the data set:
+
+```{r, fig.height = 4, echo = FALSE}
+sampIDs <- sample(1:1000, 30, replace = FALSE)
+dtSample <- dtPeriod[id %in% sampIDs]
+
+ggplot(data = dtSample, aes(x = time, y = factor(id))) +
+  geom_point(aes(color = factor(id)), size = 1) +
+  geom_line(color = "grey60") +
+  scale_x_continuous(limits = c(0, 180), breaks = seq(0,180, by = 30),
+                     name = "days") +
+  ylab("sample of individuals") +
+  theme(panel.grid = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none") 
+
+```
+
+### Step 2: generate correlated data
+
+In this step, I am creating 181 records for each individual (from period = 0 to period = 180). In order to create correlated data, I need to specify the mean and variance for each observation; in this example, the mean is a quadratic function of `time` and the variance is fixed at 9. I generate the correlated data using the `addCorGen` function, and specify an *AR-1* correlation structure with $\rho = 0.4$,
+
+```{r}
+def2 <- defDataAdd(varname = "mu", dist = "nonrandom", 
+    formula = "2 + (1/500) * (time) * (180 - time)")
+def2 <- defDataAdd(def2, varname = "var", dist = "nonrandom", formula = 9)
+
+dtY <- genData(1000)
+dtY <- addPeriods(dtY, nPeriod = (maxTime + 1) ) 
+setnames(dtY, "period", "time")
+dtY <- addColumns(def2, dtY)
+
+dtY <- addCorGen(dtOld = dtY, idvar = "id", nvars = (maxTime + 1), 
+                  rho = .4, corstr = "ar1", dist = "normal", 
+                  param1 = "mu", param2 = "var", cnames = "Y")
+
+dtY[, `:=`(timeID = NULL, var = NULL, mu = NULL)]
+```
+
+Here is a plot of a sample of individuals that shows the values of $Y$ at every single time point (not just the time points generated in step 1). The $Y$'s are correlated within individual.
+
+```{r, fig.height = 4, echo = FALSE}
+dtSample <- dtY[id %in% sampIDs]
+
+ggplot(data = dtSample, aes(x = time, y = Y, group = id)) +
+  geom_line(aes(color = factor(id)), alpha = .5) +
+  scale_x_continuous(limits = c(0, 180), breaks = seq(0, 180, by = 30),
+                     name = "days") +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") 
+```
+
+### Step 3
+
+Now we just do an inner-join, or perhaps it is a left join - hard to tell, because one data set is a subset of the other. In any case, the new data set includes all the rows from step 1 and the ones that match from step 2.
+
+```{r}
+setkey(dtY, id, time)
+setkey(dtPeriod, id, time)
+finalDT <- mergeData(dtY, dtPeriod, idvars = c("id", "time"))
+```
+
+Here is a plot of the observed data for a sample of individuals:
+
+```{r, echo = FALSE, fig.height = 4}
+sampIDs <- sample(1:1000, 16, replace = FALSE)
+dtSample <- finalDT[id %in% sampIDs]
+
+ggplot(data = dtSample, aes(x = time, y = Y, group = id)) +
+  geom_point(aes(color = factor(id)), size = 1) +
+  geom_line(color = "grey70") +
+  scale_x_continuous(limits = c(0, 180), breaks = seq(0, 180, by = 30),
+                     name = "days") +
+  theme(panel.grid = element_blank(),
+        legend.position = "none",
+        axis.text = element_text(size = 6)) +
+  facet_wrap(~ id, nrow = 4)
+```
+
+### Addendum
+
+To verify that the data are indeed correlated with an *AR-1* structure, I first convert the complete (latent) data from step 2 from its *long* format to a *wide* format. The correlation is calculated from this $1000 \times 181$ matrix, where each row is an individual and each column is a value of $Y$ at a different time point. And since the correlation matrix, which has dimensions $181 \times 181$, is too big to show, what you see is only the upper left hand corner of the matrix:
+
+```{r}
+round(cor(as.matrix(dcast(dtY, id ~ time, 
+    value.var = "Y")[, -1]))[1:13, 1:13], 1)
+```
