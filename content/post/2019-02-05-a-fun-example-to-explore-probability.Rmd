@@ -1,0 +1,266 @@
+---
+title: Using the uniform sum distribution to introduce probability
+author: ''
+date: '2019-02-05'
+slug: a-fun-example-to-explore-probability
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+```{r, echo = FALSE}
+options(digits = 2)
+```
+
+I've never taught an intro probability/statistics course. If I ever did, I would certainly want to bring the underlying wonder of the subject to life. I've always found it almost magical the way mathematical formulation can be mirrored by computer simulation, the way proof can be guided by observed data generation processes, and the way DGPs can confirm analytic solutions. 
+
+I would like to begin such a course with a somewhat unusual but accessible problem that would evoke these themes from the start. The concepts would not necessarily be immediately comprehensible, but rather would pique the interest of the students.
+
+I recently picked up copy of John Allen Paulos' fun sort-of-memoir [*A Numerate Life*](https://www.goodreads.com/book/show/24940376-a-numerate-life), and he reminded of a fun problem that might provide a good starting point for my imaginary course. The problem is great, because it is easy to understand, but challenging enough to raise some interesting issues. In this post, I sketch out a set of simulations and mathematical derivations that would motivate the ideas of marginal and conditional probability distributions. 
+
+### The problem
+
+Say we make repeated draws of independent uniform variables between 0 and 1, and add them up as we go along. The question is, on average, how many draws do we need to make so that the cumulative sum is greater than 1? We definitely need to make at least 2 draws, but it is possible (though almost certainly not the case) that we won't get to 1 with even 100 draws. It turns that if we did this experiment over and over, the average number of draws would approach $exp(1) = 2.718$. Can we prove this and confirm by simulation?
+
+### Re-formulating the question more formally
+
+If $U_k$ is one draw of a uniform random variable (where $k \in (1, 2, ...)$), and $N$ represents the number of draws, the probability of $N$ taking on a specific value (say $n$) can be characterized like this:
+
+$$ 
+\footnotesize{P(N = n) = P\left( \; \sum_{k=1}^{n-1}  {U_k} < 1  \; \& \; \sum_{k=1}^{n}  {U_k} > 1\right)}
+$$
+
+Now, we need to understand this a little better to figure out how to figure out how to characterize the distribution of $N$, which is what we are really interested in.
+
+### CDF
+
+This is where I would start to describe the concept of a probability distribution, and start by looking at the cumulative distribution function (CDF) $P \left( \; \sum_{k=1}^n  {U_k} < 1 \right)$ for a fixed $n$. It turns out that the CDF for this distribution (which actually has at least two names - *Irwin-Hall distribution* or *uniform sum distribution*) can be estimated with the following equation. (I certainly wouldn't be bold enough to attempt to derive this formula in an introductory class): 
+
+$$ 
+\footnotesize {
+P\left(\sum_{k=1}^{n}  {U_k} < x \right) = \frac{1}{n!} \sum_{k=0}^{\lfloor x \rfloor} (-1)^k {n \choose k} (x - k)^n
+}
+$$
+
+Our first simulation would confirm that this specification of the CDF is correct. Before doing the simulation, we create an `R` function to calculate the theoretical cumulative probability for the range of $x$.
+
+```{r}
+psumunif <- function(x, n) {
+
+  k <- c(0:floor(x))
+  (1/factorial(n)) * sum( (-1)^k * choose(n, k) * (x - k)^n )
+  
+}
+
+ddtheory <- data.table(x = seq(0, 3, by = .1))
+ddtheory[, cump := psumunif(x, 3), keyby = x]
+
+ddtheory[x %in% seq(0, 3, by = .5)]
+```
+
+Now, we generate some actual data. In this case, we are assuming three draws for each experiment, and we are "conducting" 200 different experiments. We generate non-correlated uniform data for each experiment:
+
+```{r}
+library(simstudy)
+set.seed(02012019)
+
+dd <- genCorGen(n = 200, nvars = 3, params1 = 0, params2 = 1, 
+          dist = "uniform", rho = 0.0, corstr = "cs", cnames = "u")
+dd
+```
+
+For each experiment, we calculate the sum the of the three draws, so that we have a data set with 200 observations:
+ 
+```{r} 
+dsum <- dd[, .(x = sum(u)), keyby = id]
+dsum
+```
+
+We can plot the theoretical CDF versus the observed empirical CDF:
+
+```{r, fig.height = 3}
+
+ggplot(dsum, aes(x)) + 
+  stat_ecdf(geom = "step", color = "black") +
+  geom_line(data=ddtheory, aes(x=x, y = cump), color ="red") +
+  scale_x_continuous(limits = c(0, 3)) +
+  ylab("cumulative probability") +
+  theme(panel.grid.minor = element_blank(),
+        axis.ticks = element_blank())
+```
+
+And here is another pair of curves using a set of experiments with only two draws for each experiment:
+
+```{r, echo = FALSE, fig.height = 3}
+
+dd <- genCorGen(n = 200, nvars = 2, params1 = 0, params2 = 1, 
+          dist = "uniform", rho = 0.0, corstr = "cs", cnames = "u")
+
+dsum <- dd[, .(x = sum(u)), keyby = id]
+
+ddtheory <- data.table(x = seq(0, 2.1, length = 250))
+ddtheory[, cump := psumunif(x, 2), keyby = x]
+
+ggplot(dsum, aes(x)) + 
+  stat_ecdf(geom = "step", color = "black") +
+  geom_line(data=ddtheory, aes(x=x, y = cump), color ="red") +
+  scale_x_continuous(limits = c(0, 3)) +
+  ylab("cumulative probability") +
+  theme(panel.grid.minor = element_blank(),
+        axis.ticks = element_blank())
+```
+
+### More specifically, exploring P(sum < 1)
+
+The problem at hand specifically asks us to evaluate $\footnotesize{P\left(\sum_{k=1}^{n}  {U_k} < 1 \right)}$. So this will be our first algebraic manipulation to derive the probability in terms of $n$, starting with the analytic solution for the *CDF* I introduced above without derivation:
+
+$$ 
+\footnotesize{
+\begin{aligned}
+P\left(\sum_{k=1}^{n}  {U_k} < 1 \right) &= \frac{1}{n!} \sum_{k=0}^1 (-1)^k {n \choose k} (x - k)^n \\
+\\
+&= \frac{1}{n!} \left [ (-1)^0 {n \choose 0} (1 - 0)^n +  (-1)^1 {n \choose 1} (1 - 1)^n \right] \\
+\\
+&= \frac{1}{n!} \left [ 1 + 0 \right] \\
+\\
+&= \frac{1}{n!}
+\end{aligned}
+}
+$$ 
+
+We can look back at the plots to confirm that this solution is matched by the theoretical and empirical CDFs. For $n=3$, we expect $\footnotesize{P\left(\sum_{k=1}^{3}  {U_k} < 1 \right)} = \frac{1}{3!} = 0.167$. And for $n=2$, the expected probability is $\frac{1}{2}$.
+
+### Deriving $P(N)$
+
+I think until this point, things would be generally pretty accessible to a group of students thinking about these things for the first time. This next step, deriving $P(N)$ might present more of a challenge, because we have to deal with joint probabilities as well as conditional probabilities. While I don't do so here, I think in a classroom setting I would delve more into the simulated data to illustrate each type of probability. The joint probability is merely a probability of multiple events occurring simultaneously. And the the conditional probability is a probability of an event for a subset of the data (the subset defined by the group of observations where another - conditional - event actually happened). Once those concepts were explained a bit, I would need a little courage to walk through the derivation. However, I think it would be worth it, because moving through each step highlights an important concept.
+
+$N$ is a new random variable that takes on the value $n$ if $\sum_{k=1}^{n-1}  {U_k} < 1$ *and* $\sum_{k=1}^{n}  {U_k} > 1$. That is, the $n{\text{th}}$ value in a sequence uniform random variables $\left [ U(0,1) \right]$ is the threshold where the cumulative sum exceeds 1. $P(N=n)$ can be derived as follows:
+
+$$ 
+\footnotesize {
+\begin{aligned}
+P(N = n) &= P\left( \; \sum_{k=1}^{n-1}  {U_k} < 1  \; \& \; \sum_{k=1}^{n}  {U_k} > 1\right) \\
+\\
+&= P\left( \; \sum_{k=1}^{n}  {U_k} > 1 \; \middle | \;\sum_{k=1}^{n-1}  {U_k} < 1  \right) P\left( \; \sum_{k=1}^{n-1}  {U_k} < 1  \right) \\
+\\
+&= \frac{1}{(n-1)!}P\left( \; \sum_{k=1}^{n}  {U_k} > 1 \; \middle | \;\sum_{k=1}^{n-1}  {U_k} < 1  \right) \\
+\\
+&= \frac{1}{(n-1)!}\left [ 1 - P\left( \; \sum_{k=1}^{n}  {U_k} < 1 \; \middle | \;\sum_{k=1}^{n-1}  {U_k} < 1  \right) \right ] \\
+\\
+&= \frac{1}{(n-1)!}\left [ 1 - \frac{P\left( \; \sum_{k=1}^{n}  {U_k} < 1 \; \& \;\sum_{k=1}^{n-1}  {U_k} < 1  \right)}{P\left( \; \sum_{k=1}^{n-1}  {U_k} < 1  \right)} \right ] \\
+\\
+&= \frac{1}{(n-1)!}\left [ 1 - \frac{P\left( \; \sum_{k=1}^{n}  {U_k} < 1 \;  \right)}{P\left( \; \sum_{k=1}^{n-1}  {U_k} < 1  \right)} \right ] \\
+\\
+&= \frac{1}{(n-1)!}\left [ 1 - \frac{1/n!}{1/(n-1)!} \right ] 
+\end{aligned}
+}
+$$
+
+Now, once we get to this point, it is just algebraic manipulation to get to the final formulation. It is a pet peeve of mine when papers say that it is quite easily shown that some formula can be simplified into another without showing it; sometimes, it is not so simple. In this case, however, I actually think it is. So, here is a final solution of the probability:
+
+$$
+P(N = n) = \frac{n-1}{n!}
+$$
+
+### Simulating the distribution of $N$
+
+We are almost there. To simulate $P(N=n)$, we generate 1000 iterations of 7 draws. For each iteration, we check to see which draw pushes the cumulative sum over 1, and this is the observed value of $N$ for each iteration. Even though $N$ can conceivably be quite large, we stop at 7, since the probability of observing $n=8$ is vanishingly small, $P(N=8) < 0.0002$.
+
+```{r}
+dd <- genCorGen(n = 1000, nvars = 7, params1 = 0, params2 = 1, 
+          dist = "uniform", rho = 0.0, corstr = "cs", cnames = "U")
+
+dd[, csum := cumsum(U), keyby = id]
+dd[, under := 1*(csum < 1)]
+
+dc <- dcast(dd, id ~ (period + 1), value.var = c("under", "csum" ))
+dc[, n := 2 + sum(under_2, under_3, under_4, under_5, under_6, under_7), 
+   keyby = id]
+
+dc[, .(id, n, csum_1, csum_2, csum_3, csum_4, csum_5, csum_6, csum_7)]
+```
+
+And this is what the data look like. On the left is the cumulative sum of each iteration (color coded by the threshold value), and on the right is the probability for each level of $n$.
+
+```{r, fig.height = 3, echo = FALSE}
+dm <- melt(dc, id.vars = c("id", "n"), 
+  measure.vars = c("csum_1","csum_2","csum_3","csum_4",
+                   "csum_5","csum_6","csum_7"))
+
+setkey(dm, id, variable)
+
+library(ggthemes)
+
+p1 <- ggplot(data = dm, aes(x = as.integer(variable), y = value, group = id)) +
+  geom_line(aes(color = factor(n))) +
+  scale_color_ptol() +
+  scale_y_continuous(limits = c(0,6), breaks = c(0:6), name = "cumulative sum") +
+  scale_x_continuous(breaks = c(0:7), name = "measurement #" ) +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank())
+
+p2 <- ggplot(data = dc) +
+  geom_bar(aes(x = factor(n), y = ..prop.., 
+               fill = factor(..x..), group = 1)) +
+  xlab("threshold where cumulative sum > 1") +
+  scale_fill_ptol() +
+  scale_y_continuous(labels = scales::percent_format(accuracy = 1),
+                     name = "proportion") +
+  theme(legend.position = "none",
+        panel.grid.minor = element_blank(),
+        axis.ticks = element_blank())
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+
+```
+
+Here are the observed and expected probabilities:
+
+```{r}
+expProbN <- function(n) {
+  (n-1)/(factorial(n))
+}
+
+rbind(prop.table(dc[, table(n)]), # observed
+      expProbN(2:7)               # expected
+)
+
+```
+
+### Expected value of N
+
+The final piece to the puzzle requires a brief introduction to expected value, which for a discrete outcome (which is what we are dealing with even though the underlying process is a sum of potentially infinite continuous outcomes) is $\sum_{n=0}^\infty \; n\times P(n)$:
+
+$$
+\footnotesize{
+\begin{aligned}
+E[N] &= \sum_{n=1}^{\infty} \; n  P(n) \\
+\\
+&= \sum_{n=1}^{\infty} \; n \left ( \frac{n-1}{n!} \right) \\
+\\
+&= \sum_{n=2}^{\infty} \; n \left ( \frac{n-1}{n!} \right) \\
+\\
+&= \sum_{n=2}^{\infty} \;  \frac{1}{(n-2)!} \\
+\\
+&= \sum_{n=0}^{\infty} \;  \frac{1}{n!} \\
+\\
+&= \sum_{n=0}^{\infty} \;  \frac{1^n}{n!} \\
+\\
+E[N] &= exp(1) \; \; \text{(since} \sum_{n=0}^{\infty} \; \frac{a^n}{n!} = e^a \text{)}
+\end{aligned}
+}
+$$
+
+We are now in a position to see if our observed average is what is predicted by theory:
+
+```{r}
+c(observed = dc[, mean(n)], expected = exp(1))
+```
+
+I am assuming that all the students in the class will think this is pretty cool when they see this final result. And that will provide motivation to really learn all of these concepts (and more) over the subsequent weeks of the course.
+
+One final note: I have evaded uncertainty or variability in all of this, which is obviously a key omission, and something I would need to address if I really had an opportunity to do something like this in a class. However, simulation provides ample opportunity to introduce that as well, so I am sure I could figure out a way to weave that in. Or maybe that could be the second class, though I probably won't do a follow-up post. 
+
+
