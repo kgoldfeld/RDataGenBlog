@@ -1,0 +1,115 @@
+---
+title: 
+  "A example in causal inference designed to frustrate: an estimate doomed by bias"
+author: ''
+date: '2019-02-26'
+slug: dags-colliders-and-an-example-of-variance-bias-tradeoff
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I am putting together a brief lecture introducing causal inference for graduate students studying biostatistics. As part of this lecture, I thought it would be helpful to spend a little time describing directed acyclic graphs (DAGs), since they are an extremely helpful tool for communicating assumptions about the causal relationships underlying a researcher’s data.</p>
+<p>The strength of DAGs is that they help us think how these underlying relationships in the data might lead to biases in causal effect estimation, and suggest ways to estimate causal effects that eliminate these biases. (For a real introduction to DAGs, you could take a look at this <a href="http://ftp.cs.ucla.edu/pub/stat_ser/r251.pdf">paper</a> by <em>Greenland</em>, <em>Pearl</em>, and <em>Robins</em> or better yet take a look at Part I of this <a href="https://www.hsph.harvard.edu/miguel-hernan/causal-inference-book/2015/">book</a> on causal inference by <em>Hernán</em> and <em>Robins</em>.)</p>
+<p>As part of this lecture, I plan on including a (frustrating) example that illustrates a scenario where it may in fact be impossible to get an unbiased estimate of the causal effect of interest based on the data that has been collected. I thought I would share this little example here.</p>
+<div id="the-scenario" class="section level2">
+<h2>The scenario</h2>
+<p>In the graph below we are interested in the causal effect of <span class="math inline">\(A\)</span> on an outcome <span class="math inline">\(Y\)</span>. We have also measured a covariate <span class="math inline">\(L\)</span>, thinking it might be related to some unmeasured confounder (in this case <span class="math inline">\(U_2\)</span>). Furthermore, there is another unmeasured variable <span class="math inline">\(U_1\)</span> unrelated to <span class="math inline">\(A\)</span>, but related to the measure <span class="math inline">\(L\)</span> and outcome <span class="math inline">\(Y\)</span>. These relationships are captured in this DAG:</p>
+<p><img src="/img/post-dag/firstDAG.png" /></p>
+<p>It may help to be a bit more concrete about what these variables might represent. Say we are conducting an epidemiological study focused on whether or not exercise between the age of 50 and 60 has an effect on hypertension after 60. (So, <span class="math inline">\(A\)</span> is exercise and <span class="math inline">\(Y\)</span> is a measure of hypertension.) We are concerned that there might be confounding by some latent (unmeasured) factor related to an individual’s conscientiousness about their health; those who are more conscientious may exercise more, but they will also do other things to improve their health. In this case, we are able to measure whether or not the individual has a healthy diet (<span class="math inline">\(L\)</span>), and we hope that will address the issue of confounding. (Note we are making the assumption that conscientiousness is related to hypertension only through exercise or diet, probably not very realistic.)</p>
+<p>But, it also turns out that an individual’s diet is also partly determined by where the individual lives; that is, characteristics of the area may play a role. Unfortunately, the location of the individual (or characteristics of the location) was not measured (<span class="math inline">\(U_1\)</span>). These same characteristics also affect location-specific hypertension levels.</p>
+<p>Inspecting the original DAG, we see that <span class="math inline">\(U_2\)</span> is indeed confounding the relationship between <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span>. There is a back-door path <span class="math inline">\(A \rightarrow U_2 \rightarrow L \rightarrow Y\)</span> that needs to be blocked. We cannot just ignore this path. If we generate data and estimate the effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span>, we will see that the estimate is quite biased. First, we generate data based on the DAG, assuming <span class="math inline">\(L\)</span>, and <span class="math inline">\(A\)</span> are binary, and <span class="math inline">\(Y\)</span> is continuous (though this is by no means necessary):</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;U1&quot;, formula = 0.5, 
+             dist = &quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;U2&quot;,  formula = 0.4,
+             dist = &quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;L&quot;, formula = &quot;-1.6 + 1 * U1 + 1 * U2&quot;,
+             dist = &quot;binary&quot;, link = &quot;logit&quot;)
+d &lt;- defData(d, varname = &quot;A&quot;, formula = &quot;-1.5 + 1.2 * U2&quot;, 
+             dist = &quot;binary&quot;, link=&quot;logit&quot;)
+d &lt;- defData(d, varname = &quot;Y&quot;, formula =  &quot;0 + 1 * U1 + 1 * L + 0.5 * A&quot;,
+             variance = .5, dist = &quot;normal&quot;)
+
+set.seed(20190226)
+dd &lt;- genData(2500, d)
+dd</code></pre>
+<pre><code>##         id U1 U2 L A     Y
+##    1:    1  0  1 1 1  1.13
+##    2:    2  0  0 1 0  1.31
+##    3:    3  1  0 0 0  1.20
+##    4:    4  0  1 1 0  1.04
+##    5:    5  0  0 0 0 -0.67
+##   ---                     
+## 2496: 2496  0  0 0 0  0.29
+## 2497: 2497  0  0 0 0 -0.24
+## 2498: 2498  1  0 1 0  1.32
+## 2499: 2499  1  1 1 1  3.44
+## 2500: 2500  0  0 0 0 -0.78</code></pre>
+<p>And here is the unadjusted model. The effect of <span class="math inline">\(A\)</span> is overestimated (the true effect is 0.5):</p>
+<pre class="r"><code>broom::tidy(lm(Y ~ A, data = dd))</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)    0.826    0.0243      34.0 2.54e-208
+## 2 A              0.570    0.0473      12.0 1.53e- 32</code></pre>
+</div>
+<div id="adjusting-for-a-potential-confounder-that-is-also-a-collider" class="section level2">
+<h2>Adjusting for a potential confounder that is also a collider</h2>
+<p>While we are not able to measure <span class="math inline">\(U_2\)</span>, we have observed <span class="math inline">\(L\)</span>. We might think we are OK. But, alas, we are not. If we control for diet (<span class="math inline">\(L\)</span>), we are controlling a “collider”, which will open up an association between <span class="math inline">\(U_1\)</span> and <span class="math inline">\(U_2\)</span>. (I wrote about this before <a href="https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/">here</a>.)</p>
+<p><img src="/img/post-dag/firstDAGcontrol1.png" /></p>
+<p>The idea is that if I have a healthy diet but I am not particularly conscientious about my health, I probably live in an area encourages or provides access to better food. Therefore, conditioning on diet induces a (negative, in this case) correlation between location type and health conscientiousness. So, by controlling <span class="math inline">\(L\)</span> we’ve created a back-door path <span class="math inline">\(A \rightarrow U_2 \rightarrow U_1 \rightarrow Y\)</span>. Confounding remains, though it may be reduced considerably if the induced link between <span class="math inline">\(U_2\)</span> and <span class="math inline">\(U_1\)</span> is relatively weak.</p>
+<pre class="r"><code>broom::tidy(lm(Y ~ L+ A, data = dd))</code></pre>
+<pre><code>## # A tibble: 3 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)    0.402    0.0231      17.4 6.58e- 64
+## 2 L              1.26     0.0356      35.6 2.10e-224
+## 3 A              0.464    0.0386      12.0 2.46e- 32</code></pre>
+</div>
+<div id="more-systematic-exploration-of-bias-and-variance-of-estimates" class="section level2">
+<h2>More systematic exploration of bias and variance of estimates</h2>
+<p>If we repeatedly generate samples (this time of size 500), we get a much better picture of the consequences of using different models to estimate the causal effect. The function below generates the data (using the same definitions as before), and then estimating three different models: (1) no adjustment, (2) incorrect adjustment for <span class="math inline">\(L\)</span>, the confounder/collider, and (3) the correct adjustment of the unmeasured confounder <span class="math inline">\(U_2\)</span>, which should be unbiased. The function returns the three estimates of the causal effect of <span class="math inline">\(A\)</span>:</p>
+<pre class="r"><code>repFunc &lt;- function(n, def) {
+  
+  dd &lt;- genData(n, def)
+  
+  c1 &lt;- coef(lm(Y ~ A, data = dd))[&quot;A&quot;]
+  c2 &lt;- coef(lm(Y ~ L + A, data = dd))[&quot;A&quot;]
+  c3 &lt;- coef(lm(Y ~ U2 + A, data = dd))[&quot;A&quot;]
+  
+  return(data.table(c1, c2, c3))
+}</code></pre>
+<p>This following code generates 2500 replications of the “experiment” and stores the final results in data.table <code>rdd</code>:</p>
+<pre class="r"><code>RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)  # to set seed for parallel process
+
+reps &lt;- parallel::mclapply(1:2500, 
+                           function(x) repFunc(500, d),
+                           mc.set.seed = TRUE)
+rdd &lt;- rbindlist(reps)
+rdd[, rep := .I]
+rdd</code></pre>
+<pre><code>##         c1   c2   c3  rep
+##    1: 0.46 0.45 0.40    1
+##    2: 0.56 0.45 0.41    2
+##    3: 0.59 0.46 0.50    3
+##    4: 0.74 0.68 0.61    4
+##    5: 0.45 0.43 0.41    5
+##   ---                    
+## 2496: 0.42 0.42 0.37 2496
+## 2497: 0.57 0.54 0.53 2497
+## 2498: 0.56 0.49 0.51 2498
+## 2499: 0.53 0.45 0.43 2499
+## 2500: 0.73 0.63 0.69 2500</code></pre>
+<pre class="r"><code>rdd[, .(mean(c1 - 0.5), mean(c2 - 0.5), mean(c3-0.5))]</code></pre>
+<pre><code>##       V1     V2      V3
+## 1: 0.062 -0.015 -0.0016</code></pre>
+<pre class="r"><code>rdd[, .(var(c1), var(c2), var(c3))]</code></pre>
+<pre><code>##       V1     V2    V3
+## 1: 0.011 0.0074 0.012</code></pre>
+<p>As expected, the first two models are biased, whereas the third is not. Under these parameter and distribution assumptions, the variance of the causal effect estimate is larger for the unbiased estimate than for the model that incorrectly adjusts for diet (<span class="math inline">\(L\)</span>). So, we seem to have a bias/variance trade-off. In other cases, where we have binary outcome <span class="math inline">\(Y\)</span> or continuous exposures, this trade-off may be more or less extreme.</p>
+<p>Here, we end with a look at the estimates, with the dashed line indicated at the true causal effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span>:</p>
+<p><img src="/post/2019-02-26-dags-colliders-and-an-example-of-variance-bias-tradeoff.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
