@@ -22,11 +22,36 @@ dmf &lt;- genMultiFac(each = 2, nFactors = 2, levels = c(3, 2),
             colNames = c(&quot;temp&quot;, &quot;wind&quot;))
 
 genFactor(dmf, &quot;temp&quot;, labels = c(&quot;cold&quot;, &quot;moderate&quot;, &quot;hot&quot;), 
-          replace = TRUE)
-genFactor(dmf, &quot;wind&quot;, labels = c(&quot;low&quot;, &quot;high&quot;), 
-          replace = TRUE)
-
-dmf</code></pre>
+          replace = TRUE)</code></pre>
+<pre><code>##     id wind    ftemp
+##  1:  1    1     cold
+##  2:  2    1     cold
+##  3:  3    1 moderate
+##  4:  4    1 moderate
+##  5:  5    1      hot
+##  6:  6    1      hot
+##  7:  7    2     cold
+##  8:  8    2     cold
+##  9:  9    2 moderate
+## 10: 10    2 moderate
+## 11: 11    2      hot
+## 12: 12    2      hot</code></pre>
+<pre class="r"><code>genFactor(dmf, &quot;wind&quot;, labels = c(&quot;low&quot;, &quot;high&quot;), 
+          replace = TRUE)</code></pre>
+<pre><code>##     id    ftemp fwind
+##  1:  1     cold   low
+##  2:  2     cold   low
+##  3:  3 moderate   low
+##  4:  4 moderate   low
+##  5:  5      hot   low
+##  6:  6      hot   low
+##  7:  7     cold  high
+##  8:  8     cold  high
+##  9:  9 moderate  high
+## 10: 10 moderate  high
+## 11: 11      hot  high
+## 12: 12      hot  high</code></pre>
+<pre class="r"><code>dmf</code></pre>
 <pre><code>##     id    ftemp fwind
 ##  1:  1     cold   low
 ##  2:  2     cold   low
@@ -55,7 +80,7 @@ dmf</code></pre>
 <div id="the-multi-factorial-study-design" class="section level3">
 <h3>The multi-factorial study design</h3>
 <p>A multi-factorial experiment is an innovative way to efficiently explore the effectiveness of a large number of innovations in a single experiment. There is a vast literature on the topic, much of which has been written by the <a href="https://methodology.psu.edu/">Penn State Methodology Center</a>. My colleague plans on using this design in the context of a multi phase optimization strategy (MOST), which is described in a excellent <a href="https://www.springer.com/us/book/9783319722054">new book</a> by Linda Collins.</p>
-<p>My colleague is interested in conducting a smallish-scale study of four possible interventions in order to identify the most promising one for a considerably larger follow-up study. He is open to the idea that the best intervention might actually be a combination of two (though probably not three). One way to do this would be to conduct an RCT with 5 groups, one for each intervention plus a control. The RCT has two has two potential problems: the sample size requirements could be prohibitive since we are essentially doing 4 RCTs, and there would be no way to assess how interventions work together. The second shortcoming could be addressed by explicitly testing certain combinations, but this would only exacerbate the sample size requirements.</p>
+<p>My colleague is interested in conducting a smallish-scale study of four possible interventions in order to identify the most promising one for a considerably larger follow-up study. He is open to the idea that the best intervention might actually be a combination of two (though probably not three). One way to do this would be to conduct an RCT with 5 groups, one for each intervention plus a control. The RCT has two potential problems: the sample size requirements could be prohibitive since we are essentially doing 4 RCTs, and there would be no way to assess how interventions work together. The second shortcoming could be addressed by explicitly testing certain combinations, but this would only exacerbate the sample size requirements.</p>
 <p>The multi-factorial design addresses both of these potential problems. A person (or unit of analysis) is randomized to a combination of factors. So, in the case of 4 factors, an individual would be assigned to 1 of 16 groups. We can assess the effect of a specific intervention by averaging the effect size across different combinations of the other two interventions. This is easy to see with the aid of a simulation - so let’s do that (using 3 interventions to keep it a bit simpler).</p>
 <pre class="r"><code># define the outcome
 
@@ -130,11 +155,13 @@ mean(d1$avg - d0$avg)</code></pre>
 <pre class="r"><code>library(broom)
 
 tidy(lm(Y ~ f1 + f2 + f3, data = dx))[1:3]</code></pre>
-<pre><code>##          term  estimate std.error
-## 1 (Intercept) 10.107283 0.1608486
-## 2          f1  4.131657 0.1608486
-## 3          f2  3.719557 0.1608486
-## 4          f3  3.933804 0.1608486</code></pre>
+<pre><code>## # A tibble: 4 x 3
+##   term        estimate std.error
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)    10.1      0.161
+## 2 f1              4.13     0.161
+## 3 f2              3.72     0.161
+## 4 f3              3.93     0.161</code></pre>
 </div>
 <div id="compare-with-an-rct" class="section level3">
 <h3>Compare with an RCT</h3>
@@ -147,11 +174,13 @@ dr &lt;- trtAssign(dr, nTrt = 4, grpName = &quot;trt&quot;)
 dr &lt;- addColumns(defRCT, dr)
 
 tidy(lm(Y ~ factor(trt), data = dr))[1:3]</code></pre>
-<pre><code>##           term estimate std.error
-## 1  (Intercept) 9.903715 0.1141933
-## 2 factor(trt)2 3.970397 0.1614937
-## 3 factor(trt)3 4.070231 0.1614937
-## 4 factor(trt)4 3.735965 0.1614937</code></pre>
+<pre><code>## # A tibble: 4 x 3
+##   term         estimate std.error
+##   &lt;chr&gt;           &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)      9.90     0.114
+## 2 factor(trt)2     3.97     0.161
+## 3 factor(trt)3     4.07     0.161
+## 4 factor(trt)4     3.74     0.161</code></pre>
 </div>
 <div id="interaction" class="section level3">
 <h3>Interaction</h3>
@@ -168,15 +197,17 @@ dint &lt;- addColumns(defA, dint)</code></pre>
 <p><img src="/post/2018-04-19-testing-many-interventions-in-a-single-experiment_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
 <p>We can fit a linear model with the interaction term and draw the same conclusion. In this case, we might opt for a combination of Factors 1 &amp; 2 to test in a larger study:</p>
 <pre class="r"><code>tidy(lm(Y ~ f1 * f2 * f3, data = dint))[1:3]</code></pre>
-<pre><code>##          term     estimate std.error
-## 1 (Intercept)  9.952437064 0.1029921
-## 2          f1  4.894436641 0.1456529
-## 3          f2  5.334322807 0.1456529
-## 4          f3  0.001752936 0.1456529
-## 5       f1:f2  4.963846878 0.2059843
-## 6       f1:f3  0.292551294 0.2059843
-## 7       f2:f3 -0.391652073 0.2059843
-## 8    f1:f2:f3 -0.097282869 0.2913058</code></pre>
+<pre><code>## # A tibble: 8 x 3
+##   term        estimate std.error
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)  9.95        0.103
+## 2 f1           4.89        0.146
+## 3 f2           5.33        0.146
+## 4 f3           0.00175     0.146
+## 5 f1:f2        4.96        0.206
+## 6 f1:f3        0.293       0.206
+## 7 f2:f3       -0.392       0.206
+## 8 f1:f2:f3    -0.0973      0.291</code></pre>
 <p>With a more traditional RCT approach, we would never have the opportunity to observe the interaction effect, since by definition each randomization group is limited to a single intervention.</p>
 </div>
 <div id="getting-a-little-technical-effect-vs.dummy-coding" class="section level3">
@@ -247,30 +278,34 @@ dm</code></pre>
 ## f12 0.000 0.000 0.000 0.125</code></pre>
 <p>Here is model estimation of the data set <code>dint</code> we generated earlier with interaction. The first results are based on the original “dummy” coding, which we saw earlier:</p>
 <pre class="r"><code>tidy(lm(Y ~ f1 * f2 * f3, data = dint))[1:3]</code></pre>
-<pre><code>##          term     estimate std.error
-## 1 (Intercept)  9.952437064 0.1029921
-## 2          f1  4.894436641 0.1456529
-## 3          f2  5.334322807 0.1456529
-## 4          f3  0.001752936 0.1456529
-## 5       f1:f2  4.963846878 0.2059843
-## 6       f1:f3  0.292551294 0.2059843
-## 7       f2:f3 -0.391652073 0.2059843
-## 8    f1:f2:f3 -0.097282869 0.2913058</code></pre>
+<pre><code>## # A tibble: 8 x 3
+##   term        estimate std.error
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)  9.95        0.103
+## 2 f1           4.89        0.146
+## 3 f2           5.33        0.146
+## 4 f3           0.00175     0.146
+## 5 f1:f2        4.96        0.206
+## 6 f1:f3        0.293       0.206
+## 7 f2:f3       -0.392       0.206
+## 8 f1:f2:f3    -0.0973      0.291</code></pre>
 <p>And now changing the coding from “dummy” to “effect”, you can see that the standard error estimates are constant across the coefficients. This consistency can be particularly useful in maintaining statistical power when you are interested not just in main effects but interaction effects as well. (That said, it may still be difficult to have a large enough sample to pick up those interaction effects, just because they are typically smaller than main effects.)</p>
 <pre class="r"><code>dint[f1 == 0, f1 := -1]
 dint[f2 == 0, f2 := -1]
 dint[f3 == 0, f3 := -1]
 
 tidy(lm(Y ~ f1 * f2 * f3, data = dint))[1:3]</code></pre>
-<pre><code>##          term    estimate  std.error
-## 1 (Intercept) 16.27171942 0.03641322
-## 2          f1  3.74915750 0.03641322
-## 3          f2  3.79804975 0.03641322
-## 4          f3 -0.03605909 0.03641322
-## 5       f1:f2  1.22880136 0.03641322
-## 6       f1:f3  0.06097746 0.03641322
-## 7       f2:f3 -0.11007338 0.03641322
-## 8    f1:f2:f3 -0.01216036 0.03641322</code></pre>
+<pre><code>## # A tibble: 8 x 3
+##   term        estimate std.error
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)  16.3       0.0364
+## 2 f1            3.75      0.0364
+## 3 f2            3.80      0.0364
+## 4 f3           -0.0361    0.0364
+## 5 f1:f2         1.23      0.0364
+## 6 f1:f3         0.0610    0.0364
+## 7 f2:f3        -0.110     0.0364
+## 8 f1:f2:f3     -0.0122    0.0364</code></pre>
 </div>
 <div id="how-many-people-do-you-need" class="section level3">
 <h3>How many people do you need?</h3>
