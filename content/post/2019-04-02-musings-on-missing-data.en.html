@@ -1,0 +1,146 @@
+---
+title: Musings on missing data
+author: ''
+date: '2019-04-02'
+slug: musings-on-missing-data
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I’ve been meaning to share an analysis I recently did to estimate the strength of the relationship between a young child’s ability to recognize emotions in others (e.g. teachers and fellow students) and her longer term academic success. The study itself is quite interesting (hopefully it will be published sometime soon), but I really wanted to write about it here as it involved the challenging problem of missing data in the context of heterogeneous effects (different across sub-groups) and clustering (by schools).</p>
+<p>As I started to develop simulations to highlight key issues, I found myself getting bogged down in the data generation process. Once I realized I needed to be systematic about thinking how to generate various types of missingness, I thought maybe DAGs would help to clarify some of the issues (I’ve written a bit about DAGS <a href="https://www.rdatagen.net/post/dags-colliders-and-an-example-of-variance-bias-tradeoff/">before</a> and provided some links to some good references). I figured that I probably wasn’t the first to think of this, and a quick search confirmed that there is indeed a pretty rich literature on the topic. I first found this <a href="http://jakewestfall.org/blog/index.php/2017/08/22/using-causal-graphs-to-understand-missingness-and-how-to-deal-with-it/">blog post</a> by Jake Westfall, which, in addition to describing many of the key issues that I want to address here, provides some excellent references, including this paper by <a href="https://journals.sagepub.com/doi/pdf/10.1177/0962280210394469"><em>Daniel et al</em></a> and this one by <a href="http://papers.nips.cc/paper/4899-graphical-models-for-inference-with-missing-data.pdf"><em>Mohan et al</em></a>.</p>
+<p>I think the value I can add here is to provide some basic code to get the data generation processes going, in case you want to explore missing data methods for yourself.</p>
+<div id="thinking-systematically-about-missingness" class="section level2">
+<h2>Thinking systematically about missingness</h2>
+<p>In the world of missing data, it has proved to be immensely useful to classify different types of missing data. That is, there could various explanations of how the missingness came to be in a particular data set. This is important, because as in any other modeling problem, having an idea about the data generation process (in this case the missingness generation process) informs how you should proceed to get the “best” estimate possible using the data at hand.</p>
+<p>Missingness can be recorded as a binary characteristic of a particular data point for a particular individual; the data point is missing or it is not. It seems to be the convention that the missingness indicator is <span class="math inline">\(R_{p}\)</span> (where <span class="math inline">\(p\)</span> is the variable), and <span class="math inline">\(R_{p} = 1\)</span> if the data point <span class="math inline">\(p\)</span> is missing and is <span class="math inline">\(0\)</span> otherwise.</p>
+<p>We say data are <em>missing completely at random</em> (MCAR) when <span class="math inline">\(P(R)\)</span> is independent of all data, observed and missing. For example, if missingness depends on the flip of a coin, the data would be MCAR. Data are <em>missing at random</em> when <span class="math inline">\(P(R \ | \  D_{obs})\)</span> is independent of <span class="math inline">\(D_{mis}\)</span>, the missing data. In this case, if older people tend to have more missing data, and we’ve recorded age, then the data are MAR. And finally, data are <em>missing not at random</em> (MNAR) when <span class="math inline">\(P(R \ | \ D_{obs}) = f(D_{mis})\)</span>, or missingness is related to the unobserved data even after conditioning on observed data. If missingness is related to the health of a person at follow-up and the outcome measurement reflects the health of a person, then the data are MNAR.</p>
+</div>
+<div id="the-missingness-taxonomy-in-3-dags" class="section level2">
+<h2>The missingness taxonomy in 3 DAGs</h2>
+<p>The <a href="http://papers.nips.cc/paper/4899-graphical-models-for-inference-with-missing-data.pdf"><em>Mohan et al</em></a> paper suggests including the missing indicator <span class="math inline">\(R_p\)</span> directly in the DAG to clarify the nature of dependence between the variables and the missingness. If we have missingness in the outcome <span class="math inline">\(Y\)</span> (so that for at least one individual <span class="math inline">\(R_y = 1\)</span>), there is an induced observed variable <span class="math inline">\(Y^*\)</span> that equals <span class="math inline">\(Y\)</span> if <span class="math inline">\(R_y = 0\)</span>, and is missing if <span class="math inline">\(R_y = 1\)</span>. <span class="math inline">\(Y\)</span> represents the complete outcome data, which don’t observe if there is any missingness. The question is, can we estimate the joint distribution <span class="math inline">\(P(A, Y)\)</span> (or really any characteristic of the distribution, such as the mean of <span class="math inline">\(Y\)</span> at different levels of <span class="math inline">\(A\)</span>, which would give us a measure of causal effect) using the observed data <span class="math inline">\((A, R_y, Y^*)\)</span>? (For much of what follows, I am drawing directly from the <em>Mohan et al</em> paper.)</p>
+<div id="mcar" class="section level3">
+<h3>MCAR</h3>
+<p><img src="/img/post-missing/MCAR.png" /></p>
+<p>First, consider when the missingness is MCAR, as depicted above. From the DAG, <span class="math inline">\(A \cup Y \perp \! \! \! \perp R_y\)</span>, since <span class="math inline">\(Y^*\)</span> is a “collider”. It follows that <span class="math inline">\(P(A, Y) = P(A, Y \ | \ R_y)\)</span>, or more specifically <span class="math inline">\(P(A, Y) = P(A, Y \ | \ R_y=0)\)</span>. And when <span class="math inline">\(R_y = 0\)</span>, by definition <span class="math inline">\(Y = Y^*\)</span>. So we end up with <span class="math inline">\(P(A, Y) = P(A, Y^* \ | \ R_y = 0)\)</span>. Using observed data only, we can “recover” the underlying relationship between <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span>.</p>
+<p>A simulation my help to see this. First, we use the <code>simstudy</code> functions to define both the data generation and missing data processes:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;y&quot;, formula = &quot;1*a&quot;, variance = 1, dist = &quot;normal&quot;)
+
+defM &lt;- defMiss(varname = &quot;y&quot;, formula = 0.2, logit.link = FALSE)</code></pre>
+<p>The complete data are generated first, followed by the missing data matrix, and ending with the observed data set.</p>
+<pre class="r"><code>set.seed(983987)
+
+dcomp &lt;- genData(1000, def)
+dmiss &lt;- genMiss(dcomp, defM, idvars = &quot;id&quot;)
+dobs &lt;- genObs(dcomp, dmiss, &quot;id&quot;)
+
+head(dobs)</code></pre>
+<pre><code>##    id      a     y
+## 1:  1  0.171  0.84
+## 2:  2 -0.882  0.37
+## 3:  3  0.362    NA
+## 4:  4  1.951  1.62
+## 5:  5  0.069 -0.18
+## 6:  6 -2.423 -1.29</code></pre>
+<p>In this replication, about 22% of the <span class="math inline">\(Y\)</span> values are missing:</p>
+<pre class="r"><code>dmiss[, mean(y)]</code></pre>
+<pre><code>## [1] 0.22</code></pre>
+<p>If <span class="math inline">\(P(A, Y) = P(A, Y^* \ | \ R_y = 0)\)</span>, then we would expect that the mean of <span class="math inline">\(Y\)</span> in the complete data set will equal the mean of <span class="math inline">\(Y^*\)</span> in the observed data set. And indeed, they appear quite close:</p>
+<pre class="r"><code>round(c(dcomp[, mean(y)], dobs[, mean(y, na.rm = TRUE)]), 2)</code></pre>
+<pre><code>## [1] 0.03 0.02</code></pre>
+<p>Going beyond the mean, we can characterize the joint distribution of <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span> using a linear model (which we know is true, since that is how we generated the data). Since the outcome data are missing completely at random, we would expect that the relationship between <span class="math inline">\(A\)</span> and <span class="math inline">\(Y^*\)</span> to be very close to the true relationship represented by the complete (and not fully observed) data.</p>
+<pre class="r"><code>fit.comp &lt;- lm(y ~ a, data = dcomp)
+fit.obs &lt;- lm(y ~ a, data = dobs)
+
+broom::tidy(fit.comp)</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept) -0.00453    0.0314    -0.144 8.85e-  1
+## 2 a            0.964      0.0313    30.9   2.62e-147</code></pre>
+<pre class="r"><code>broom::tidy(fit.obs)</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)  -0.0343    0.0353    -0.969 3.33e-  1
+## 2 a             0.954     0.0348    27.4   4.49e-116</code></pre>
+<p>And if we plot those lines over the actual data, they should be quite close, if not overlapping. In the plot below, the red points represent the true values of the missing data. We can see that missingness is scattered randomly across values of <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span> - this is what MCAR data looks like. The solid line represents the fitted regression line based on the full data set (assuming no data are missing) and the dotted line represents the fitted regression line using complete cases only.</p>
+<pre class="r"><code>dplot &lt;- cbind(dcomp, y.miss = dmiss$y)
+
+ggplot(data = dplot, aes(x = a, y = y)) +
+  geom_point(aes(color = factor(y.miss)), size = 1) +
+  scale_color_manual(values = c(&quot;grey60&quot;, &quot;#e67c7c&quot;)) +
+  geom_abline(intercept = coef(fit.comp)[1], 
+              slope = coef(fit.comp)[2]) +
+  geom_abline(intercept = coef(fit.obs)[1], 
+              slope = coef(fit.obs)[2], lty = 2) +
+  theme(legend.position = &quot;none&quot;,
+        panel.grid = element_blank())</code></pre>
+<p><img src="/post/2019-04-02-musings-on-missing-data.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="mar" class="section level3">
+<h3>MAR</h3>
+<p><img src="/img/post-missing/MAR.png" /></p>
+<p>This DAG is showing a MAR pattern, where <span class="math inline">\(Y \perp \! \! \! \perp R_y \ | \ A\)</span>, again because <span class="math inline">\(Y^*\)</span> is a collider. This means that <span class="math inline">\(P(Y | A) = P(Y | A, R_y)\)</span>. If we decompose <span class="math inline">\(P(A, Y) = P(Y | A)P(A)\)</span>, you can see how that independence is useful. Substituting <span class="math inline">\(P(Y | A, R_y)\)</span> for <span class="math inline">\(P(Y | A)\)</span> , <span class="math inline">\(P(A, Y) = P(Y | A, R_y)P(A)\)</span>. Going further, <span class="math inline">\(P(A, Y) = P(Y | A, R_y=0)P(A)\)</span>, which is equal to <span class="math inline">\(P(Y^* | A, R_y=0)P(A)\)</span>. Everything in this last decomposition is observable - <span class="math inline">\(P(A)\)</span> from the full data set and <span class="math inline">\(P(Y^* | A, R_y=0)\)</span> from the records with observed <span class="math inline">\(Y\)</span>’s only.</p>
+<p>This implies that, conceptually at least, we can estimate the conditional probability distribution of observed-only <span class="math inline">\(Y\)</span>’s for each level of <span class="math inline">\(A\)</span>, and then pool the distributions across the fully observed distribution of <span class="math inline">\(A\)</span>. That is, under an assumption of data MAR, we can recover the joint distribution of the full data using observed data only.</p>
+<p>To simulate, we keep the data generation process the same as under MCAR; the only thing that changes is the missingness generation process. <span class="math inline">\(P(R_y)\)</span> now depends on <span class="math inline">\(A\)</span>:</p>
+<pre class="r"><code>defM &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-2 + 1.5*a&quot;, logit.link = TRUE)</code></pre>
+<p>After generating the data as before, the proportion of missingness is unchanged (though the pattern of missingness certainly is):</p>
+<pre class="r"><code>dmiss[, mean(y)]</code></pre>
+<pre><code>## [1] 0.22</code></pre>
+<p>We do not expect the marginal distribution of <span class="math inline">\(Y\)</span> and <span class="math inline">\(Y^*\)</span> to be the same (only the distributions conditional on <span class="math inline">\(A\)</span> are close), so the means should be different:</p>
+<pre class="r"><code>round(c(dcomp[, mean(y)], dobs[, mean(y, na.rm = TRUE)]), 2)</code></pre>
+<pre><code>## [1]  0.03 -0.22</code></pre>
+<p>However, since the conditional distribution of <span class="math inline">\((Y|A)\)</span> is equivalent to <span class="math inline">\((Y^*|A, R_y = 0)\)</span>, we would expect estimates from a regression model of <span class="math inline">\(E[Y] = \beta_0 + \beta_1A)\)</span> would yield estimates very close to <span class="math inline">\(E[Y^*] = \beta_0^{*} + \beta_1^{*}A\)</span>. That is, we would expect <span class="math inline">\(\beta_1^{*} \approx \beta_1\)</span>.</p>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept) -0.00453    0.0314    -0.144 8.85e-  1
+## 2 a            0.964      0.0313    30.9   2.62e-147</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)  0.00756    0.0369     0.205 8.37e- 1
+## 2 a            0.980      0.0410    23.9   3.57e-95</code></pre>
+<p>The overlapping lines in the plot confirm the close model estimates. In addition, you can see here that missingness is associated with higher values of <span class="math inline">\(A\)</span>.</p>
+<p><img src="/post/2019-04-02-musings-on-missing-data.en_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+</div>
+<div id="mnar" class="section level3">
+<h3>MNAR</h3>
+<p><img src="/img/post-missing/MNAR.png" /></p>
+<p>In MNAR, there is no way to separate <span class="math inline">\(Y\)</span> from <span class="math inline">\(R_y\)</span>. Reading from the DAG, <span class="math inline">\(P(Y) \neq P(Y^* | R_y)\)</span>, and <span class="math inline">\(P(Y|A) \neq P(Y^* | A, R_y)\)</span>. There is no way to recover the joint probability of <span class="math inline">\(P(X,Y)\)</span> with observed data. <em>Mohan et al</em> do show that under some circumstances, it <em>is</em> possible to use observed data to recover the true distribution under MNAR (particularly when there is missingness related to the exposure measurement <span class="math inline">\(A\)</span>), but not in this particular case.</p>
+<p><a href="https://journals.sagepub.com/doi/pdf/10.1177/0962280210394469"><em>Daniel et al</em></a> have a different approach to determine whether the causal relationship of <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span> is identifiable under the different mechanisms. They do not use variable like <span class="math inline">\(Y^*\)</span>, but introduce external, nodes <span class="math inline">\(U_a\)</span> and <span class="math inline">\(U_y\)</span> representing unmeasured variability related to both exposure and outcome (panel <em>a</em> of the diagram below).</p>
+<p><img src="/img/post-missing/MNAR%20Daniel.png" /></p>
+<p>In the case of MNAR, when you use complete cases only, you are effectively controlling for <span class="math inline">\(R_y\)</span> (panel <em>b</em>). Since <span class="math inline">\(Y\)</span> is a collider (and <span class="math inline">\(U_y\)</span> is an ancestor of <span class="math inline">\(Y\)</span>), this has the effect of inducing an association between <span class="math inline">\(A\)</span> and <span class="math inline">\(U_y\)</span>, the common causes of <span class="math inline">\(Y\)</span>. By doing this, we have introduced unmeasured confounding that cannot be corrected, because <span class="math inline">\(U_y\)</span>, by definition, always represents the portion of unmeasured variation of <span class="math inline">\(Y\)</span>.</p>
+<p>In the simulation, I explicitly generate <span class="math inline">\(U_y\)</span>, so we can see if we observe this association:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;u.y&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;y&quot;, formula = &quot;1*a + u.y&quot;, dist = &quot;nonrandom&quot;)</code></pre>
+<p>This time around, we generate missingness of <span class="math inline">\(Y\)</span> as a function of <span class="math inline">\(Y\)</span> itself:</p>
+<pre class="r"><code>defM &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-3 + 2*y&quot;, logit.link = TRUE)</code></pre>
+<pre><code>## [1] 0.21</code></pre>
+<p>Indeed, <span class="math inline">\(A\)</span> and <span class="math inline">\(U_y\)</span> are virtually uncorrelated in the full data set, but are negatively correlated in the cases where <span class="math inline">\(Y\)</span> is not missing, as theory would suggest:</p>
+<pre class="r"><code>round(c(dcomp[, cor(a, u.y)], dobs[!is.na(y), cor(a, u.y)]), 2)</code></pre>
+<pre><code>## [1] -0.04 -0.23</code></pre>
+<p>The plot generated from these data shows diverging regression lines, the divergence a result of the induced unmeasured confounding.</p>
+<p><img src="/post/2019-04-02-musings-on-missing-data.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>In this MNAR example, we see that the missingness is indeed associated with higher values of <span class="math inline">\(Y\)</span>, although the proportion of missingness remains at about 21%, consistent with the earlier simulations.</p>
+</div>
+</div>
+<div id="there-may-be-more-down-the-road" class="section level2">
+<h2>There may be more down the road</h2>
+<p>I’ll close here, but in the near future, I hope to explore various (slightly more involved) scenarios under which complete case analysis is adequate, or where something like multiple imputation is more useful. Also, I would like to get back to the original motivation for writing about missingness, which was to describe how I went about analyzing the child emotional intelligence data. Both of these will be much easier now that we have the basic tools to think about how missing data can be generated in a systematic way.</p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Daniel, Rhian M., Michael G. Kenward, Simon N. Cousens, and Bianca L. De Stavola. “Using causal diagrams to guide analysis in missing data problems.” Statistical methods in medical research 21, no. 3 (2012): 243-256.</p>
+<p>Mohan, Karthika, Judea Pearl, and Jin Tian. “Graphical models for inference with missing data.” In Advances in neural information processing systems, pp. 1277-1285. 2013.</p>
+Westfall, Jake. “Using causal graphs to understand missingness and how to deal with it.” Cookie Scientist (blog). August 22, 2017. Accessed March 25, 2019. <a href="http://jakewestfall.org/blog/" class="uri">http://jakewestfall.org/blog/</a>.
+</font></small>
+</p>
+</div>
