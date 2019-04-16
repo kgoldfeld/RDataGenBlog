@@ -1,0 +1,274 @@
+---
+title: Even with randomization, mediation analysis can still be confounded
+author: ''
+date: '2019-04-16'
+slug: even-with-randomization-mediation-analysis-can-still-be-confounded
+categories: []
+tags: []
+subtitle: ''
+---
+
+
+
+<p>Randomization is super useful because it usually eliminates the risk that confounding will lead to a biased estimate of a treatment effect. However, this only goes so far. If you are conducting a meditation analysis in the hopes of understanding the underlying causal mechanism of a treatment, it is important to remember that the mediator has <em>not</em> been randomized, only the treatment. This means that the estimated mediation effect <em>is</em> still at risk of being confounded.</p>
+<p>I never fail to mention this when a researcher tells me they are interested in doing a mediation analysis (and it seems like more and more folks are interested in including this analysis as part of their studies). So, when my son brought up the fact that the lead investigator on his experimental psychology project wanted to include a mediation analysis, I, of course, had to pipe up. “You have to be careful, you know.”</p>
+<p>But, he wasn’t buying it, wondering why randomization didn’t take care of the confounding; surely, the potential confounders would be balanced across treatment groups. Maybe I’d had a little too much wine, as I considered he might have a point. But no - I’d quickly come to my senses - it doesn’t matter that the confounder is balanced across treatment groups (which it very well could be), it would still be unbalanced across the different levels of the mediator, which is what really matters if we are estimating the effect of the mediator.</p>
+<p>I proposed to do a simulation of this phenomenon. My son was not impressed, but I went ahead and did it anyways, and I am saving it here in case he wants to take a look. Incidentally, this is effectively a brief follow-up to an <a href="https://www.rdatagen.net/post/causal-mediation/">earlier post</a> on mediation. So, if the way in which I am generating the data seems a bit opaque, you might want to take a <a href="https://www.rdatagen.net/post/causal-mediation/">look</a> at what I did earlier.</p>
+<div id="the-data-generating-process" class="section level2">
+<h2>The data generating process</h2>
+<p>Here is a DAG that succinctly describes how I will generate the data. You can see clearly that <span class="math inline">\(U_2\)</span> is a confounder of the relationship between the mediator <span class="math inline">\(M\)</span> and the outcome <span class="math inline">\(Y\)</span>. (It should be noted that if we were only interested in is the causal effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span>, <span class="math inline">\(U_2\)</span> is <em>not</em> a confounder, so we wouldn’t need to control for <span class="math inline">\(U_2\)</span>.)</p>
+<p><img src="/img/post-confoundmed/DAGmediation.png" /></p>
+<p>As I did in the earlier simulation of mediation, I am simulating the potential outcomes so that we can see the “truth” that we are trying to measure.</p>
+<pre class="r"><code>defU &lt;- defData(varname = &quot;U2&quot;, formula = 0, 
+                variance = 1.5, dist = &quot;normal&quot;)
+
+defI &lt;- defDataAdd(varname = &quot;M0&quot;, formula = &quot;-2 + U2&quot;,
+                   dist = &quot;binary&quot;, link = &quot;logit&quot;)
+defI &lt;- defDataAdd(defI, varname = &quot;M1&quot;, formula = &quot;-1 + U2&quot;,
+                   dist = &quot;binary&quot;, link = &quot;logit&quot;)
+
+defA &lt;- defReadAdd(&quot;DataConfoundMediation/mediation def.csv&quot;)</code></pre>
+<table class="table table-condensed">
+<thead>
+<tr>
+<th style="text-align:right;">
+varname
+</th>
+<th style="text-align:right;">
+formula
+</th>
+<th style="text-align:right;">
+variance
+</th>
+<th style="text-align:right;">
+dist
+</th>
+<th style="text-align:right;">
+link
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">e0 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">1</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">normal </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">Y0M0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">2 + M0*2 + U2 + e0 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">Y0M1</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">2 + M1*2 + U2 + e0 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">e1 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">1</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">normal </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">Y1M0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">8 + M0*5 + U2 + e1 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">Y1M1</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">8 + M1*5 + U2 + e1 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">M </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">(A==0) * M0 + (A==1) * M1 </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+<tr>
+<td style="text-align:right;">
+<span style="font-size: 16px">Y </span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">(A==0) * Y0M0 + (A==1) * Y1M1</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">0</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">nonrandom</span>
+</td>
+<td style="text-align:right;">
+<span style="font-size: 16px">identity</span>
+</td>
+</tr>
+</tbody>
+</table>
+<div id="getting-the-true-causal-effects" class="section level3">
+<h3>Getting the “true”&quot; causal effects</h3>
+<p>With the definitions set, we can generate a very, very large data set (not infinite, but pretty close) to get at the “true” causal effects that we will try to recover using smaller (finite) data sets. I am calculating the causal mediated effects (for the treated and controls) and the causal direct effects (also for the treated and controls).</p>
+<pre class="r"><code>set.seed(184049)
+
+du &lt;- genData(1000000, defU)
+dtrue &lt;- addCorFlex(du, defI, rho = 0.6, corstr = &quot;cs&quot;)
+
+dtrue &lt;- trtAssign(dtrue, grpName = &quot;A&quot;)
+
+dtrue &lt;- addColumns(defA, dtrue)
+
+truth &lt;- round(dtrue[, .(CMEc = mean(Y0M1 - Y0M0), CMEt= mean(Y1M1 - Y1M0),
+                  CDEc = mean(Y1M0 - Y0M0), CDEt= mean(Y1M1 - Y0M1))], 2)
+
+truth</code></pre>
+<pre><code>##    CMEc CMEt CDEc CDEt
+## 1: 0.29 0.72 6.51 6.95</code></pre>
+<p>And here we can see that although <span class="math inline">\(U_2\)</span> is balanced across treatment groups <span class="math inline">\(A\)</span>, <span class="math inline">\(U_2\)</span> is still associated with the mediator <span class="math inline">\(M\)</span>:</p>
+<pre class="r"><code>dtrue[, mean(U2), keyby = A]</code></pre>
+<pre><code>##    A       V1
+## 1: 0 -0.00220
+## 2: 1 -0.00326</code></pre>
+<pre class="r"><code>dtrue[, mean(U2), keyby = M]</code></pre>
+<pre><code>##    M     V1
+## 1: 0 -0.287
+## 2: 1  0.884</code></pre>
+<p>Also - since <span class="math inline">\(U_2\)</span> is a confounder, we would expect it to be associated with the outcome <span class="math inline">\(Y\)</span>, which it is:</p>
+<pre class="r"><code>dtrue[, cor(U2, Y)]</code></pre>
+<pre><code>## [1] 0.42</code></pre>
+</div>
+<div id="recovering-the-estimate-from-a-small-data-set" class="section level3">
+<h3>Recovering the estimate from a small data set</h3>
+<p>We generate a smaller data set using the same process:</p>
+<pre class="r"><code>du &lt;- genData(1000, defU)
+dd &lt;- addCorFlex(du, defI, rho = 0.6, corstr = &quot;cs&quot;)
+dd &lt;- trtAssign(dd, grpName = &quot;A&quot;)
+dd &lt;- addColumns(defA,dd)</code></pre>
+<p>We can estimate the causal effects using the <code>mediation</code> package, by specifying a “mediation” model and an “outcome model”. I am going to compare two approaches, one that controls for <span class="math inline">\(U_2\)</span> in both models, and a second that ignores the confounder in both.</p>
+<pre class="r"><code>library(mediation)
+
+### models that control for confounder
+
+med.fitc &lt;- glm(M ~ A + U2, data = dd, family = binomial(&quot;logit&quot;))
+out.fitc &lt;- lm(Y ~ M*A + U2, data = dd)
+
+med.outc &lt;- mediate(med.fitc, out.fitc, treat = &quot;A&quot;, mediator = &quot;M&quot;,
+                   robustSE = TRUE, sims = 500)
+
+### models that ignore confounder
+
+med.fitx &lt;- glm(M ~ A, data = dd, family = binomial(&quot;logit&quot;))
+out.fitx &lt;- lm(Y ~ M*A, data = dd)
+
+med.outx &lt;- mediate(med.fitx, out.fitx, treat = &quot;A&quot;, mediator = &quot;M&quot;,
+                   robustSE = TRUE, sims = 500)</code></pre>
+<p>It appears that the approach that adjusts for <span class="math inline">\(U_2\)</span> (middle row) provides a set of estimates closer to the truth (top row) than the approach that ignores <span class="math inline">\(U_2\)</span> (bottom row):</p>
+<pre class="r"><code>dres &lt;- rbind(
+  
+  truth,
+
+  data.table(CMEc = med.outc$d0, CMEt = med.outc$d1, 
+             CDEc = med.outc$z0, CDEt = med.outc$z1) ,
+
+  data.table(CMEc = med.outx$d0, CMEt = med.outx$d1, 
+             CDEc = med.outx$z0, CDEt = med.outx$z1)
+)
+
+round(dres,2)</code></pre>
+<pre><code>##    CMEc CMEt CDEc CDEt
+## 1: 0.29 0.72 6.51 6.95
+## 2: 0.32 0.84 6.51 7.03
+## 3: 0.53 1.07 6.32 6.85</code></pre>
+<p>Of course, it is not prudent to draw conclusions from a single simulation. So, I generated 1000 data sets and recorded all the results. A visual summary of the results shows that the approach that ignores <span class="math inline">\(U_2\)</span> is biased with respect to the four causal effects, whereas including <span class="math inline">\(U_2\)</span> in the analysis yields unbiased estimates. In the plot, the averages of the estimates are the black points, the segments represent <span class="math inline">\(\pm \ 2 \ sd\)</span>, and the blue vertical lines represent the truth:</p>
+<p><img src="/img/post-confoundmed/estMediation.png" /></p>
+<p>Almost as an addendum, using the almost infinitely large “true” data set, we can see that the total treatment effect of <span class="math inline">\(A\)</span> can be estimated from observed data <em>ignoring</em> <span class="math inline">\(U_2\)</span>, because as we saw earlier, <span class="math inline">\(U_2\)</span> is indeed balanced across both levels of <span class="math inline">\(A\)</span> due to randomization:</p>
+<pre class="r"><code>c( est = coef(lm(Y ~ A, data = dtrue))[&quot;A&quot;], 
+   truth = round(dtrue[, .(TotalEff = mean(Y1M1 - Y0M0))], 2))</code></pre>
+<pre><code>## $est.A
+## [1] 7.24
+## 
+## $truth.TotalEff
+## [1] 7.24</code></pre>
+</div>
+</div>
