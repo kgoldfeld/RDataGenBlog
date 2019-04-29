@@ -1,0 +1,197 @@
+---
+title: 'What matters more in a cluster randomized trial: number or size?'
+author: ''
+date: '2019-04-30'
+slug: what-matters-more-in-a-cluster-randomized-trial-number-or-size
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I am involved with a trial of an intervention designed to prevent full-blown opioid use disorder for patients who may have an incipient opioid use problem. Given the nature of the intervention, it was clear the only feasible way to conduct this particular study is to randomize at the physician rather than the patient level.</p>
+<p>There was a concern that the number of patients eligible for the study might be limited, so that each physician might only have a handful of patients able to participate, if that many. A question arose as to whether we can make up for this limitation by increasing the number of physicians who participate? That is, what is the trade-off between number of clusters and cluster size?</p>
+<p>This is a classic issue that confronts any cluster randomized trial - made more challenging by the potentially very small cluster sizes. A primary concern of the investigators is having sufficient power to estimate an intervention effect - how would this trade-off impact that? And as a statistician, I have concerns about bias and variance, which could have important implications depending on what you are interested in measuring.</p>
+<div id="clustering-in-a-nutshell" class="section level2">
+<h2>Clustering in a nutshell</h2>
+<p>This is an immense topic - I won’t attempt to point you to the best resources, because there are so many out there. For me, there are two salient features of cluster randomized trials that present key challenges.</p>
+<p>First, individuals in a cluster are not providing as much information as we might imagine. If we take an extreme example of a case where the outcome of everyone in a cluster is identical, we learn absolutely nothing by taking an additional subject from that cluster; in fact, all we need is one subject per cluster, because all the variation is across clusters, not within. Of course, that is overly dramatic, but the same principal is in play even when the outcomes of subjects in a cluster are moderately correlated. The impact of this phenomenon depends on the within cluster correlation relative to the between cluster correlation. The relationship of these two correlations is traditionally characterized by the intra-class coefficient (ICC), which is the ratio of the between-cluster variation to total variation.</p>
+<p>Second, if there is high variability across clusters, that gets propagated to the variance of the estimate of the treatment effect. From study to study (which is what we are conceiving of in a frequentist frame of mind), we are not just sampling individuals from the clusters, but we are changing the sample of clusters that we are selecting from! So much variation going on. Of course, if all clusters are exactly the same (i.e. no variation between clusters), then it doesn’t really matter what clusters we are choosing from each time around, and we have no added variability as a result of sampling from different clusters. But, as we relax this assumption of no between-cluster variability, we add over-all variability to the process, which gets translated to our parameter estimates.</p>
+<p>The cluster size/cluster number trade-off is driven largely by these two issues.</p>
+</div>
+<div id="simulation" class="section level2">
+<h2>Simulation</h2>
+<p>I am generating data from a cluster randomized trial that has the following underlying data generating process:</p>
+<p><span class="math display">\[ Y_{ij} = 0.35 * R_j + c_j + \epsilon_{ij}\ ,\]</span>
+where <span class="math inline">\(Y_{ij}\)</span> is the outcome for patient <span class="math inline">\(i\)</span> who is being treated by physician <span class="math inline">\(j\)</span>. <span class="math inline">\(R_j\)</span> represents the treatment indicator for physician <span class="math inline">\(j\)</span> (0 for control, 1 for treatment). <span class="math inline">\(c_j\)</span> is the physician-level random effect that is normally distributed <span class="math inline">\(N(0, \sigma^2_c)\)</span>. <span class="math inline">\(\epsilon_{ij}\)</span> is the individual-level effect, and <span class="math inline">\(\epsilon_{ij} \sim N(0, \sigma^2_\epsilon)\)</span>. The expected value of <span class="math inline">\(Y_{ij}\)</span> for patients treated by physicians in the control group is <span class="math inline">\(0\)</span>. And for the patients treated by physicians in the intervention <span class="math inline">\(E(Y_{ij}) = 0.35\)</span>.</p>
+<div id="defining-the-simulation" class="section level3">
+<h3>Defining the simulation</h3>
+<p>The entire premise of this post is that we have a target number of study subjects (which in the real world example was set at 480), and the question is should we spread those subjects across a smaller or larger number of clusters? In all the simulations that follow, then, we have fixed the total number of subjects at 480. That means if we have 240 clusters, there will be only 2 in each one; and if we have 10 clusters, there will be 48 patients per cluster.</p>
+<p>In the first example shown here, we are assuming an ICC = 0.10 and 60 clusters of 8 subjects each:</p>
+<pre class="r"><code>library(simstudy)
+Var &lt;- iccRE(0.10, varWithin = 0.90, dist = &quot;normal&quot;)
+
+defC &lt;- defData(varname = &quot;ceffect&quot;, formula = 0, variance = Var,
+                  dist = &quot;normal&quot;, id = &quot;cid&quot;)
+defC &lt;- defData(defC, &quot;nperc&quot;, formula = &quot;8&quot;, 
+                  dist = &quot;nonrandom&quot; )
+  
+defI &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;ceffect + 0.35 * rx&quot;, 
+                   variance = 0.90)</code></pre>
+</div>
+<div id="generating-a-single-data-set-and-estimating-parameters" class="section level3">
+<h3>Generating a single data set and estimating parameters</h3>
+<p>Based on the data definitions, I can now generate a single data set:</p>
+<pre class="r"><code>set.seed(711216)
+  
+dc &lt;- genData(60, defC)
+dc &lt;- trtAssign(dc, 2, grpName = &quot;rx&quot;)
+    
+dd &lt;- genCluster(dc, &quot;cid&quot;, numIndsVar = &quot;nperc&quot;, level1ID = &quot;id&quot; )
+dd &lt;- addColumns(defI, dd)
+
+dd</code></pre>
+<pre><code>##      cid rx  ceffect nperc  id     y
+##   1:   1  0  0.71732     8   1  2.94
+##   2:   1  0  0.71732     8   2  1.23
+##   3:   1  0  0.71732     8   3  1.33
+##   4:   1  0  0.71732     8   4  1.11
+##   5:   1  0  0.71732     8   5  1.15
+##  ---                                
+## 476:  60  1 -0.00034     8 476 -0.52
+## 477:  60  1 -0.00034     8 477 -1.10
+## 478:  60  1 -0.00034     8 478  1.83
+## 479:  60  1 -0.00034     8 479 -0.27
+## 480:  60  1 -0.00034     8 480 -0.25</code></pre>
+<p>We use a linear mixed effect model to estimate the treatment effect and variation across clusters:</p>
+<pre class="r"><code>library(lmerTest)
+lmerfit &lt;- lmer(y~rx + (1 | cid), data = dd)</code></pre>
+<p>Here are the estimates of the random and fixed effects:</p>
+<pre class="r"><code>as.data.table(VarCorr(lmerfit))</code></pre>
+<pre><code>##         grp        var1 var2  vcov sdcor
+## 1:      cid (Intercept) &lt;NA&gt; 0.098  0.31
+## 2: Residual        &lt;NA&gt; &lt;NA&gt; 0.797  0.89</code></pre>
+<pre class="r"><code>coef(summary(lmerfit))</code></pre>
+<pre><code>##             Estimate Std. Error df t value Pr(&gt;|t|)
+## (Intercept)    0.013      0.081 58    0.16   0.8720
+## rx             0.333      0.115 58    2.90   0.0053</code></pre>
+<p>And here is the estimated ICC, which happens to be close to the “true” ICC of 0.10 (which is definitely not a sure thing given the relatively small sample size):</p>
+<pre class="r"><code>library(sjstats)
+icc(lmerfit)</code></pre>
+<pre><code>## 
+## Intraclass Correlation Coefficient for Linear mixed model
+## 
+## Family : gaussian (identity)
+## Formula: y ~ rx + (1 | cid)
+## 
+##   ICC (cid): 0.1098</code></pre>
+</div>
+</div>
+<div id="a-deeper-look-at-the-variation-of-estimates" class="section level2">
+<h2>A deeper look at the variation of estimates</h2>
+<p>In these simulations, we are primarily interested in investigating the effect of different numbers of clusters and different cluster sizes on power, variation, bias (and mean square error, which is a combined measure of variance and bias). This means replicating many data sets and studying the distribution of the estimates.</p>
+<p>To do this, it is helpful to create a functions that generates the data:</p>
+<pre class="r"><code>reps &lt;- function(nclust) {
+  
+    dc &lt;- genData(nclust, defC)
+    dc &lt;- trtAssign(dc, 2, grpName = &quot;rx&quot;)
+    
+    dd &lt;- genCluster(dc, &quot;cid&quot;, numIndsVar = &quot;nperc&quot;, level1ID = &quot;id&quot; )
+    dd &lt;- addColumns(defI, dd)
+    
+    lmerTest::lmer(y ~ rx + (1 | cid), data = dd)
+}</code></pre>
+<p>And here is a function to check if p-values from model estimates are less than 0.05, which will come in handy later when estimating power:</p>
+<pre class="r"><code>pval &lt;- function(x) {
+    coef(summary(x))[&quot;rx&quot;, &quot;Pr(&gt;|t|)&quot;] &lt; 0.05
+}</code></pre>
+<p>Now we can generate 1000 data sets and fit a linear fixed effects model to each one, and store the results in an R <em>list</em>:</p>
+<pre class="r"><code>library(parallel)
+
+res &lt;- mclapply(1:1000, function(x) reps(60))</code></pre>
+<p>Extracting information from all 1000 model fits provides an estimate of power:</p>
+<pre class="r"><code>mean(sapply(res, function(x) pval(x)))</code></pre>
+<pre><code>## [1] 0.82</code></pre>
+<p>And here are estimates of bias, variance, and root mean square error of the treatment effect estimates. We can see in this case, the estimated treatment effect is not particularly biased:</p>
+<pre class="r"><code>RX &lt;- sapply(res, function(x) getME(x, &quot;fixef&quot;)[&quot;rx&quot;])
+
+c(true = 0.35, avg = mean(RX), var = var(RX), 
+  bias = mean(RX - 0.35), rmse = sqrt(mean((RX - 0.35)^2)))</code></pre>
+<pre><code>##   true    avg    var   bias   rmse 
+## 0.3500 0.3516 0.0149 0.0016 0.1219</code></pre>
+<p>And if we are interested in seeing how well we measure the between cluster variation, we can evaluate that as well. The true variance (used to generate the data), was 0.10, and the average of the estimates was 0.099, quite close:</p>
+<pre class="r"><code>RE &lt;- sapply(res, function(x) as.numeric(VarCorr(x)))
+
+c(true = Var, avg = mean(RE), var = var(RE), 
+  bias = mean(RE - Var), rmse = sqrt(mean((RE - Var)^2)))</code></pre>
+<pre><code>##   true    avg    var   bias   rmse 
+## 0.1000 0.1005 0.0017 0.0005 0.0412</code></pre>
+</div>
+<div id="replications-under-different-scenarios" class="section level2">
+<h2>Replications under different scenarios</h2>
+<p>Now we are ready to put all of this together for one final experiment to investigate the effects of the ICC and cluster number/size on power, variance, and bias. I generated 2000 data sets for each combination of assumptions about cluster sizes (ranging from 10 to 240) and ICC’s (ranging from 0 to 0.15). For each combination, I estimated the variance and bias for the treatment effect parameter estimates and the between-cluster variance. (I include the code in case any one needs to do something similar.)</p>
+<pre class="r"><code>ps &lt;- list()
+pn &lt;- 0
+
+nclust &lt;- c(10, 20, 30, 40, 48, 60, 80, 96, 120, 160, 240)
+iccs &lt;- c(0, 0.02, 0.05 , 0.10, 0.15)
+
+for (s in seq_along(nclust)) {
+  for (i in seq_along(iccs)) {
+    
+    newvar &lt;- iccRE(iccs[i], varWithin = .90, dist = &quot;normal&quot;)
+    newperc &lt;- 480/nclust[s]
+    
+    defC &lt;- updateDef(defC, &quot;ceffect&quot;, newvariance = newvar)
+    defC &lt;- updateDef(defC, &quot;nperc&quot;, newformula = newperc)
+    
+    res &lt;- mclapply(1:2000, function(x) reps(nclust[s]))
+    RX &lt;- sapply(res, function(x) getME(x, &quot;fixef&quot;)[&quot;rx&quot;])
+    RE &lt;- sapply(res, function(x) as.numeric(VarCorr(x)))
+    power &lt;- mean(sapply(res, function(x) pval(x))
+    
+    pn &lt;- pn + 1
+    ps[[pn]] &lt;- data.table(nclust = nclust[s], 
+                           newperc, 
+                           icc=iccs[i], 
+                           newvar,
+                           power,
+                           biasRX = mean(RX - 0.35),
+                           varRX = var(RX),
+                           rmseRX = sqrt(mean((RX - 0.35)^2)),
+                           avgRE = mean(RE),
+                           biasRE = mean(RE - newvar),
+                           varRE = var(RE),
+                           rmseRE = sqrt(mean((RE - newvar)^2))
+    )
+  }
+}
+  
+ps &lt;- rbindlist(ps)</code></pre>
+<p>First, we can take a look at the power. Clearly, for lower ICC’s, there is little marginal gain after a threshold between 60 and 80 clusters; with the higher ICC’s, a study might benefit with respect to power from adding more clusters (and reducing cluster size):</p>
+<pre class="r"><code>library(ggthemes)
+library(scales)
+
+ggplot(data = ps, aes(x = nclust, y = power, group = icc)) +
+  geom_smooth(aes(color = factor(icc)), se = FALSE) +
+  theme(panel.grid.minor = element_blank()) +
+  scale_color_ptol(name = &quot;ICC&quot;, labels = number(iccs, accuracy = .01)) +
+  scale_x_continuous(name = &quot;number of clusters&quot;, breaks = nclust)</code></pre>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
+<p>Not surprisingly, the same picture emerges (only in reverse) when looking at the variance of the estimate for treatment effect. Variance declines quite dramatically as we increase the number of clusters (again, reducing cluster size) up to about 60 or so, and little gain in precision beyond that:</p>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>If we are interested in measuring the variation across clusters (which was <span class="math inline">\(\sigma^2_c\)</span> in the model), then a very different picture emerges. First, the plot of RMSE (which is <span class="math inline">\(E[(\hat{\theta} - \theta)^2]^{\frac{1}{2}}\)</span>, where <span class="math inline">\(\theta = \sigma^2_c\)</span>), indicates that after some point, actually increasing the number of clusters after a certain point may be a bad idea.</p>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>The trends of RMSE are mirrored by the variance of <span class="math inline">\(\hat{\sigma^2_c}\)</span>:</p>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>I show the bias of the variance estimate, because it highlights the point that it is very difficult to get an unbiased estimate of <span class="math inline">\(\sigma^2_c\)</span> when the ICC is low, particularly with a large number of clusters with small cluster sizes. This may not be so surprising, because with small cluster sizes it may be more difficult to estimate the within-cluster variance, an important piece of the total variation.</p>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
+</div>
+<div id="almost-an-addendum" class="section level2">
+<h2>Almost an addendum</h2>
+<p>I’ve focused entirely on the direct trade-off between the number of clusters and cluster size, because that was the question raised by the study that motivated this post. However, we may have a fixed number of clusters, and we might want to know if it makes sense to recruit more subjects from each cluster. To get a picture of this, I re-ran the simulations with 60 clusters, by evaluated power and variance of the treatment effect estimator at cluster sizes ranging from 5 to 60.</p>
+<p>Under the assumptions used here, it also looks like there is a point after which little can be gained by adding subjects to each cluster (at least in terms of both power and precision of the estimate of the treatment effect):</p>
+<p><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-21-1.png" width="672" /><img src="/post/2019-04-30-what-matters-more-in-a-cluster-randomized-trial-number-or-size.en_files/figure-html/unnamed-chunk-21-2.png" width="672" /></p>
+</div>
