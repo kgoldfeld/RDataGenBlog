@@ -113,21 +113,21 @@ icc(lmerfit)</code></pre>
 res &lt;- mclapply(1:1000, function(x) reps(60))</code></pre>
 <p>Extracting information from all 1000 model fits provides an estimate of power:</p>
 <pre class="r"><code>mean(sapply(res, function(x) pval(x)))</code></pre>
-<pre><code>## [1] 0.82</code></pre>
+<pre><code>## [1] 0.8</code></pre>
 <p>And here are estimates of bias, variance, and root mean square error of the treatment effect estimates. We can see in this case, the estimated treatment effect is not particularly biased:</p>
 <pre class="r"><code>RX &lt;- sapply(res, function(x) getME(x, &quot;fixef&quot;)[&quot;rx&quot;])
 
 c(true = 0.35, avg = mean(RX), var = var(RX), 
   bias = mean(RX - 0.35), rmse = sqrt(mean((RX - 0.35)^2)))</code></pre>
-<pre><code>##   true    avg    var   bias   rmse 
-## 0.3500 0.3516 0.0149 0.0016 0.1219</code></pre>
+<pre><code>##    true     avg     var    bias    rmse 
+##  0.3500  0.3479  0.0153 -0.0021  0.1236</code></pre>
 <p>And if we are interested in seeing how well we measure the between cluster variation, we can evaluate that as well. The true variance (used to generate the data), was 0.10, and the average of the estimates was 0.099, quite close:</p>
 <pre class="r"><code>RE &lt;- sapply(res, function(x) as.numeric(VarCorr(x)))
 
 c(true = Var, avg = mean(RE), var = var(RE), 
   bias = mean(RE - Var), rmse = sqrt(mean((RE - Var)^2)))</code></pre>
 <pre><code>##   true    avg    var   bias   rmse 
-## 0.1000 0.1005 0.0017 0.0005 0.0412</code></pre>
+## 0.1000 0.1020 0.0017 0.0020 0.0417</code></pre>
 </div>
 <div id="replications-under-different-scenarios" class="section level2">
 <h2>Replications under different scenarios</h2>
@@ -169,9 +169,9 @@ for (s in seq_along(nclust)) {
   }
 }
   
-ps &lt;- rbindlist(ps)</code></pre>
+ps &lt;- data.table::rbindlist(ps)</code></pre>
 <p>First, we can take a look at the power. Clearly, for lower ICC’s, there is little marginal gain after a threshold between 60 and 80 clusters; with the higher ICC’s, a study might benefit with respect to power from adding more clusters (and reducing cluster size):</p>
-<pre class="r"><code>library(ggthemes)
+<pre class="r"><code>library(ggthemes) # for Paul Tol&#39;s Color Schemes
 library(scales)
 
 ggplot(data = ps, aes(x = nclust, y = power, group = icc)) +
