@@ -54,29 +54,29 @@ dd &lt;- addColumns(defI, dd)
 
 dd</code></pre>
 <pre><code>##      cid rx  ceffect nperc  id     y
-##   1:   1  0  0.71732     8   1  2.94
-##   2:   1  0  0.71732     8   2  1.23
-##   3:   1  0  0.71732     8   3  1.33
-##   4:   1  0  0.71732     8   4  1.11
-##   5:   1  0  0.71732     8   5  1.15
+##   1:   1  0  0.71732     8   1  0.42
+##   2:   1  0  0.71732     8   2  0.90
+##   3:   1  0  0.71732     8   3 -1.24
+##   4:   1  0  0.71732     8   4  2.37
+##   5:   1  0  0.71732     8   5  0.71
 ##  ---                                
-## 476:  60  1 -0.00034     8 476 -0.52
-## 477:  60  1 -0.00034     8 477 -1.10
-## 478:  60  1 -0.00034     8 478  1.83
-## 479:  60  1 -0.00034     8 479 -0.27
-## 480:  60  1 -0.00034     8 480 -0.25</code></pre>
+## 476:  60  1 -0.00034     8 476 -1.12
+## 477:  60  1 -0.00034     8 477  0.88
+## 478:  60  1 -0.00034     8 478  0.47
+## 479:  60  1 -0.00034     8 479  0.28
+## 480:  60  1 -0.00034     8 480 -0.54</code></pre>
 <p>We use a linear mixed effect model to estimate the treatment effect and variation across clusters:</p>
 <pre class="r"><code>library(lmerTest)
 lmerfit &lt;- lmer(y~rx + (1 | cid), data = dd)</code></pre>
 <p>Here are the estimates of the random and fixed effects:</p>
 <pre class="r"><code>as.data.table(VarCorr(lmerfit))</code></pre>
-<pre><code>##         grp        var1 var2  vcov sdcor
-## 1:      cid (Intercept) &lt;NA&gt; 0.098  0.31
-## 2: Residual        &lt;NA&gt; &lt;NA&gt; 0.797  0.89</code></pre>
+<pre><code>##         grp        var1 var2 vcov sdcor
+## 1:      cid (Intercept) &lt;NA&gt; 0.14  0.38
+## 2: Residual        &lt;NA&gt; &lt;NA&gt; 0.78  0.88</code></pre>
 <pre class="r"><code>coef(summary(lmerfit))</code></pre>
 <pre><code>##             Estimate Std. Error df t value Pr(&gt;|t|)
-## (Intercept)    0.013      0.081 58    0.16   0.8720
-## rx             0.333      0.115 58    2.90   0.0053</code></pre>
+## (Intercept)    0.008      0.089 58    0.09    0.929
+## rx             0.322      0.126 58    2.54    0.014</code></pre>
 <p>And here is the estimated ICC, which happens to be close to the “true” ICC of 0.10 (which is definitely not a sure thing given the relatively small sample size):</p>
 <pre class="r"><code>library(sjstats)
 icc(lmerfit)</code></pre>
@@ -86,7 +86,7 @@ icc(lmerfit)</code></pre>
 ## Family : gaussian (identity)
 ## Formula: y ~ rx + (1 | cid)
 ## 
-##   ICC (cid): 0.1098</code></pre>
+##   ICC (cid): 0.1540</code></pre>
 </div>
 </div>
 <div id="a-deeper-look-at-the-variation-of-estimates" class="section level2">
@@ -113,21 +113,21 @@ icc(lmerfit)</code></pre>
 res &lt;- mclapply(1:1000, function(x) reps(60))</code></pre>
 <p>Extracting information from all 1000 model fits provides an estimate of power:</p>
 <pre class="r"><code>mean(sapply(res, function(x) pval(x)))</code></pre>
-<pre><code>## [1] 0.8</code></pre>
+<pre><code>## [1] 0.82</code></pre>
 <p>And here are estimates of bias, variance, and root mean square error of the treatment effect estimates. We can see in this case, the estimated treatment effect is not particularly biased:</p>
 <pre class="r"><code>RX &lt;- sapply(res, function(x) getME(x, &quot;fixef&quot;)[&quot;rx&quot;])
 
 c(true = 0.35, avg = mean(RX), var = var(RX), 
   bias = mean(RX - 0.35), rmse = sqrt(mean((RX - 0.35)^2)))</code></pre>
 <pre><code>##    true     avg     var    bias    rmse 
-##  0.3500  0.3479  0.0153 -0.0021  0.1236</code></pre>
+## 0.35000 0.35061 0.01489 0.00061 0.12197</code></pre>
 <p>And if we are interested in seeing how well we measure the between cluster variation, we can evaluate that as well. The true variance (used to generate the data), was 0.10, and the average of the estimates was 0.099, quite close:</p>
 <pre class="r"><code>RE &lt;- sapply(res, function(x) as.numeric(VarCorr(x)))
 
 c(true = Var, avg = mean(RE), var = var(RE), 
   bias = mean(RE - Var), rmse = sqrt(mean((RE - Var)^2)))</code></pre>
-<pre><code>##   true    avg    var   bias   rmse 
-## 0.1000 0.1020 0.0017 0.0020 0.0417</code></pre>
+<pre><code>##    true     avg     var    bias    rmse 
+## 0.10000 0.10011 0.00160 0.00011 0.03996</code></pre>
 </div>
 <div id="replications-under-different-scenarios" class="section level2">
 <h2>Replications under different scenarios</h2>
@@ -150,7 +150,7 @@ for (s in seq_along(nclust)) {
     res &lt;- mclapply(1:2000, function(x) reps(nclust[s]))
     RX &lt;- sapply(res, function(x) getME(x, &quot;fixef&quot;)[&quot;rx&quot;])
     RE &lt;- sapply(res, function(x) as.numeric(VarCorr(x)))
-    power &lt;- mean(sapply(res, function(x) pval(x))
+    power &lt;- mean(sapply(res, function(x) pval(x)))
     
     pn &lt;- pn + 1
     ps[[pn]] &lt;- data.table(nclust = nclust[s], 
