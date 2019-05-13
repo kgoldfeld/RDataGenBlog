@@ -1,0 +1,129 @@
+---
+title: Generating and modeling over-dispersed binomial data
+author: ''
+date: '2019-05-14'
+slug: overdispersed-binomial-data
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>A couple of weeks ago, I was inspired by a study to <a href="https://www.rdatagen.net/post/what-matters-more-in-a-cluster-randomized-trial-number-or-size/">write</a> about a classic design issue that arises in cluster randomized trials: should we focus on the number of clusters or the size of those clusters? This trial, which is concerned with preventing opioid use disorder for at-risk patients in primary care clinics, has also motivated this second post, which concerns another important issue - over-dispersion.</p>
+<div id="a-count-outcome" class="section level3">
+<h3>A count outcome</h3>
+<p>In this study, one of the primary outcomes is the number of days of opioid use over a six-month follow-up period (to be recorded monthly by patient-report and aggregated for the six-month measure). While one might get away with assuming that the outcome is continuous, it really is not; it is a <em>count</em> outcome, and the possible range is 0 to 180. There are two related questions here - what model will be used to analyze the data once the study is complete? And, how should we generate simulated data to estimate the power of the study?</p>
+<p>In this particular study, the randomization is at the physician level so that all patients in a particular physician practice will be in control or treatment. (For the purposes of simplification here, I am going to assume there is no treatment effect, so that all variation in the outcome is due to physicians and patients only.) One possibility is to assume the outcome <span class="math inline">\(Y_{ij}\)</span> for patient <span class="math inline">\(i\)</span> in group <span class="math inline">\(j\)</span> has a binomial distribution with 180 different “experiments” - every day we ask did the patient use opioids? - so that we say <span class="math inline">\(Y_{ij} \sim Bin(180, \ p_{ij})\)</span>.</p>
+</div>
+<div id="the-probability-parameter" class="section level3">
+<h3>The probability parameter</h3>
+<p>The key parameter here is <span class="math inline">\(p_{ij}\)</span>, the probability that patient <span class="math inline">\(i\)</span> (in group <span class="math inline">\(j\)</span>) uses opioids on any given day. Given the binomial distribution, the number of days of opioid use we expect to observe for patient <span class="math inline">\(i\)</span> is <span class="math inline">\(180p_{ij}\)</span>. There are at least three ways to think about how to model this probability (though there are certainly more):</p>
+<ul>
+<li><span class="math inline">\(p_{ij} = p\)</span>: everyone shares the same probability The collection of all patients will represent a sample from <span class="math inline">\(Bin(180, p)\)</span>.</li>
+<li><span class="math inline">\(p_{ij} = p_j\)</span>: the probability of the outcome is determined by the cluster or group alone. The data within the cluster will have a binomial distribution, but the collective data set will <em>not</em> have a strict binomial distribution and will be over-dispersed.</li>
+<li><span class="math inline">\(p_{ij}\)</span> is unique for each individual. Once again the collective data are over-dispersed, potentially even more so.</li>
+</ul>
+</div>
+<div id="modeling-the-outcome" class="section level3">
+<h3>Modeling the outcome</h3>
+<p>The correct model depends, of course, on the situation at hand. What data generation process fits what we expect to be the case? Hopefully, there are existing data to inform the likely model. If not, it may by most prudent to be conservative, which usually means assuming more variation (unique <span class="math inline">\(p_{ij}\)</span>) rather than less (<span class="math inline">\(p_{ij} = p\)</span>).</p>
+<p>In the first case, the probability (and counts) can be estimated using a generalized linear model (GLM) with a binomial distribution. In the second, one solution (that I will show here) is a generalized linear mixed effects model (GLMM) with a binomial distribution and a group level random effect. In the third case, a GLMM with a negative a <em>negative binomial</em> distribution would be more likely to properly estimate the variation. (I have described other ways to think about these kind of data <a href="https://www.rdatagen.net/post/a-small-update-to-simstudy-neg-bin/">here</a> and <a href="https://www.rdatagen.net/post/binary-beta-beta-binomial/">here</a>.)</p>
+</div>
+<div id="case-1-binomial-distribution" class="section level3">
+<h3>Case 1: binomial distribution</h3>
+<p>Even though there is no clustering effect in this first scenario, let’s assume there are clusters. Each individual will have a probability of 0.4 of using opioids on any given day (log odds = -0.405):</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;m&quot;, formula = 100, dist = &quot;nonrandom&quot;, id = &quot;cid&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;x&quot;, formula = -.405, variance = 180, 
+                   dist = &quot;binomial&quot;, link = &quot;logit&quot;)</code></pre>
+<p>Generate the data:</p>
+<pre class="r"><code>set.seed(5113373)
+
+dc &lt;- genData(200, def)
+dd &lt;- genCluster(dc, cLevelVar = &quot;cid&quot;, numIndsVar = &quot;m&quot;, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p>Here is a plot of 20 of the 100 groups:</p>
+<pre class="r"><code>dplot &lt;- dd[cid %in% c(1:20)]
+davg &lt;- dplot[, .(avgx = mean(x)), keyby = cid]
+
+ggplot(data=dplot, aes(y = x, x = factor(cid))) +
+  geom_jitter(size = .5, color = &quot;grey50&quot;, width = 0.2) +
+  geom_point(data = davg, aes(y = avgx, x = factor(cid)), 
+             shape = 21, fill = &quot;firebrick3&quot;, size = 2) +
+  theme(panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()
+  ) +
+  xlab(&quot;Group&quot;) +
+  scale_y_continuous(limits = c(0, 185), breaks = c(0, 60, 120, 180))</code></pre>
+<p><img src="/post/2019-05-14-overdispersed-binomial-data.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Looking at the plot, we can see that a mixed effects model is probably not relevant.</p>
+</div>
+<div id="case-2-over-dispersion-from-clustering" class="section level3">
+<h3>Case 2: over-dispersion from clustering</h3>
+<pre class="r"><code>def &lt;- defData(varname = &quot;ceffect&quot;, formula = 0, variance = 0.08, 
+               dist = &quot;normal&quot;, id = &quot;cid&quot;)
+def &lt;- defData(def, varname = &quot;m&quot;, formula = &quot;100&quot;, dist = &quot;nonrandom&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;x&quot;, formula = &quot;-0.405 + ceffect&quot;, 
+                   variance = 100, dist = &quot;binomial&quot;, link = &quot;logit&quot;)
+
+dc &lt;- genData(200, def)
+dd &lt;- genCluster(dc, cLevelVar = &quot;cid&quot;, numIndsVar = &quot;m&quot;, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p><img src="/post/2019-05-14-overdispersed-binomial-data.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>This plot suggests that variation <em>within</em> the groups is pretty consistent, though there is variation <em>across</em> the groups. This suggests that a binomial GLMM with a group level random effect would be appropriate.</p>
+</div>
+<div id="case-3-added-over-dispersion-due-to-individual-differences" class="section level3">
+<h3>Case 3: added over-dispersion due to individual differences</h3>
+<pre class="r"><code>defa &lt;- defDataAdd(varname = &quot;ieffect&quot;, formula = 0, 
+                   variance = .25, dist = &quot;normal&quot;)
+defa &lt;- defDataAdd(defa, varname = &quot;x&quot;, 
+                   formula = &quot;-0.405 + ceffect + ieffect&quot;, 
+                   variance = 180, dist = &quot;binomial&quot;, link = &quot;logit&quot;)
+
+dd &lt;- genCluster(dc, cLevelVar = &quot;cid&quot;, numIndsVar = &quot;m&quot;, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p><img src="/post/2019-05-14-overdispersed-binomial-data.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>In this last case, it is not obvious what model to use. Since there is variability within and between groups, it is probably safe to use a negative binomial model, which is most conservative.</p>
+</div>
+<div id="estimating-the-parameters-under-a-negative-binomial-assumption" class="section level3">
+<h3>Estimating the parameters under a negative binomial assumption</h3>
+<p>We can fit the data we just generated (with a 2-level mixed effects model) using a <em>single-level</em> mixed effects model with the assumption of a negative binomial distribution to estimate the parameters we can use for one last simulated data set. Here is the model fit:</p>
+<pre class="r"><code>nbfit &lt;- glmer.nb(x ~ 1 + (1|cid), data = dd, 
+                    control = glmerControl(optimizer=&quot;bobyqa&quot;))
+broom::tidy(nbfit)</code></pre>
+<pre><code>## # A tibble: 2 x 6
+##   term               estimate std.error statistic p.value group
+##   &lt;chr&gt;                 &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;   &lt;dbl&gt; &lt;chr&gt;
+## 1 (Intercept)           4.29     0.0123      347.       0 fixed
+## 2 sd_(Intercept).cid    0.172   NA            NA       NA cid</code></pre>
+<p>And to generate the negative binomial data using <code>simstudy</code>, we need a dispersion parameter, which can be extracted from the estimated model:</p>
+<pre class="r"><code>(theta &lt;- 1/getME(nbfit, &quot;glmer.nb.theta&quot;))</code></pre>
+<pre><code>## [1] 0.079</code></pre>
+<pre class="r"><code>revar &lt;-  lme4::getME(nbfit, name = &quot;theta&quot;)^2
+revar</code></pre>
+<pre><code>## cid.(Intercept) 
+##            0.03</code></pre>
+<p>Generating the data from the estimated model allows us to see how well the negative binomial model fit the dispersed binomial data that we generated. A plot of the two data sets should look pretty similar, at least with respect to the distribution of the cluster means and within-cluster individual counts.</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;ceffect&quot;, formula = 0, variance = revar, 
+               dist = &quot;normal&quot;, id = &quot;cid&quot;)
+def &lt;- defData(def, varname = &quot;m&quot;, formula = &quot;100&quot;, dist = &quot;nonrandom&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;x&quot;, formula = &quot;4.28 + ceffect&quot;, 
+                   variance = theta, dist = &quot;negBinomial&quot;, link = &quot;log&quot;)
+
+dc &lt;- genData(200, def)
+ddnb &lt;- genCluster(dc, cLevelVar = &quot;cid&quot;, numIndsVar = &quot;m&quot;, 
+                   level1ID = &quot;id&quot;)
+ddnb &lt;- addColumns(defa, ddnb)</code></pre>
+<p><img src="/post/2019-05-14-overdispersed-binomial-data.en_files/figure-html/unnamed-chunk-12-1.png" width="960" /></p>
+<p>The two data sets do look like they came from the same distribution. The one limitation of the negative binomial distribution is that the sample space is not limited to numbers between 0 and 180; in fact, the sample space is all non-negative integers. For at least two clusters shown, there are some individuals with counts that exceed 180 days, which of course is impossible. Because of this, it might be safer to use the over-dispersed binomial data as the generating process for a power calculation, but it would be totally fine to use the negative binomial model as the analysis model (in both the power calculation and the actual data analysis).</p>
+</div>
+<div id="estimating-power" class="section level3">
+<h3>Estimating power</h3>
+<p>One could verify that power is indeed reduced as we move from <em>Case 1</em> to <em>Case 3</em>. (I’ll leave that as an exercise for you - I think I’ve provided many examples in the past on how one might go about doing this. If, after struggling for a while, you aren’t successful, feel free to get in touch with me.)</p>
+</div>
