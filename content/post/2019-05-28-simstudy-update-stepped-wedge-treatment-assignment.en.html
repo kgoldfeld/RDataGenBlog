@@ -1,0 +1,74 @@
+---
+title: simstudy update - stepped-wedge design treatment assignment
+author: ''
+date: '2019-05-28'
+slug: simstudy-update-stepped-wedge-treatment-assignment
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p><code>simstudy</code> has just been updated (version 0.1.13 on <a href="https://cran.rstudio.com/web/packages/simstudy/">CRAN</a>), and includes one interesting addition (and a couple of bug fixes). I am working on a post (or two) about intra-cluster correlations (ICCs) and stepped-wedge study designs (which I’ve written about <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/">before</a>), and I was getting tired of going through the convoluted process of generating data from a time-dependent treatment assignment process. So, I wrote a new function, <code>trtStepWedge</code>, that should simplify things.</p>
+<p>I will take the opportunity of this brief announcement to provide a quick example.</p>
+<div id="data-definition" class="section level3">
+<h3>Data definition</h3>
+<p>Stepped-wedge designs are a special class of cluster randomized trial where each cluster is observed in both treatment arms (as opposed to the classic parallel design where only some of the clusters receive the treatment). This is a special case of a cross-over design, where the cross-over is only in one direction: control (or pre-intervention) to intervention.</p>
+<p>In this example, the data generating process looks like this:</p>
+<p><span class="math display">\[Y_{ict} = \beta_0 + b_c + \beta_1 * t + \beta_2*X_{ct} + e_{ict}\]</span></p>
+<p>where <span class="math inline">\(Y_{ict}\)</span> is the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(c\)</span> in time period <span class="math inline">\(t\)</span>, <span class="math inline">\(b_c\)</span> is a cluster-specific effect, <span class="math inline">\(X_{ct}\)</span> is the intervention indicator that has a value 1 during periods where the cluster is under the intervention, and <span class="math inline">\(e_{ict}\)</span> is the individual-level effect. Both <span class="math inline">\(b_c\)</span> and <span class="math inline">\(e_{ict}\)</span> are normally distributed with mean 0 and variances <span class="math inline">\(\sigma^2_{b}\)</span> and <span class="math inline">\(\sigma^2_{e}\)</span>, respectively. <span class="math inline">\(\beta_1\)</span> is the time trend, and <span class="math inline">\(\beta_2\)</span> is the intervention effect.</p>
+<p>We need to define the cluster-level variables (i.e. the cluster effect and the cluster size) as well as the individual specific outcome. In this case each cluster will have 15 individuals per period, and <span class="math inline">\(\sigma^2_b = 0.20\)</span>. In addition, <span class="math inline">\(\sigma^2_e = 1.75\)</span>.</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+
+defc &lt;- defData(varname = &quot;ceffect&quot;, formula = 0, variance = 0.20, 
+                dist = &quot;normal&quot;, id = &quot;cluster&quot;)
+defc &lt;- defData(defc, &quot;m&quot;, formula = 15, dist = &quot;nonrandom&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;Y&quot;, 
+                   formula = &quot;0 + ceffect + 0.1*period + trt*1.5&quot;, 
+                   variance = 1.75, dist = &quot;normal&quot;)</code></pre>
+<p>In this case, there will be 30 clusters and 24 time periods. With 15 individuals per cluster per period, there will be 360 observations for each cluster, and 10,800 in total. (There is no reason the cluster sizes need to be deterministic, but I just did that to simplify things a bit.)</p>
+<p>Cluster-level intervention assignment is done after generating the cluster-level and time-period data. The call to <code>trtStepWedge</code> includes 3 key arguments that specify the number of waves, the length of each wave, and the period during which the first clusters begin the intervention.</p>
+<p><code>nWaves</code> indicates how many clusters share the same starting period for the intervention. In this case, we have 5 waves, with 6 clusters each. <code>startPer</code> is the first period of the first wave. The earliest starting period is 0, the first period. Here, the first wave starts the intervention during period 4. <code>lenWaves</code> indicates the length between starting points for each wave. Here, a length of 4 means that the starting points will be 4, 8, 12, 16, and 20.</p>
+<p>Once the treatment assignments are made, the individual records are created and the outcome data are generated in the last step.</p>
+<pre class="r"><code>set.seed(608477)
+
+dc &lt;- genData(30, defc)
+dp &lt;- addPeriods(dc, 24, &quot;cluster&quot;, timevarName = &quot;t&quot;)
+dp &lt;- trtStepWedge(dp, &quot;cluster&quot;, nWaves = 5, lenWaves = 4, 
+          startPer = 4, grpName = &quot;trt&quot;)
+
+dd &lt;- genCluster(dp, cLevelVar = &quot;timeID&quot;, &quot;m&quot;, &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)
+
+dd</code></pre>
+<pre><code>##        cluster period ceffect  m timeID startTrt trt    id     Y
+##     1:       1      0   0.628 15      1        4   0     1  1.52
+##     2:       1      0   0.628 15      1        4   0     2  0.99
+##     3:       1      0   0.628 15      1        4   0     3 -0.12
+##     4:       1      0   0.628 15      1        4   0     4  2.09
+##     5:       1      0   0.628 15      1        4   0     5 -2.34
+##    ---                                                          
+## 10796:      30     23  -0.098 15    720       20   1 10796  1.92
+## 10797:      30     23  -0.098 15    720       20   1 10797  5.92
+## 10798:      30     23  -0.098 15    720       20   1 10798  4.12
+## 10799:      30     23  -0.098 15    720       20   1 10799  4.57
+## 10800:      30     23  -0.098 15    720       20   1 10800  3.66</code></pre>
+<p>It is easiest to understand the stepped-wedge design by looking at it. Here, we average the outcomes by each cluster for each period and plot the results.</p>
+<pre class="r"><code>dSum &lt;- dd[, .(Y = mean(Y)), keyby = .(cluster, period, trt, startTrt)]
+
+ggplot(data = dSum, 
+    aes(x = period, y = Y, group = interaction(cluster, trt))) +
+  geom_line(aes(color = factor(trt))) +
+  facet_grid(factor(startTrt, labels = c(1 : 5)) ~ .) +
+  scale_x_continuous(breaks = seq(0, 23, by = 4), name = &quot;week&quot;) +
+  scale_color_manual(values = c(&quot;#b8cce4&quot;, &quot;#4e81ba&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.position = &quot;none&quot;) </code></pre>
+<p><img src="/post/2019-05-28-simstudy-update-stepped-wedge-treatment-assignment.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Key elements of the data generation process are readily appreciated by looking at the graph: (1) the cluster-specific effects, reflected in the variable starting points at period 0, (2) the general upward time trend, and (3), the stepped-wedge intervention scheme.</p>
+<p>Since <code>trtStepWedge</code> is a new function, it is still a work in progress. Feel free to get in touch to give me feedback on any enhancements that folks might find useful.</p>
+</div>
