@@ -1,0 +1,117 @@
+---
+title: Don't get too excited - it might just be regression to the mean
+author: ''
+date: '2019-06-11'
+slug: regression-to-the-mean
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>It is always exciting to find an interesting pattern in the data that seems to point to some important difference or relationship. A while ago, one of my colleagues shared a figure with me that looked something like this:</p>
+<p><img src="/post/2019-06-11-regression-to-the-mean.en_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>It looks like something is going on. On average low scorers in the first period increased a bit in the second period, and high scorers decreased a bit. Something <strong>is</strong> going on, but nothing specific to the data in question; it is just probability working its magic.</p>
+<p>What my colleague had shown me is a classic example of <em>regression to the mean</em>. In the hope of clarifying the issue, I created a little simulation for her to show I could recreate this scenario with arbitrary data. And now I share it with you.</p>
+<div id="what-is-regression-to-the-mean" class="section level3">
+<h3>What <em>is</em> regression to the mean?</h3>
+<p>A simple picture may clarify what underlies regression to the mean. An individual’s measured responses over time are a function of various factors. In this first scenario, the responses are driven entirely by short term factors:</p>
+<p><img src="/img/post-regression-to-mean/shortcauses.png" width="500" /></p>
+<p>Responses in the two different time periods depend only on proximal causes. These could include an individual’s mood (which changes over time) or maybe something unrelated to the individual that would induce measurement error. (If the short term factor is not measured, this what is typically considered random noise or maybe “error”; I prefer to refer to this quantity as something like unexplained variation or individual level effects.) When these are the only factors influencing the responses, we would expect the responses in each period to be uncorrelated.</p>
+<p>Regression to the mean manifests itself when we focus on sub-groups at extreme ends of the distribution. Here, we consider a sub-group of individuals with high levels of response in the first period. Since factors that led to these high values will not necessarily be present in the second period, we would expect the distribution of values for the sub-group in the <strong>second</strong> period to look like the distribution in the <em>full sample</em> (including high, moderate, and low responders) from the <strong>first</strong> period. Alternatively, if we think about the second period alone, we would expect the high value sub-group (from the first period) to look just like the rest of the sample. Either way we look at it, the sub-group mean in the second period will necessarily be lower than the mean of that same sub-group in the first period.</p>
+<p>A simulation might clarify this. <span class="math inline">\(p_1\)</span> and <span class="math inline">\(p_2\)</span> are the short term factors influencing the period one outcome <span class="math inline">\(x_1\)</span> and period two outcome <span class="math inline">\(x_2\)</span>, respectively. The indicator <span class="math inline">\(h_1 = 1\)</span> if the period one response falls in the top <span class="math inline">\(20\%\)</span> of responses:</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;p1&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+d &lt;- defData(d, varname = &quot;p2&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+d &lt;- defData(d, varname = &quot;x1&quot;, formula = &quot;0 + p1&quot;, dist = &quot;nonrandom&quot;)
+d &lt;- defData(d, varname = &quot;x2&quot;, formula = &quot;0 + p2&quot;, dist = &quot;nonrandom&quot;)
+d &lt;- defData(d, varname = &quot;h1&quot;, formula = &quot;x1 &gt; quantile(x1, .80) &quot;, 
+             dist = &quot;nonrandom&quot;)</code></pre>
+<pre class="r"><code>set.seed(2371)
+dd &lt;- genData(1000, d)</code></pre>
+<p>The average (and sd) for the full sample in period one and period two are pretty much the same:</p>
+<pre class="r"><code>dd[, .(mu.x1 = mean(x1), sd.x1 = sd(x1), 
+       mu.x2 = mean(x2), sd.x2 = sd(x2))]</code></pre>
+<pre><code>##    mu.x1 sd.x1 mu.x2 sd.x2
+## 1:  0.02     1 -0.07     1</code></pre>
+<p>The mean of the sub-group of the sample who scored in the top 20% in period one is obviously higher than the full sample period one average since this is how we defined the sub-group. However, the period two distribution for this sub-group looks like the <em>overall</em> sample in period two. Again, this is due to the fact that the distribution of <span class="math inline">\(p_2\)</span> is the <em>same</em> for the period one high scoring sub-group and everyone else:</p>
+<pre class="r"><code>cbind(dd[h1 == TRUE, .(muh.x1 = mean(x1), sdh.x1 = sd(x1), 
+                   muh.x2 = mean(x2), sdh.x2 = sd(x2))],
+      dd[, .(mu.x2 = mean(x2), sd.x2 = sd(x2))])</code></pre>
+<pre><code>##    muh.x1 sdh.x1 muh.x2 sdh.x2 mu.x2 sd.x2
+## 1:      1    0.5  -0.08      1 -0.07     1</code></pre>
+</div>
+<div id="a-more-realistic-scenario" class="section level3">
+<h3>A more realistic scenario</h3>
+<p>It is unlikely that the repeated measures <span class="math inline">\(x_1\)</span> and <span class="math inline">\(x_2\)</span> will be uncorrelated, and more plausible that they share some common factor or factors; someone who tends to score high in the first may tend to score high in the second. For example, an individual’s underlying health status could influence outcomes over both measurement periods. Here is the updated DAG:</p>
+<p><img src="/img/post-regression-to-mean/causes.png" width="500" /></p>
+<p>Regression to the mean is really a phenomenon driven by the relative strength of the longer term underlying factors and shorter term proximal factors. If the underlying factors dominate the more proximal ones, then the we would expect to see less regression to the mean. (In the extreme case where there no proximal factors, only longer term, underlying ones, there will be no regression to the mean.)</p>
+<p>Back to the simulation. (This time <span class="math inline">\(p_1\)</span> and <span class="math inline">\(p_2\)</span> are reflected in the variance of the two responses, so they do not appear explicitly in the data definitions.)</p>
+<pre class="r"><code>library(parallel)
+
+d &lt;- defData(varname = &quot;U&quot;, formula = &quot;-1;1&quot;, dist = &quot;uniform&quot;)
+d &lt;- defData(d, varname = &quot;x1&quot;, formula = &quot;0 + 2*U&quot;, variance = 1)
+d &lt;- defData(d, varname = &quot;x2&quot;, formula = &quot;0 + 2*U&quot;, variance = 1)
+d &lt;- defData(d, varname = &quot;h1&quot;, formula = &quot;x1 &gt; quantile(x1, .80) &quot;, 
+             dist = &quot;nonrandom&quot;)
+
+set.seed(2371)
+dd &lt;- genData(1000, d)</code></pre>
+<p>When we look at the means of the period one high scoring sub-group in periods one and two, it appears that there is at least <em>some</em> regression to the mean, but it is not absolute, because the underlying factors <span class="math inline">\(U\)</span> have a fairly strong effect on the responses in both periods:</p>
+<pre><code>##    muh.x1 sdh.x1 muh.x2 sdh.x2 mu.x2 sd.x2
+## 1:      2    0.6      1      1 -0.02     1</code></pre>
+</div>
+<div id="regression-to-the-mean-under-different-scenarios" class="section level3">
+<h3>Regression to the mean under different scenarios</h3>
+<p>To conclude, I want to illustrate how the relative strength of <span class="math inline">\(U\)</span>, <span class="math inline">\(p_1\)</span>, and <span class="math inline">\(p_2\)</span> affect the regression to the mean. (The code to generate the plot immediately follows.) Under each simulation scenario I generated 1000 data sets of 200 individuals each, and averaged across the 1000 replications to show the mean <span class="math inline">\(x_1\)</span> and <span class="math inline">\(x_2\)</span> measurements <em>for the high scorers only in period one</em>. In all cases, period one scores are to the right and the arrow points to the period two scores. The longer the arrow, the more extensive the regression to the mean.</p>
+<p><img src="/post/2019-06-11-regression-to-the-mean.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>As the effect of <span class="math inline">\(U\)</span> grows (moving down from box to box in the plot), regression to the mean decreases. And within each box, as we decrease the strength of the proximal <span class="math inline">\(p\)</span> factors (by decreasing the variance of the <span class="math inline">\(p_1\)</span> and <span class="math inline">\(p_2\)</span>), regression to the mean also decreases.</p>
+</div>
+<div id="addendum-code-to-generate-replications-and-plot" class="section level3">
+<h3>Addendum: code to generate replications and plot</h3>
+<pre class="r"><code>rtomean &lt;- function(n, d) {
+  dd &lt;- genData(n, d)
+  data.table(x1 = dd[x1 &gt;= h1, mean(x1)] , x2 = dd[x1 &gt;= h1, mean(x2)])
+}
+
+repl &lt;- function(xvar, nrep, ucoef, d) {
+  
+  d &lt;- updateDef(d, &quot;x1&quot;, newvariance = xvar)
+  d &lt;- updateDef(d, &quot;x2&quot;, newvariance = xvar)
+  
+  dif &lt;- rbindlist(mclapply(1:nrep, function(x) rtomean(200, d)))
+  mudif &lt;- unlist(lapply(dif, mean))
+  data.table(ucoef, xvar, x1 = mudif[1], x2 = mudif[2])
+  
+}
+
+dres &lt;- list()
+i &lt;- 0
+
+for (ucoef in c(0, 1, 2, 3)) {
+  
+  i &lt;- i + 1
+  
+  uform &lt;- genFormula( c(0, ucoef), &quot;U&quot;)
+  
+  d &lt;- updateDef(d, &quot;x1&quot;, newformula = uform)
+  d &lt;- updateDef(d, &quot;x2&quot;, newformula = uform)
+  
+  dr &lt;- mclapply(seq(1, 4, by = 1), function(x) repl(x, 1000, ucoef, d))
+  dres[[i]] &lt;- rbindlist(dr)
+}
+
+dres &lt;- rbindlist(dres)
+
+ggplot(data = dres, aes(x = x1, xend = x2, y = xvar, yend = xvar)) +
+  geom_point(aes(x=x1, y = xvar), color = &quot;#824D99&quot;, size = 1) +
+  geom_segment(arrow = arrow(length = unit(.175, &quot;cm&quot;)), 
+                color = &quot;#824D99&quot;) +
+  scale_y_continuous(limits = c(0.5, 4.5), breaks = 1:4,
+                     name = &quot;variance of measurements&quot;) +
+  scale_x_continuous(limits = c(-0.1, 3), name = &quot;mean&quot;) +
+  facet_grid(ucoef ~ .) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.y = element_blank())</code></pre>
+</div>
