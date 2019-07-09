@@ -1,0 +1,244 @@
+---
+title: 
+  "More on those stepped-wedge design assumptions: varying intra-cluster correlations over time"
+author: ''
+date: '2019-07-09'
+slug: varying-intra-cluster-correlations-over-time
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In my last <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">post</a>, I wrote about <em>within-</em> and <em>between-period</em> intra-cluster correlations in the context of stepped-wedge cluster randomized study designs. These are quite important to understand when figuring out sample size requirements (and models for analysis, which I’ll be writing about soon.) Here, I’m extending the constant ICC assumption I presented last time around by introducing some complexity into the correlation structure. Much of the code I am using can be found in last week’s post, so if anything seems a little unclear, hop over <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">here</a>.</p>
+<div id="different-within--and-between-period-iccs" class="section level3">
+<h3>Different within- and between-period ICC’s</h3>
+<p>In a scenario with constant within- and between-period ICC’s, the correlated data can be induced using a single cluster-level effect like <span class="math inline">\(b_c\)</span> in this model:</p>
+<p><span class="math display">\[ 
+Y_{ict} = \mu  + \beta_0t + \beta_1X_{ct} + b_{c} + e_{ict}
+\]</span></p>
+<p>More complexity can be added if, instead of a single cluster level effect, we have a vector of correlated cluster/time specific effects <span class="math inline">\(\mathbf{b_c}\)</span>. These cluster-specific random effects <span class="math inline">\((b_{c1}, b_{c2}, \ldots, b_{cT})\)</span> replace <span class="math inline">\(b_c\)</span>, and the slightly modified data generating model is</p>
+<p><span class="math display">\[ 
+Y_{ict} = \mu  + \beta_0t + \beta_1X_{ct} + b_{ct} + e_{ict}
+\]</span></p>
+<p>The vector <span class="math inline">\(\mathbf{b_c}\)</span> has a multivariate normal distribution <span class="math inline">\(N_T(0, \sigma^2_b \mathbf{R})\)</span>. This model assumes a common covariance structure across all clusters, <span class="math inline">\(\sigma^2_b \mathbf{R}\)</span>, where the general version of <span class="math inline">\(\mathbf{R}\)</span> is</p>
+<p><span class="math display">\[
+\mathbf{R}  =
+\left(
+\begin{matrix}
+1    &amp; r_{12}  &amp; r_{13}  &amp; \cdots &amp; r_{1T} \\
+r_{21} &amp; 1     &amp; r_{23}   &amp; \cdots &amp; r_{2T} \\
+r_{31} &amp; r_{32}     &amp; 1   &amp; \cdots &amp; r_{3T} \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+r_{T1} &amp; r_{T2} &amp; r_{T3} &amp; \cdots &amp; 1
+\end{matrix}
+\right )
+\]</span></p>
+<div id="within-period-cluster-correlation" class="section level4">
+<h4>Within-period cluster correlation</h4>
+<p>The covariance of any two individuals <span class="math inline">\(i\)</span> and <span class="math inline">\(j\)</span> in the same cluster <span class="math inline">\(c\)</span> and same period <span class="math inline">\(t\)</span> is</p>
+<p><span class="math display">\[
+\begin{aligned}
+cov(Y_{ict}, Y_{jct}) &amp;= cor(\mu  + \beta_0t + \beta_1X_{ct} + b_{ct} + e_{ict}, \  \mu  + \beta_0t + \beta_1X_{ct} + b_{ct} + e_{jct}) \\
+\\ 
+&amp;= cov(b_{ct}, b_{ct}) + cov(e_{ict}, e_{jct}) \\
+\\ 
+&amp;=var(b_{ct}) + 0 \\ 
+\\ 
+&amp;= \sigma^2_b r_{tt} \\ 
+\\ 
+&amp;= \sigma^2_b \qquad  \qquad  \qquad \text{since } r_{tt} = 1, \ \forall t \in \ ( 1, \ldots, T)
+\end{aligned}
+\]</span></p>
+<p>And I showed in the previous post that <span class="math inline">\(var(Y_{ict}) = var(Y_{jct}) = \sigma^2_b + \sigma^2_e\)</span>, so the within-period intra-cluster correlation is what we saw last time:</p>
+<p><span class="math display">\[ICC_{tt} = \frac{\sigma^2_b}{\sigma^2_b+\sigma^2_e}\]</span></p>
+</div>
+<div id="between-period-cluster-correlation" class="section level4">
+<h4>Between-period cluster correlation</h4>
+<p>The covariance of any two individuals in the same cluster but two <em>different</em> time periods <span class="math inline">\(t\)</span> and <span class="math inline">\(t^{\prime}\)</span> is:</p>
+<p><span class="math display">\[
+\begin{aligned}
+cov(Y_{ict}, Y_{jct^{\prime}}) &amp;= cor(\mu  + \beta_0t + \beta_1X_{ct} + b_{ct} + e_{ict}, \  \mu  + \beta_0t + \beta_1X_{ct^{\prime}} + b_{ct^{\prime}} + e_{jct^{\prime}}) \\
+\\ 
+&amp;= cov(b_{ct}, b_{ct^{\prime}}) + cov(e_{ict}, e_{jct^{\prime}}) \\
+\\ 
+&amp;= \sigma^2_br_{tt^{\prime}}
+\end{aligned}
+\]</span></p>
+<p>Based on this, the between-period intra-cluster correlation is</p>
+<p><span class="math display">\[ ICC_{tt^\prime} =\frac{\sigma^2_b}{\sigma^2_b+\sigma^2_e}  r_{tt^{\prime}}\]</span></p>
+</div>
+<div id="adding-structure-to-matrix-mathbfr" class="section level4">
+<h4>Adding structure to matrix <span class="math inline">\(\mathbf{R}\)</span></h4>
+<p>This paper by <a href="https://journals.sagepub.com/doi/full/10.1177/0962280217734981"><em>Kasza et al</em></a>, which describes various stepped-wedge models, suggests a structured variation of <span class="math inline">\(\mathbf{R}\)</span> that is a function of two parameters, <span class="math inline">\(r_0\)</span> and <span class="math inline">\(r\)</span>:</p>
+<p><span class="math display">\[
+\mathbf{R} = \mathbf{R}(r_0, r) =
+\left(
+\begin{matrix}
+1    &amp; r_0r  &amp; r_0r^2  &amp; \cdots &amp; r_0r^{T-1} \\
+r_0r &amp; 1     &amp; r_0 r   &amp; \cdots &amp; r_0 r^{T-2} \\
+r_0r^2 &amp; r_0 r     &amp; 1   &amp; \cdots &amp; r_0 r^{T-3} \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+r_0r^{T-1} &amp; r_0r^{T-2} &amp; r_0 r^{T-3} &amp; \cdots &amp; 1
+\end{matrix}
+\right )
+\]</span></p>
+<p>How we specify <span class="math inline">\(r_0\)</span> and <span class="math inline">\(r\)</span> reflects different assumptions about the between-period intra-cluster correlations. I describe two particular cases below.</p>
+</div>
+</div>
+<div id="constant-correlation-over-time" class="section level3">
+<h3>Constant correlation over time</h3>
+<p>In this first case, the correlation between individuals in the same cluster but different time periods is less than the correlation between individuals in the same cluster and same time period. In other words, <span class="math inline">\(ICC_{tt} \ne ICC_{tt^\prime}\)</span>. However the between-period correlation is constant, or <span class="math inline">\(ICC_{tt^\prime}\)</span> are constant for all <span class="math inline">\(t\)</span> and <span class="math inline">\(t^\prime\)</span>. We have these correlations when <span class="math inline">\(r_0 = \rho\)</span> and <span class="math inline">\(r = 1\)</span>, giving</p>
+<p><span class="math display">\[
+\mathbf{R} = \mathbf{R}(\rho, 1) =
+\left(
+\begin{matrix}
+1    &amp; \rho &amp; \rho &amp; \cdots &amp; \rho \\
+\rho &amp; 1     &amp; \rho   &amp; \cdots &amp; \rho  \\
+\rho &amp; \rho     &amp; 1   &amp; \cdots &amp; \rho \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+\rho &amp; \rho &amp; \rho  &amp; \cdots &amp; 1
+\end{matrix}
+\right )
+\]</span></p>
+<p>To simulate under this scenario, I am setting <span class="math inline">\(\sigma_b^2 = 0.15\)</span>, <span class="math inline">\(\sigma_e^2 = 2.0\)</span>, and <span class="math inline">\(\rho = 0.6\)</span>. We would expect the following ICC’s:</p>
+<p><span class="math display">\[
+\begin{aligned}
+ICC_{tt} &amp;= \frac{0.15}{0.15+2.00} =  0.0698 \\
+\\ 
+ICC_{tt^\prime} &amp;= \frac{0.15}{0.15+2.00}\times0.6 =  0.0419
+\end{aligned}
+\]</span></p>
+<p>Here is the code to define and generate the data:</p>
+<pre class="r"><code>defc &lt;- defData(varname = &quot;mu&quot;, formula = 0, 
+                dist = &quot;nonrandom&quot;, id = &quot;cluster&quot;)
+defc &lt;- defData(defc, &quot;s2&quot;, formula = 0.15, dist = &quot;nonrandom&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;Y&quot;, 
+                   formula = &quot;0 + 0.10  * period + 1 * rx + cteffect&quot;, 
+                   variance = 2, dist = &quot;normal&quot;)
+
+dc &lt;- genData(100, defc)
+dp &lt;- addPeriods(dc, 7, &quot;cluster&quot;)
+dp &lt;- trtStepWedge(dp, &quot;cluster&quot;, nWaves = 4, lenWaves = 1, startPer = 2)
+dp &lt;- addCorGen(dtOld = dp, nvars = 7, idvar = &quot;cluster&quot;, 
+                rho = 0.6, corstr = &quot;cs&quot;, dist = &quot;normal&quot;, 
+                param1 = &quot;mu&quot;, param2 = &quot;s2&quot;, cnames = &quot;cteffect&quot;)
+  
+dd &lt;- genCluster(dp, cLevelVar = &quot;timeID&quot;, numIndsVar = 100, 
+                 level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p>As I did in my previous post, I’ve generated 200 data sets, estimated the <em>within-</em> and <em>between-period</em> ICC’s for each data set, and computed the average for each. The plot below shows the expected values in gray and the estimated values in purple and green.</p>
+<p><img src="/img/post-iccvary/p2.png" width="800" /></p>
+</div>
+<div id="declining-correlation-over-time" class="section level3">
+<h3>Declining correlation over time</h3>
+<p>In this second case, we make an assumption that the correlation between individuals in the same cluster degrades over time. Here, the correlation between two individuals in adjacent time periods is stronger than the correlation between individuals in periods further apart. That is <span class="math inline">\(ICC_{tt^\prime} &gt; ICC_{tt^{\prime\prime}}\)</span> if <span class="math inline">\(|t^\prime - t| &lt; |t^{\prime\prime} - t|\)</span>. This structure can be created by setting <span class="math inline">\(r_0 = 1\)</span> and <span class="math inline">\(r=\rho\)</span>, giving us an auto-regressive correlation matrix <span class="math inline">\(R\)</span>:</p>
+<p><span class="math display">\[
+\mathbf{R} = \mathbf{R}(1, \rho) =
+\left(
+\begin{matrix}
+1    &amp; \rho  &amp; \rho^2  &amp; \cdots &amp; \rho^{T-1} \\
+\rho &amp; 1     &amp; \rho   &amp; \cdots &amp;  \rho^{T-2} \\
+\rho^2 &amp;  \rho     &amp; 1   &amp; \cdots &amp;  \rho^{T-3} \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+\rho^{T-1} &amp; \rho^{T-2} &amp;  \rho^{T-3} &amp; \cdots &amp; 1
+\end{matrix}
+\right )
+\]</span></p>
+<p>I’ve generated data using the same variance assumptions as above. The only difference in this case is that the <code>corstr</code> argument in the call to <code>addCorGen</code> is “ar1” rather than “cs” (which was used above). Here are a few of the expected correlations:</p>
+<p><span class="math display">\[
+\begin{aligned}
+ICC_{t,t} &amp;= \frac{0.15}{0.15+2.00} =  0.0698 \\
+\\ 
+ICC_{t,t+1} &amp;= \frac{0.15}{0.15+2.00}\times 0.6^{1} =  0.0419 \\
+\\ 
+ICC_{t,t+2} &amp;= \frac{0.15}{0.15+2.00}\times 0.6^{2} =  0.0251 \\ 
+\\ 
+\vdots
+\\ 
+ICC_{t, t+6} &amp;= \frac{0.15}{0.15+2.00}\times 0.6^{6} =  0.0032
+\end{aligned}
+\]</span></p>
+<p>And here is the code:</p>
+<pre class="r"><code>defc &lt;- defData(varname = &quot;mu&quot;, formula = 0, 
+                dist = &quot;nonrandom&quot;, id = &quot;cluster&quot;)
+defc &lt;- defData(defc, &quot;s2&quot;, formula = 0.15, dist = &quot;nonrandom&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;Y&quot;, 
+                   formula = &quot;0 + 0.10  * period + 1 * rx + cteffect&quot;, 
+                   variance = 2, dist = &quot;normal&quot;)
+
+dc &lt;- genData(100, defc)
+dp &lt;- addPeriods(dc, 7, &quot;cluster&quot;)
+dp &lt;- trtStepWedge(dp, &quot;cluster&quot;, nWaves = 4, lenWaves = 1, startPer = 2)
+dp &lt;- addCorGen(dtOld = dp, nvars = 7, idvar = &quot;cluster&quot;, 
+                rho = 0.6, corstr = &quot;ar1&quot;, dist = &quot;normal&quot;, 
+                param1 = &quot;mu&quot;, param2 = &quot;s2&quot;, cnames = &quot;cteffect&quot;)
+  
+dd &lt;- genCluster(dp, cLevelVar = &quot;timeID&quot;, numIndsVar = 10, 
+                 level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p>And here are the observed average estimates (based on 200 datasets) alongside the expected values:</p>
+<p><img src="/img/post-iccvary/p3.png" width="800" /></p>
+</div>
+<div id="random-slope" class="section level3">
+<h3>Random slope</h3>
+<p>In this last case, I am exploring what the ICC’s look like in the context of random effects model that includes a cluster-specific intercept <span class="math inline">\(b_c\)</span> and a cluster-specific slope <span class="math inline">\(s_c\)</span>:</p>
+<p><span class="math display">\[ 
+Y_{ict} = \mu   + \beta_0 t + \beta_1 X_{ct} + b_c + s_c t + e_{ict}
+\]</span></p>
+<p>Both <span class="math inline">\(b_c\)</span> and <span class="math inline">\(s_c\)</span> are normally distributed with mean 0, and variances <span class="math inline">\(\sigma_b^2\)</span> and <span class="math inline">\(\sigma_s^2\)</span>, respectively. (In this example <span class="math inline">\(\sigma_b^2\)</span> and <span class="math inline">\(\sigma_s^2\)</span> are uncorrelated, but that may not necessarily be the case.)</p>
+<p>Because of the random slopes, the variance of the <span class="math inline">\(Y\)</span>’s increase over time:</p>
+<p><span class="math display">\[ 
+var(Y_{ict}) = \sigma^2_b + t^2 \sigma^2_s + \sigma^2_e
+\]</span></p>
+<p>The same is true for the within- and between-period covariances:</p>
+<p><span class="math display">\[
+\begin{aligned}
+cov(Y_{ict}, Y_{jct}) &amp;= \sigma^2_b + t^2 \sigma^2_s \\ 
+\\ 
+cov(Y_{ict}, Y_{jct^\prime}) &amp;= \sigma^2_b + tt^\prime \sigma^2_s \\ 
+\end{aligned}
+\]</span></p>
+<p>The ICC’s that follow from these various variances and covariances are:</p>
+<p><span class="math display">\[
+\begin{aligned}
+ITT_{tt} &amp;= \frac{\sigma^2_b + t^2 \sigma^2_s}{\sigma^2_b + t^2 \sigma^2_s + \sigma^2_e}\\
+\\
+ITT_{tt^\prime} &amp; = \frac{\sigma^2_b + tt^\prime \sigma^2_s}{\left[(\sigma^2_b + t^2 \sigma^2_s + \sigma^2_e)(\sigma^2_b + {t^\prime}^2 \sigma^2_s + \sigma^2_e)\right]^\frac{1}{2}}
+\end{aligned}
+\]</span></p>
+<p>In this example, <span class="math inline">\(\sigma^2_s = 0.01\)</span> (and the other variances remain as before), so</p>
+<p><span class="math display">\[ ITT_{33} = \frac{0.15 + 3^2 \times 0.01}{0.15 + 3^2 \times 0.01 + 2} =0.1071\]</span>
+and</p>
+<p><span class="math display">\[ ITT_{36} = \frac{0.15 + 3 \times 6 \times 0.01}{\left[(0.15 + 3^2 \times 0.01 + 2)(0.15 + 6^2 \times 0.01 + 2)\right ]^\frac{1}{2}} =0.1392\]</span></p>
+<p>Here’s the data generation:</p>
+<pre class="r"><code>defc &lt;- defData(varname = &quot;ceffect&quot;, formula = 0, variance = 0.15, 
+                dist = &quot;normal&quot;, id = &quot;cluster&quot;)
+defc &lt;- defData(defc, &quot;cteffect&quot;, formula = 0, variance = 0.01, 
+                dist = &quot;normal&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;Y&quot;, 
+  formula = &quot;0 + ceffect + 0.10  * period + cteffect * period + 1 * rx&quot;, 
+  variance = 2, dist = &quot;normal&quot;)
+
+dc &lt;- genData(100, defc)
+dp &lt;- addPeriods(dc, 7, &quot;cluster&quot;)
+dp &lt;- trtStepWedge(dp, &quot;cluster&quot;, nWaves = 4, lenWaves = 1, startPer = 2)
+  
+dd &lt;- genCluster(dp, cLevelVar = &quot;timeID&quot;, numIndsVar = 10, 
+                 level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defa, dd)</code></pre>
+<p>And here is the comparison between observed and expected ICC’s. The estimates are quite variable, so there appears to be slight bias. However, if I generated more than 200 data sets, the mean would likely converge closer to the expected values.</p>
+<p><img src="/img/post-iccvary/p4.png" width="800" /></p>
+<p>In the next post (or two), I plan on providing some examples of fitting models to the data I’ve generated here. In some cases, fairly standard linear mixed effects models in <code>R</code> may be adequate, but in others, we may need to look elsewhere.</p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Kasza, J., K. Hemming, R. Hooper, J. N. S. Matthews, and A. B. Forbes. “Impact of non-uniform correlation structure on sample size and power in multiple-period cluster randomised trials.” <em>Statistical methods in medical research</em> (2017): 0962280217734981.</p>
+</font></small>
+</p>
+</div>
