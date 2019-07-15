@@ -1,0 +1,404 @@
+---
+title: Estimating treatment effects (and ICCs) for stepped-wedge designs
+author: ''
+date: '2019-07-16'
+slug: estimating-treatment-effects-and-iccs-for-stepped-wedge-designs
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In the last two posts, I introduced the notion of time-varying intra-cluster correlations in the context of stepped-wedge study designs. (See <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">here</a> and <a href="https://www.rdatagen.net/post/varying-intra-cluster-correlations-over-time/">here</a>). Though I generated lots of data for those posts, I didn’t fit any models to see if I could recover the estimates and any underlying assumptions. That’s what I am doing now.</p>
+<p>My focus here is on the simplest case, where the ICC’s are constant over time and between time. Typically, I would just use a mixed-effects model to estimate the treatment effect and account for variability across clusters, which is easily done in <code>R</code> using the <code>lme4</code> package; if the outcome is continuous the function <code>lmer</code> is appropriate. I thought, however, it would also be interesting to use the <code>rstan</code> package to fit a Bayesian hierarchical model.</p>
+<p>While it is always fun to explore new methods, I have a better justification for trying this approach: as far as I can tell, <code>lme4</code> (or <code>nlme</code> for that matter) cannot handle the cases with more complex patterns of between-period intra-cluster correlation that I focused on last time. A Bayesian hierarchical model should be up to the challenge. I thought that it would be best to start with a simple case before proceeding to the situation where I have no clear option in <code>R</code>. I’ll do that next time.</p>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>I know I am repeating myself a little bit, but it is important to be clear about the data generation process that I am talking about here.</p>
+<p><span class="math display">\[Y_{ic} = \mu  + \beta_1X_{c} + b_c + e_{ic},\]</span></p>
+<p>where <span class="math inline">\(Y_{ic}\)</span> is a continuous outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(c\)</span>, and <span class="math inline">\(X_c\)</span> is a treatment indicator for cluster <span class="math inline">\(c\)</span> (either 0 or 1). The underlying structural parameters are <span class="math inline">\(\mu\)</span>, the grand mean, and <span class="math inline">\(\beta_1\)</span>, the treatment effect. The unobserved random effects are, <span class="math inline">\(b_c \sim N(0, \sigma^2_b)\)</span>, the normally distributed group level effect, and <span class="math inline">\(e_{ic} \sim N(0, \sigma^2_e)\)</span>, the normally distributed individual-level effect.</p>
+<pre class="r"><code>library(simstudy)
+
+defc &lt;- defData( varname = &quot;ceffect&quot;, formula = 0.0, variance = 0.15, 
+                 dist = &quot;normal&quot;, id = &quot;cluster&quot;)
+
+defa &lt;- defDataAdd(varname = &quot;Y&quot;, 
+                   formula = &quot;0 + 0.10  * period + 1 * rx + ceffect&quot;, 
+                   variance = 2, dist = &quot;normal&quot;)
+
+genDD &lt;- function(defc, defa, nclust, nperiods, waves, len, start) {
+  dc &lt;- genData(nclust, defc)
+  dp &lt;- addPeriods(dc, nperiods, &quot;cluster&quot;)
+  dp &lt;- trtStepWedge(dp, &quot;cluster&quot;, nWaves = waves, lenWaves = len, 
+                     startPer = start)
+  
+  dd &lt;- genCluster(dp, cLevelVar = &quot;timeID&quot;, numIndsVar = 15, 
+                   level1ID = &quot;id&quot;)
+  dd &lt;- addColumns(defa, dd)
+  dd[]
+}
+
+set.seed(2822)
+dx &lt;- genDD(defc, defa, 60, 7, 4, 1, 2)
+
+dx</code></pre>
+<pre><code>##       cluster period     ceffect timeID startTrt rx   id          Y
+##    1:       1      0 -0.05348668      1        2  0    1 -0.1369149
+##    2:       1      0 -0.05348668      1        2  0    2 -1.0030891
+##    3:       1      0 -0.05348668      1        2  0    3  3.1169339
+##    4:       1      0 -0.05348668      1        2  0    4 -0.8109585
+##    5:       1      0 -0.05348668      1        2  0    5  0.2285751
+##   ---                                                              
+## 6296:      60      6  0.10844859    420        5  1 6296  0.4171770
+## 6297:      60      6  0.10844859    420        5  1 6297  1.5127632
+## 6298:      60      6  0.10844859    420        5  1 6298  0.5194967
+## 6299:      60      6  0.10844859    420        5  1 6299 -0.3120285
+## 6300:      60      6  0.10844859    420        5  1 6300  2.0493244</code></pre>
+</div>
+<div id="using-lmer-to-estimate-treatment-effect-and-iccs" class="section level3">
+<h3>Using lmer to estimate treatment effect and ICC’s</h3>
+<p>As I <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">derived earlier</a>, the within- and between-period ICC’s under this data generating process are:</p>
+<p><span class="math display">\[ICC = \frac{\sigma^2_b}{\sigma^2_b + \sigma^2_e}\]</span></p>
+<p>Using a linear mixed-effects regression model we can estimate the fixed effects (the time trend and the treatment effect) as well as the random effects (cluster- and individual-level variation, <span class="math inline">\(\sigma^2_b\)</span> and <span class="math inline">\(\sigma^2_e\)</span>). The constant ICC can be estimated directly from the variance estimates.</p>
+<pre class="r"><code>library(lme4)
+library(sjPlot)
+
+lmerfit &lt;- lmer(Y ~ period + rx + (1 | cluster) , data = dx)
+
+tab_model(lmerfit, show.icc = FALSE, show.dev = FALSE,
+          show.p = FALSE, show.r2 = FALSE,
+          title = &quot;Linear mixed-effects model&quot;)</code></pre>
+<table style="border-collapse:collapse; border:none;">
+<caption style="font-weight: bold; text-align:left;">
+Linear mixed-effects model
+</caption>
+<tr>
+<th style="border-top: double; text-align:center; font-style:normal; font-weight:bold; padding:0.2cm;  text-align:left; ">
+ 
+</th>
+<th colspan="2" style="border-top: double; text-align:center; font-style:normal; font-weight:bold; padding:0.2cm; ">
+Y
+</th>
+</tr>
+<tr>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  text-align:left; ">
+Predictors
+</td>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  ">
+Estimates
+</td>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  ">
+CI
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+(Intercept)
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.09
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+-0.03 – 0.21
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+period
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.08
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.05 – 0.11
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+rx
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+1.03
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.90 – 1.17
+</td>
+</tr>
+<tr>
+<td colspan="3" style="font-weight:bold; text-align:left; padding-top:.8em;">
+Random Effects
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+σ<sup>2</sup>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+2.07
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+τ<sub>00</sub> <sub>cluster</sub>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+0.15
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+N <sub>cluster</sub>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+60
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm; border-top:1px solid;">
+Observations
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; border-top:1px solid;" colspan="2">
+6300
+</td>
+</tr>
+</table>
+<p>Not surprisingly, this model recovers the parameters used in the data generation process. Here is the ICC estimate based on this sample:</p>
+<pre class="r"><code>(vars &lt;- as.data.frame(VarCorr(lmerfit))$vcov)</code></pre>
+<pre><code>## [1] 0.1540414 2.0691434</code></pre>
+<pre class="r"><code>(iccest &lt;- round(vars[1]/(sum(vars)), 3))</code></pre>
+<pre><code>## [1] 0.069</code></pre>
+</div>
+<div id="bayesian-hierarchical-model" class="section level3">
+<h3>Bayesian hierarchical model</h3>
+<p>To estimate the same model using Bayesian methods, I’m turning to <code>rstan</code>. If Bayesian methods are completely foreign to you or you haven’t used <code>rstan</code> before, there are obviously incredible resources out on the internet and in bookstores. (See <a href="https://mc-stan.org/users/interfaces/rstan">here</a>, for example.) While I have done some Bayesian modeling in the past and have read some excellent books on the topic (including <a href="https://xcelab.net/rm/statistical-rethinking/"><em>Statistical Rethinking</em></a> and <a href="https://sites.google.com/site/doingbayesiandataanalysis/what-s-new-in-2nd-ed"><em>Doing Bayesian Data Analysis</em></a>, though I have not read <a href="http://www.stat.columbia.edu/~gelman/book/"><em>Bayesian Data Analysis</em></a> and I know I should.)</p>
+<p>To put things simplistically, the goal of this method is to generate a posterior distribution <span class="math inline">\(P(\theta | observed \  data)\)</span>, where <span class="math inline">\(\theta\)</span> is a vector of model parameters of interest. The <em>Bayes theorem</em> provides the underlying machinery for all of this to happen:</p>
+<p><span class="math display">\[P(\theta | observed \ data) = \frac{P(observed \ data | \theta)}{P(observed \  data)} P(\theta)\]</span>
+<span class="math inline">\(P(observed \ data | \theta)\)</span> is the data <em>likelihood</em> and <span class="math inline">\(P(\theta)\)</span> is the prior distribution. Both need to be specified in order to generate the desired posterior distribution. The general (again, highly simplistic) idea is that draws of <span class="math inline">\(\theta\)</span> are repeatedly made from the prior distribution, and each time the likelihood is estimated which updates the probability of <span class="math inline">\(\theta\)</span>. At the completion of the iterations, we are left with a posterior distribution of <span class="math inline">\(\theta\)</span> (conditional on the observed data).</p>
+<p>This is my first time working with <code>Stan</code>, so it is a bit of an experiment. While things have worked out quite well in this case, I may be doing things in an unconventional (i.e. not quite correct) way, so treat this as more conceptual than tutorial - though it’ll certainly get you started.</p>
+</div>
+<div id="defining-the-model" class="section level3">
+<h3>Defining the model</h3>
+<p>In Stan, the model is specified in a separate <code>stan</code> program that is written using the Stan probabilistic programming language. The code can be saved as an external file and referenced when you want to sample data from the posterior distribution. In this case, I’ve save the following code in a file named <code>nested.stan</code>.</p>
+<p>This <code>stan</code> file includes at least 3 “blocks”: <em>data</em>, <em>parameters</em>, and <em>model</em>. The data block defines the data that will be provided by the user, which includes the outcome and predictor data, as well as other information required for model estimation. The data are passed from <code>R</code> using a <code>list</code>.</p>
+<p>The parameters of the model are defined explicitly in the parameter block; in this case, we have regression parameters, random effects, and variance parameters. The transformed parameter block provides the opportunity to create parameters that depend on data and pre-defined parameters. They have no prior distributions <em>per se</em>, but can be used to simplify model block statements, or perhaps make the model estimation more efficient.</p>
+<p>Since this is a Bayesian model, each of the parameters will have a prior distribution that can be specified in the model block; if there is no explicit specification of a prior for a parameter, Stan will use a default (non- or minimally-informative) prior distribution. The outcome model is also defined here.</p>
+<p>There is also the interesting possibility of defining derived values in a block called <em>generated quantities</em>. These quantities will be functions of previously defined parameters and data. In this case, we might be interested in estimating the ICC along with an uncertainty interval; since the ICC is a function of cluster- and individual-level variation, we can derive and ICC estimate for each of the iterations. At the end of the sequence of iterations, we will have a posterior distribution of the ICC.</p>
+<p>Here is the <code>nested.stan</code> file used for this analysis:</p>
+<pre class="stan"><code>data {
+
+  int&lt;lower=0&gt; N;              // number of individuals
+  int&lt;lower=1&gt; K;              // number of predictors
+  int&lt;lower=1&gt; J;              // number of clusters
+  int&lt;lower=1,upper=J&gt; jj[N];  // group for individual
+  matrix[N, K] x;              // predictor matrix
+  vector[N] y;                 // outcome vector
+  
+}
+ 
+parameters {
+
+  vector[K] beta;           // intercept, time trend, rx effect
+  real&lt;lower=0&gt; sigmalev1;  // cluster level standard deviation
+  real&lt;lower=0&gt; sigma;      // individual level sd
+  vector[J] ran;            // cluster level effects
+  
+}
+ 
+transformed parameters{ 
+  
+  vector[N] yhat;
+  
+  for (i in 1:N)  
+    yhat[i] = x[i]*beta + ran[jj[i]];
+    
+}
+
+model {
+  ran ~ normal(0, sigmalev1);
+  y ~ normal(yhat, sigma);
+}
+
+generated quantities {
+  
+  real&lt;lower=0&gt; sigma2;
+  real&lt;lower=0&gt; sigmalev12;
+  real&lt;lower=0&gt; icc;
+  
+  sigma2 = pow(sigma, 2);
+  sigmalev12 = pow(sigmalev1, 2);
+  icc = sigmalev12/(sigmalev12 + sigma2);
+  
+}
+</code></pre>
+</div>
+<div id="estimating-the-model" class="section level3">
+<h3>Estimating the model</h3>
+<p>Once the definition has been created, the next steps are to create the data set (as an R <code>list</code>) and call the functions to run the MCMC algorithm. The first function (<code>stanc</code>) converts the <code>.stan</code> file into <code>C++</code> code. The function <code>stan_model</code> converts the <code>C++</code> code into a stanmodel object. And the function <code>sampling</code> draws samples from the stanmodel object created in the second step.</p>
+<pre class="r"><code>library(rstan)
+options(mc.cores = parallel::detectCores())
+
+x &lt;- as.matrix(dx[ ,.(1, period, rx)])
+K &lt;- ncol(x)
+N &lt;- dx[, length(unique(id))]
+J &lt;- dx[, length(unique(cluster))]
+jj &lt;- dx[, cluster]
+y &lt;- dx[, Y]
+
+testdat &lt;- list(N, K, J, jj, x, y)
+
+rt &lt;- stanc(&quot;Working/stan_icc/nested.stan&quot;)
+sm &lt;- stan_model(stanc_ret = rt, verbose=FALSE)
+fit &lt;- sampling(sm, data=testdat, seed = 3327, iter = 5000, warmup = 1000)</code></pre>
+</div>
+<div id="looking-at-the-diagnostics" class="section level3">
+<h3>Looking at the diagnostics</h3>
+<p>Once the posterior distribution has been generated, it is important to investigate to see how well-behaved the algorithm performed. One way to do this is look at a series of <em>trace</em> plots that provide insight into how stable the algorithm was as it moved around the parameter space. In this example, I used 5000 draws but threw out the first 1000. Typically, the early draws show much more variability, so it is usual to ignore the “burn-in” phase when analyzing the posterior distribution.</p>
+<p>The process didn’t actually generate 5000 draws, but rather 20,000. The process was simultaneously run four separate times. The idea is if things are behaving well, the parallel processes (called chains) should mix quite well - it should be difficult to distinguish between the chains. In the plot below each chain is represented by a different color.</p>
+<p>I think it is prudent to ensure that all parameters behaved reasonably, but here I am providing trace plots to the variance estimates, the effect size estimate, and the ICC.</p>
+<pre class="r"><code>library(ggthemes)
+
+pname &lt;- c(&quot;sigma2&quot;, &quot;sigmalev12&quot;, &quot;beta[3]&quot;, &quot;icc&quot;)
+muc &lt;- rstan::extract(fit, pars=pname,  permuted=FALSE, inc_warmup=FALSE)
+mdf &lt;- data.table(melt(muc))
+mdf[parameters == &quot;beta[3]&quot;, parameters := &quot;beta[3] (rx effect)&quot;]
+
+ggplot(mdf,aes(x=iterations, y=value, color=chains)) + 
+  geom_line() + 
+  facet_wrap(~parameters, scales = &quot;free_y&quot;) +
+  theme(legend.position = &quot;none&quot;,
+        panel.grid = element_blank()) +
+  scale_color_ptol()</code></pre>
+<p><img src="/post/2019-07-16-estimating-treatment-effects-and-iccs-for-stepped-wedge-designs.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="evaluating-the-posterior-distribution" class="section level3">
+<h3>Evaluating the posterior distribution</h3>
+<p>Since these trace plots look fairly stable, it is reasonable to look at the posterior distribution. A summary of the distribution reports the means and percentiles for the parameters of interest. I am reprinting the results from <code>lmer</code> so you can see that the Bayesian estimates are pretty much identical to the mixed-effect model:</p>
+<pre class="r"><code>print(fit, pars=c(&quot;beta&quot;, &quot;sigma2&quot;, &quot;sigmalev12&quot;, &quot;icc&quot;))</code></pre>
+<pre><code>## Inference for Stan model: nested.
+## 4 chains, each with iter=5000; warmup=1000; thin=1; 
+## post-warmup draws per chain=4000, total post-warmup draws=16000.
+## 
+##            mean se_mean   sd  2.5%  25%  50%  75% 97.5% n_eff Rhat
+## beta[1]    0.09       0 0.06 -0.03 0.05 0.09 0.13  0.21  3106    1
+## beta[2]    0.08       0 0.02  0.05 0.07 0.08 0.09  0.11  9548    1
+## beta[3]    1.03       0 0.07  0.90 0.99 1.03 1.08  1.16  9556    1
+## sigma2     2.07       0 0.04  2.00 2.05 2.07 2.10  2.14 24941    1
+## sigmalev12 0.16       0 0.03  0.11 0.14 0.16 0.18  0.24 13530    1
+## icc        0.07       0 0.01  0.05 0.06 0.07 0.08  0.11 13604    1
+## 
+## Samples were drawn using NUTS(diag_e) at Wed Jun 26 16:18:31 2019.
+## For each parameter, n_eff is a crude measure of effective sample size,
+## and Rhat is the potential scale reduction factor on split chains (at 
+## convergence, Rhat=1).</code></pre>
+ 
+<table style="border-collapse:collapse; border:none;">
+<caption style="font-weight: bold; text-align:left;">
+Linear mixed-effects model
+</caption>
+<tr>
+<th style="border-top: double; text-align:center; font-style:normal; font-weight:bold; padding:0.2cm;  text-align:left; ">
+ 
+</th>
+<th colspan="2" style="border-top: double; text-align:center; font-style:normal; font-weight:bold; padding:0.2cm; ">
+Y
+</th>
+</tr>
+<tr>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  text-align:left; ">
+Predictors
+</td>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  ">
+Estimates
+</td>
+<td style=" text-align:center; border-bottom:1px solid; font-style:italic; font-weight:normal;  ">
+CI
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+(Intercept)
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.09
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+-0.03 – 0.21
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+period
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.08
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.05 – 0.11
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; ">
+rx
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+1.03
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:center;  ">
+0.90 – 1.17
+</td>
+</tr>
+<tr>
+<td colspan="3" style="font-weight:bold; text-align:left; padding-top:.8em;">
+Random Effects
+</td>
+</tr>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+σ<sup>2</sup>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+2.07
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+τ<sub>00</sub> <sub>cluster</sub>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+0.15
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm;">
+N <sub>cluster</sub>
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left;" colspan="2">
+60
+</td>
+<tr>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; text-align:left; padding-top:0.1cm; padding-bottom:0.1cm; border-top:1px solid;">
+Observations
+</td>
+<td style=" padding:0.2cm; text-align:left; vertical-align:top; padding-top:0.1cm; padding-bottom:0.1cm; text-align:left; border-top:1px solid;" colspan="2">
+6300
+</td>
+</tr>
+</table>
+<p>The ability to produce a density plot that shows the posterior distribution of the ICC is a pretty compelling reason to use Bayesian methods. The density plot provides an quick way to assess uncertainty of estimates for parameters that might not even be directly included in a linear mixed-effects model:</p>
+<pre class="r"><code>plot_dens &lt;- function(fit, pars, p = c(0.05, 0.95), 
+                      fill = &quot;grey80&quot;, xlab = NULL) {
+  
+  qs &lt;- quantile(extract(fit, pars = pars)[[1]], probs = p)
+  
+  x.dens &lt;- density(extract(fit, pars = pars)[[1]])
+  df.dens &lt;- data.frame(x = x.dens$x, y = x.dens$y)
+  
+  p &lt;- stan_dens(fit, pars = c(pars), fill = fill, alpha = .1) +
+    geom_area(data = subset(df.dens, x &gt;= qs[1] &amp; x &lt;= qs[2]), 
+              aes(x=x,y=y), fill = fill, alpha = .4)
+  
+  if (is.null(xlab)) return(p)
+  else return(p + xlab(xlab))
+}
+ 
+plot_dens(fit, &quot;icc&quot;, fill = &quot;#a1be97&quot;)</code></pre>
+<p><img src="/post/2019-07-16-estimating-treatment-effects-and-iccs-for-stepped-wedge-designs.en_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Next time, I will expand the <code>stan</code> model to generate parameter estimates for cases where the within-period and between-period ICC’s are not necessarily constant. I will also explore how we compare models in the context of Bayesian models, because we won’t always know the underlying data generating process!</p>
+</div>
