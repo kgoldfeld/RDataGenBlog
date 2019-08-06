@@ -1,0 +1,524 @@
+---
+title: Bayes models for estimation in stepped-wedge trials with non-trivial ICC patterns
+author: ''
+date: '2019-08-06'
+slug: bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+library(rstan)
+load("DataICCmodel/rstan_ar1.Rdata")
+load("DataICCmodel/rstan_cs.Rdata")
+load("DataICCmodel/rstan_ar1_nc.Rdata")
+```
+
+Continuing a series of posts discussing the structure of intra-cluster correlations (ICC's) in the context of a stepped-wedge trial, this latest edition is primarily interested in fitting Bayesian hierarchical models for more complex cases (though I do talk a bit more about the linear mixed effects models). The first two posts in the series focused on generating data to simulate various scenarios; the [third post](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/) considered linear mixed effects and Bayesian hierarchical models to estimate ICC's under the simplest scenario of constant between-period ICC's.  Throughout this post, I use code drawn from the previous one; I am not repeating much of it here for brevity's sake. So, if this is all new, it is probably worth [glancing at](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/) before continuing on.
+
+### Data generation
+
+The data generating model this time around is only subtly different from before, but that difference is quite important. Rather than a single cluster-specific effect $b_c$, there is now a vector of cluster effects  $\mathbf{b_c} = \left( b_{c1}, b_{c2}, \ldots, b_{cT} \right)$, where $b_c \sim MVN(\mathbf{0}, \sigma^2 \mathbf{R})$ (see [this earlier post](https://www.rdatagen.net/post/varying-intra-cluster-correlations-over-time/) for a description of the correlation matrix $\mathbf{R}$.)
+
+$$ 
+Y_{ict} = \mu  + \beta_0t + \beta_1X_{ct} + b_{ct} + e_{ict}
+$$
+
+By altering the correlation structure of $\mathbf{b_c}$ (that is $\mathbf{R}$), we can the change the structure of the ICC's. (The data generation was the focus of the first two posts of this series, [here](https://www.rdatagen.net/post/intra-cluster-correlations-over-time/) and [here](https://www.rdatagen.net/post/varying-intra-cluster-correlations-over-time/). The data generating function `genDD` includes an argument where you can specify the two correlation structures, *exchangeable* and *auto-regressive*:
+
+```{r}
+library(simstudy)
+
+defc <- defData(varname = "mu", formula = 0, 
+                dist = "nonrandom", id = "cluster")
+defc <- defData(defc, "s2", formula = 0.15, dist = "nonrandom")
+defc <- defData(defc, "m", formula = 15, dist = "nonrandom")
+
+defa <- defDataAdd(varname = "Y", 
+                   formula = "0 + 0.10  * period + 1 * rx + cteffect", 
+                   variance = 2, dist = "normal")
+```
+
+```{r}
+genDD <- function(defc, defa, nclust, nperiods, 
+                  waves, len, start, rho, corstr) {
+  
+  dc <- genData(nclust, defc)
+  dp <- addPeriods(dc, nperiods, "cluster")
+  dp <- trtStepWedge(dp, "cluster", nWaves = waves, lenWaves = len, 
+                     startPer = start)
+  dp <- addCorGen(dtOld = dp, nvars = nperiods, idvar = "cluster", 
+                  rho = rho, corstr = corstr, dist = "normal", 
+                  param1 = "mu", param2 = "s2", cnames = "cteffect")
+  
+  dd <- genCluster(dp, cLevelVar = "timeID", numIndsVar = "m", 
+                   level1ID = "id")
+  dd <- addColumns(defa, dd)
+  dd[]
+}
+```
+
+### Constant between-period ICC's
+
+In this first scenario, the assumption is that the within-period ICC's are larger than the between-period ICC's and the between-period ICC's are constant. This can be generated with random effects that have a correlation matrix with compound symmetry (or is exchangeable). In this case, we will have 60 clusters and 7 time periods:
+
+```{r}
+set.seed(4119)
+dcs <- genDD(defc, defa, 60, 7, 4, 1, 2, 0.6, "cs")
+
+# correlation of "unobserved" random effects
+
+round(cor(dcast(dcs[, .SD[1], keyby = .(cluster, period)], 
+  formula = cluster ~ period, value.var = "cteffect")[, 2:7]), 2)
+```
+
+<br>
+
+#### Linear mixed-effects model
+
+It is possible to use `lmer` to correctly estimate the variance components and other parameters that underlie the data generating process used in this case. The cluster-level period-specific effects are specified in the model as "cluster/period", which indicates that the period effects are *nested* within the cluster.
+
+```{r, message = FALSE, warning=FALSE}
+library(lme4)
+
+lmerfit <- lmer(Y ~ period + rx + (1 | cluster/period) , data = dcs)
+as.data.table(VarCorr(lmerfit))
+```
+
+Reading from the `vcov` column in the `lmer` output above, we can extract the *period:cluster* variance ($\sigma_w^2$), the *cluster* variance  ($\sigma^2_v$), and the *residual* (individual level) variance ($\sigma^2_e$). Using these three variance components, we can estimate the correlation of the cluster level effects ($\rho$), the within-period ICC ($ICC_{tt}$), and the between-period ICC ($ICC_{tt^\prime}$). (See the <a href="#addendum">addendum</a> below for a more detailed description of the derivations.)
+
+#### Correlation ($\rho$) of cluster-specific effects over time
+
+In this post, don't confuse $\rho$ with the ICC. $\rho$ is the correlation between the cluster-level period-specific random effects. Here I am just showing that it is function of the decomposed variance estimates provided in the `lmer` output:
+
+$$
+\rho = \frac{\sigma^2_v}{\sigma^2_v + \sigma^2_w}
+$$
+
+```{r}
+vs <- as.data.table(VarCorr(lmerfit))$vcov
+vs[2]/sum(vs[1:2])  
+```
+<br>
+
+#### Within-period ICC
+
+The within-period ICC is the ratio of total cluster variance relative to total variance:
+
+$$ICC_{tt} = \frac{\sigma^2_v + \sigma^2_w}{\sigma^2_v + \sigma^2_w+\sigma^2_e}$$
+
+```{r}
+sum(vs[1:2])/sum(vs)
+```
+<br>
+
+#### Between-period ICC
+
+The between-period $ICC_{tt^\prime}$ is really just the within-period $ICC_{tt}$ adjusted by $\rho$ (see the <a href="#addendum">addendum</a>):
+
+$$ICC_{tt^\prime} = \frac{\sigma^2_v}{\sigma^2_v + \sigma^2_w+\sigma^2_e}$$
+
+```{r}
+vs[2]/sum(vs)          
+```
+<br>
+
+#### Bayesian model
+
+Now, I'll fit a Bayesian hierarchical model, as I did [earlier](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/) with the simplest constant ICC data generation process. The specification of the model in `stan` in this instance is slightly more involved as the number of parameters has increased. In the simpler case, I only had to estimate a scalar parameter for $\sigma_b$ and a single ICC parameter. In this model definition (`nested_cor_cs.stan`) $\mathbf{b_c}$ is a vector so there is a need to specify the variance-covariance matrix $\sigma^2 \mathbf{R}$, which has dimensions $T \times T$ (defined in the `transformed parameters` block). There are $T$ random effects for each cluster, rather than one. And finally, instead of one ICC value, there are two - the within- and between-period ICC's (defined in the `generated quantities` block).
+
+```{stan output.var='priors', eval = FALSE}
+data {
+  int<lower=0> N;              // number of unique individuals
+  int<lower=1> K;              // number of predictors
+  int<lower=1> J;              // number of clusters
+  int<lower=0> T;              // number of periods
+  int<lower=1,upper=J> jj[N];  // group for individual
+  int<lower=1> tt[N];          // period for individual
+  matrix[N, K] x;              // matrix of predctors
+  vector[N] y;                 // matrix of outcomes
+}
+
+parameters {
+  vector[K] beta;              // model fixed effects
+  real<lower=0> sigmalev1;     // cluster variance (sd)
+  real<lower=-1,upper=1> rho;  // correlation
+  real<lower=0> sigma;         // individual level varianc (sd)
+  
+  matrix[J, T] ran;            // site level random effects (by period)
+}
+ 
+transformed parameters{ 
+  
+  cov_matrix[T] Sigma;
+  vector[N] yhat;
+  vector[T] mu0;
+  
+  for (t in 1:T) 
+    mu0[t] = 0;
+    
+  // Random effects with exchangeable correlation  
+  
+  for (j in 1:(T-1))
+    for (k in (j+1):T) {
+      Sigma[j,k] = pow(sigmalev1,2) * rho;  
+      Sigma[k,j] = Sigma[j, k];
+    }
+     
+  for (i in 1:T)
+      Sigma[i,i] = pow(sigmalev1,2);
+  
+  for (i in 1:N)  
+      yhat[i] = x[i]*beta + ran[jj[i], tt[i]];
+}
+
+model {
+  
+  sigma ~ uniform(0, 10);
+  sigmalev1 ~ uniform(0, 10);
+  rho ~ uniform(-1, 1);
+  
+  for (j in 1:J)
+    ran[j] ~ multi_normal(mu0, Sigma);
+    
+  y ~ normal(yhat, sigma);
+
+}
+
+generated quantities {
+  
+  real sigma2;
+  real sigmalev12;
+  real iccInPeriod;
+  real iccBetPeriod;
+  
+  sigma2 = pow(sigma, 2);
+  sigmalev12 = pow(sigmalev1, 2);
+  
+  iccInPeriod = sigmalev12/(sigmalev12 + sigma2);
+  iccBetPeriod = iccInPeriod * rho;
+  
+}
+```
+
+Model estimation requires creating the data set (in the form of an `R list`), compiling the `stan` model, and then sampling from the posterior to generate distributions of all parameters and generated quantities. I should include conduct a diagnostic review (e.g. to assess convergence), but you'll have to trust me that everything looked reasonable.
+
+```{r, eval= FALSE}
+library(rstan)
+options(mc.cores = parallel::detectCores())
+
+x <- as.matrix(dcs[ ,.(1, period, rx)])
+K <- ncol(x)
+N <- dcs[, length(unique(id))]
+J <- dcs[, length(unique(cluster))]
+T <- dcs[, length(unique(period))]
+jj <- dcs[, cluster]
+tt <- dcs[, period] + 1
+y <- dcs[, Y]
+
+testdat <- list(N=N, K=K, J=J, T=T, jj=jj, tt=tt, x=x, y=y)
+
+rt <- stanc("nested_cor_cs.stan")
+sm <- stan_model(stanc_ret = rt, verbose=FALSE)
+fit.cs <- sampling(sm, data=testdat, seed = 32748, 
+                  iter = 5000, warmup = 1000,
+                  control = list(max_treedepth = 15))
+```
+
+Here is a summary of results for $\rho$, $ICC_{tt}$, and $ICC_{tt^\prime}$. I've included a comparison of the means of the posterior distributions with the `lmer` estimates, followed by a more complete (visual) description of the posterior distributions of the Bayesian estimates:
+
+```{r, fig.dim = c(5, 4), message=FALSE}
+mb <- sapply(
+  rstan::extract(fit.cs, pars=c("rho", "iccInPeriod", "iccBetPeriod")),
+  function(x) mean(x)
+)
+
+cbind(bayesian=round(mb,3), 
+      lmer = round(c(vs[2]/sum(vs[1:2]), 
+                     sum(vs[1:2])/sum(vs), 
+                     vs[2]/sum(vs)),3)
+)
+```
+
+```{r echo=FALSE, fig.dim = c(5, 4), message=FALSE}
+library(gridExtra)
+
+plot_dens <- function(fit, pars, p = c(0.05, 0.95), 
+                      fill = "grey90", xlab = NULL) {
+  
+  qs <- quantile(rstan::extract(fit, pars = pars)[[1]], probs = p)
+  
+  x.dens <- density(rstan::extract(fit, pars = pars)[[1]])
+  df.dens <- data.frame(x = x.dens$x, y = x.dens$y)
+  
+  p <- stan_dens(fit, pars = c(pars), fill = fill, alpha = .1) +
+    geom_area(data = subset(df.dens, x >= qs[1] & x <= qs[2]), 
+              aes(x=x,y=y), fill = fill, alpha = .4)
+  
+  if (is.null(xlab)) return(p)
+  else return(p + xlab(xlab))
+}
+
+grid.arrange(             
+  plot_dens(fit.cs, "rho", fill = "#a1be97", xlab = "rho") + 
+     scale_x_continuous(limits = c(0, 1)),
+  plot_dens(fit.cs, "iccInPeriod", fill = "#a1be97", 
+            xlab = "within-period icc") +
+     scale_x_continuous(limits = c(0,.15)),
+  plot_dens(fit.cs, "iccBetPeriod", fill = "#a1be97", 
+            xlab = "between-period icc") + 
+     scale_x_continuous(limits = c(0,.15))
+)
+```
+
+### Decaying between-period ICC over time
+
+Now we enter somewhat uncharted territory, since there is no obvious way in `R` using the `lme4` or `nlme` packages to decompose the variance estimates when the random effects have correlation that decays over time. This is where we might have to rely on a Bayesian approach to do this. (I understand that `SAS` can accommodate this, but I can't bring myself to go there.)
+
+We start where we pretty much always do - generating the data. Everything is the same, except that the cluster-random effects are correlated over time; we specify a correlation structure of *ar1* (auto-regressive).
+
+```{r}
+set.seed(4119)
+dar1 <- genDD(defc, defa, 60, 7, 4, 1, 2, 0.6, "ar1")
+
+# correlation of "unobserved" random effects
+
+round(cor(dcast(dar1[, .SD[1], keyby = .(cluster, period)], 
+  formula = cluster ~ period, value.var = "cteffect")[, 2:7]), 2)
+```
+
+The model file is similar to `nested_cor_cs.stan`, except that the specifications of the variance-covariance matrix and ICC's are now a function of $\rho^{|t^\prime - t|}$:
+
+```{stan output.var='priors', eval = FALSE}
+transformed parameters{ 
+  ⋮
+  for (j in 1:T)
+    for (k in 1:T)
+      Sigma[j,k] = pow(sigmalev1,2) * pow(rho,abs(j-k));
+  ⋮
+}
+
+generated quantities {
+  ⋮
+  for (j in 1:T)
+      for (k in 1:T)
+        icc[j, k] = sigmalev12/(sigmalev12 + sigma2) * pow(rho,abs(j-k));
+  ⋮
+}
+```
+
+The stan compilation and sampling code is not shown here - they are the same before. The posterior distribution of $\rho$ is similar to what we saw previously.
+
+```{r}
+print(fit.ar1, pars=c("rho"))
+```
+
+Now, however, we have to consider a full range of ICC estimates. Here is a plot of the posterior distribution of all ICC's with the means of each posterior directly below. The diagonal represents the within-period (constant) ICCs, and the off-diagonals are the between-period ICC's.
+
+```{r echo=FALSE, message=FALSE, fig.dim=c(6, 6)}
+library(ggpubr)
+
+x <- apply(as.matrix(fit.ar1, pars="icc"), 2, mean)
+tablex <- matrix(x, nrow = 7)
+rownames(tablex) <- c(0:6)
+colnames(tablex) <- c(0:6)
+
+ploticc <- function(fit, cell, fillcolor = "#a1be97") {
+  
+  cellstr <- "icc[x, y]"
+  cellstr <- gsub("x", cell[1], cellstr)
+  cellstr <- gsub("y", cell[2], cellstr)
+  
+  plot_dens(fit.ar1, cellstr, fill = "#a1be97") +
+    scale_x_continuous(limits = c(0,.15)) +
+    theme(axis.title.x = element_blank(),
+          axis.text.x = element_blank(),
+          axis.ticks.x = element_blank())
+}
+
+cells <- as.list(as.data.frame(t(expand.grid(c(1:7), c(1:7)))))
+
+ps <- lapply(cells, function(x) ploticc(fit.ar1, x))
+
+combine <- rbind(tableGrob(t(0:6), theme = ttheme_minimal(), rows = ""), 
+                 cbind(tableGrob(0:6, theme = ttheme_minimal()), 
+                       arrangeGrob(grobs = ps),  size = "last"), 
+                 size = "last")
+
+stab <- ggtexttable(round(tablex, 3))
+
+ggarrange(combine, stab, widths = c(1, 1), nrow = 2)
+```
+
+
+### An alternative Bayesian model: unstructured correlation
+
+Now, there is no particular reason to expect that the particular decay model (with an AR1 structure) would be the best model. We could try to fit an even more general model, one with minimal structure. For example if we put no restrictions on the correlation matrix $\mathbf{R}$, but assumed a constant variance of $\sigma_b^2$, we might achieve a better model fit. (We could go even further and relax the assumption that the variance across time changes as well, but I'll leave that to you if you want to try it.) 
+
+In this case, we need to define $\mathbf{R}$ and specify a prior distribution (I use the Lewandowski, Kurowicka, and Joe - LKJ prior, as suggested by `Stan` documentation) and define the ICC's in terms of $\mathbf{R}$. Here are the relevant snippets of the `stan` model (everything else is the same as before):
+
+```{stan output.var='priors', eval = FALSE}
+parameters {
+  ⋮
+  corr_matrix[T] R;        // correlation matrix
+  ⋮
+}
+ 
+transformed parameters{ 
+  ⋮
+  Sigma = pow(sigmalev1,2) * R;
+  ⋮
+}
+
+model {
+  ⋮
+  R ~ lkj_corr(1);         // LKJ prior on the correlation matrix 
+  ⋮
+}
+
+generated quantities {
+  ⋮
+  for (j in 1:T)
+    for (k in 1:T)
+      icc[j, k] = sigmalev12/(sigmalev12 + sigma2) * R[j, k];
+  ⋮
+}
+```
+
+Here are the means of the ICC posterior distributions alongside the means from the previous *auto-regressive* model. 
+
+```{r echo=FALSE, message=FALSE, fig.width=9, fig.height = 3}
+library(ggpubr)
+
+x.nc <- apply(as.matrix(fit.ar1.nc, pars="icc"), 2, mean)
+tablex.nc <- matrix(x.nc, nrow = 7)
+rownames(tablex.nc) <- c(0:6)
+colnames(tablex.nc) <- c(0:6)
+
+
+stab.nc <- ggtexttable(round(tablex.nc, 3))
+
+ggarrange(stab, stab.nc, widths = c(1, 1), nrow = 1, 
+          labels = c("     AR1", "No structure"))
+```
+
+Looking at the unstructured model estimates on the right, it does appear that a decay model might be reasonable. (No surprise there, because in reality, it *is* totally reasonable; that's how we generated the data.) We can use package `bridgesampling` which estimates marginal log likelihoods (across the prior distributions of the parameters). The marginal likelihoods are used in calculating the Bayes Factor, which is the basis for comparing two competing models. Here, the log-likelihood is reported. If the unstructured model is indeed an improvement (and it could very well be, because it has more parameters), the we would expect the marginal log-likelihood for the second model to be greater (less negative) than the log-likelihood for the auto-regressive model. If fact, the opposite true, suggesting the auto-regressive model is the preferred one (out of these two):
+
+```{r eval = FALSE}
+library(bridgesampling)
+
+bridge_sampler(fit.ar1, silent = TRUE)
+```
+
+```{r eval=FALSE}
+## Bridge sampling estimate of the log marginal likelihood: -5132.277
+## Estimate obtained in 6 iteration(s) via method "normal"
+```
+
+```{r eval=FALSE}
+bridge_sampler(fit.ar1.nc, silent = TRUE)
+```
+
+```{r eval=FALSE}
+## Bridge sampling estimate of the log marginal likelihood: -5137.081
+## Estimate obtained in 269 iteration(s) via method "normal".
+```
+
+&nbsp;
+
+<a name="addendum"></a>
+
+&nbsp;
+
+## Addendum - interpreting lmer variance estimates
+
+In order to show how the `lmer` variance estimates relate to the theoretical variances and correlations in the case of a constant between-period ICC, here is a simulation based on 1000 clusters. The key parameters are $\sigma^2_b = 0.15$, $\sigma^2_e = 2$, and $\rho = 0.6$. And based on these values, the theoretical ICC's are: $ICC_{within} = 0.15/2.15 = 0.698$, and $ICC_{bewteen} = 0.698 * 0.6 = 0.042$.
+
+```{r}
+set.seed(4119)
+dcs <- genDD(defc, defa, 1000, 7, 4, 1, 2, 0.6, "cs")
+```
+
+The underlying correlation matrix of the cluster-level effects is what we would expect:
+
+```{r}
+round(cor(dcast(dcs[, .SD[1], keyby = .(cluster, period)], 
+  formula = cluster ~ period, value.var = "cteffect")[, 2:7]), 2)
+```
+
+Here are the variance estimates from the mixed-effects model:
+
+```{r, message = FALSE, warning=FALSE}
+lmerfit <- lmer(Y ~ period + rx + (1 | cluster/period) , data = dcs)
+as.data.table(VarCorr(lmerfit))
+```
+
+The way `lmer` implements the nested random effects , the cluster period-specific effect $b_{ct}$ is decomposed into $v_c$, a cluster level effect, and $w_{ct}$, a cluster time-specific effect:
+
+$$
+b_{ct} = v_c + w_{ct}
+$$
+
+Since both $v_c$ and $w_{ct}$ are normally distributed ($v_c \sim N(0,\sigma_v^2)$ and $w_{ct} \sim N(0,\sigma_w^2)$), $var(b_{ct}) = \sigma^2_b = \sigma^2_v + \sigma^2_w$. 
+
+Here is the observed estimate of $\sigma^2_v + \sigma^2_w$:
+
+```{r}
+vs <- as.data.table(VarCorr(lmerfit))$vcov
+sum(vs[1:2])
+```
+
+An estimate of $\rho$ can be extracted from the `lmer` model variance estimates:
+
+$$
+\begin{aligned}
+\rho &= cov(b_{ct}, b_{ct^\prime}) \\
+&= cov(v_{c} + w_{ct}, v_{c} + w_{ct^\prime}) \\
+&= var(v_c) + cov(w_{ct}) \\
+&= \sigma^2_v
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+var(b_{ct}) &= var(v_{c}) + var(w_{ct}) \\
+&= \sigma^2_v + \sigma^2_w
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+cor(b_{ct}, b_{ct^\prime}) &= \frac{cov(b_{ct}, b_{ct^\prime})}{\sqrt{var(b_{ct}) var(b_{ct^\prime})} } \\
+\rho &= \frac{\sigma^2_v}{\sigma^2_v + \sigma^2_w}
+\end{aligned}
+$$
+
+```{r}
+vs[2]/sum(vs[1:2])
+```
+
+And here are the estimates of within and between-period ICC's:
+
+$$ICC_{tt} = \frac{\sigma^2_b}{\sigma^2_b+\sigma^2_e} =\frac{\sigma^2_v + \sigma^2_w}{\sigma^2_v + \sigma^2_w+\sigma^2_e}$$
+
+```{r}
+sum(vs[1:2])/sum(vs)
+```
+
+$$
+\begin{aligned}
+ICC_{tt^\prime} &= \left( \frac{\sigma^2_b}{\sigma^2_b+\sigma^2_e}\right) \rho \\ 
+\\ 
+&= \left( \frac{\sigma^2_v + \sigma^2_w}{\sigma^2_v + \sigma^2_w+\sigma^2_e}\right) \rho \\
+\\ 
+&=\left( \frac{\sigma^2_v + \sigma^2_w}{\sigma^2_v + \sigma^2_w+\sigma^2_e} \right) \left( \frac{\sigma^2_v}{\sigma^2_v + \sigma^2_w} \right) \\
+\\ 
+&= \frac{\sigma^2_v}{\sigma^2_v + \sigma^2_w+\sigma^2_e}
+\end{aligned}
+$$
+
+```{r}
+vs[2]/sum(vs)
+```
