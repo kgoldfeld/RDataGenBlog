@@ -55,6 +55,8 @@ library(Matching)
 
 RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)  # to set seed for parallel process
 
+### See addendum for dmatch code
+
 dd &lt;- rbindlist(mclapply(1:nrow(dc), 
                          function(x) dmatch(di[cid == x]),
                          mc.set.seed = TRUE
@@ -367,5 +369,52 @@ ggplot(data = pdata) +
         axis.text.x = element_text(angle = 0, hjust = 0.5),
         axis.text.y = element_text(angle = 90, hjust = 0.5)
   )</code></pre>
+<p> </p>
+</div>
+<div id="original-matching-algorithm" class="section level4">
+<h4>Original matching algorithm</h4>
+<pre class="r"><code>dmatch &lt;- function(dsamp) {
+  
+  dsamp[, rx := 0]
+  dused &lt;- NULL
+  drand &lt;- NULL
+  dcntl &lt;- NULL
+  
+  while (nrow(dsamp) &gt; 1) {
+    
+    selectRow &lt;- sample(1:nrow(dsamp), 1)
+    
+    dsamp[selectRow, rx := 1]
+    
+    myTr &lt;- dsamp[, rx]
+    myX &lt;- as.matrix(dsamp[, .(male, age, bmi)])
+    
+    match.dt &lt;- Match(Tr = myTr, X = myX, 
+                      caliper = c(0, 0.50, .50), ties = FALSE)
+    
+    if (length(match.dt) == 1) {  # no match
+      
+      dused &lt;- rbind(dused, dsamp[selectRow])
+      dsamp &lt;- dsamp[-selectRow, ]
+      
+    } else {                      # match
+      
+      trt &lt;- match.dt$index.treated
+      ctl &lt;- match.dt$index.control
+      
+      drand &lt;- rbind(drand, dsamp[trt])
+      dcntl &lt;- rbind(dcntl, dsamp[ctl])
+      
+      dsamp &lt;- dsamp[-c(trt, ctl)]
+      
+    }
+  }
+  
+  dcntl[, pair := paste0(cid, &quot;.&quot;, formatC(1:.N, width=2, flag=&quot;0&quot;))]
+  drand[, pair := paste0(cid, &quot;.&quot;, formatC(1:.N, width=2, flag=&quot;0&quot;))]
+  
+  rbind(dcntl, drand)
+  
+}</code></pre>
 </div>
 </div>
