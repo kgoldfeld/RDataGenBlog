@@ -1,0 +1,139 @@
+---
+title: 'There''s always at least two ways to do the same thing: an example generating 3-level hierarchical data using simstudy'
+author: ''
+date: '2019-10-03'
+slug: in-simstudy-as-in-r-there-s-always-at-least-two-ways-to-do-the-same-thing
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>“I am working on a simulation study that requires me to generate data for individuals within clusters, but each individual will have repeated measures (say baseline and two follow-ups). I’m new to simstudy and have been going through the examples in R this afternoon, but I wondered if this was possible in the package, and if so whether you could offer any tips to get me started with how I would do this?”</p>
+<p>This is the question that popped up in my in-box a couple of days ago. And since I always like an excuse to do a little coding early in the morning to get my brain going, I decided to create a little example, though in this case, there were at least two ways to go about it. I sent back both options, and am putting them up here, since I know this kind of data generation problem comes up frequently. In fact, the post I recently wrote on <a href="https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/">open cohorts in stepped-wedge designs</a> had to deal with this same issue, though in a slightly more elaborate way.</p>
+<div id="three-level-hierarchical-data" class="section level3">
+<h3>Three-level hierarchical data</h3>
+<p>In this example, we want individuals clustered within groups, and measurements clustered within individual, as depicted by this figure:</p>
+<p><img src="/img/post-twoways/cluster.png" /></p>
+<p>The hierarchical scheme represented implies that outcomes for individuals within groups are correlated, and that measurements over time for a particular individual are correlated. The structure of these two levels of correlation can take on a variety of forms. In the examples that follow, I am going to assume that the correlation between the individuals in a group is constant, as are the individual measurements over time. We could easily make the assumption that measurements closer in time will be more highly correlated than measurements further apart in time (such as auto-regressive correlation with 1 period of lag), but since we have only three measurements, it is not totally unreasonable to assume constant correlation.</p>
+</div>
+<div id="generating-data-explicitly-with-random-effects" class="section level3">
+<h3>Generating data explicitly with random effects</h3>
+<p>Enough with the preliminaries - let’s get to the data generation. In the first approach, both levels of correlation will be induced with group- and individual-level random effects using the following underlying model:</p>
+<p><span class="math display">\[Y_{ijt} = \beta_t + \gamma_j + \alpha_i + \epsilon_{ijt},\]</span></p>
+<p>where <span class="math inline">\(Y_{ijt}\)</span> is the outcome for person <span class="math inline">\(i\)</span> in group <span class="math inline">\(j\)</span> during time period <span class="math inline">\(t\)</span>. <span class="math inline">\(\beta_t\)</span> is the mean outcome during period <span class="math inline">\(t\)</span>, <span class="math inline">\(t \in \{ 0,3, 6 \}\)</span>. <span class="math inline">\(\gamma_j\)</span> is the group-specific effect, and <span class="math inline">\(\gamma_j \sim N(0,\sigma^2_\gamma)\)</span>. <span class="math inline">\(\alpha_i\)</span> is the individual-specific effect, and <span class="math inline">\(\alpha_i \sim N(0,\sigma^2_\alpha)\)</span>. Finally, <span class="math inline">\(\epsilon_{ijt}\)</span> is the noise for each particular measurement, where <span class="math inline">\(\epsilon_{ijt} \sim N(0,\sigma^2_\epsilon)\)</span>.</p>
+<p>The group, individual, and outcome definitions are the first order of business. In this example, <span class="math inline">\(\sigma^2_\gamma = 2\)</span>, <span class="math inline">\(\sigma^2_\alpha = 1.3\)</span>, and <span class="math inline">\(\sigma^2_\epsilon = 1.1\)</span>. In addition, the average outcomes at baseline, 3 months and 6 months, are 3, 4, and 6, respectively:</p>
+<pre class="r"><code>library(simstudy)
+
+### Group defintion
+
+defg &lt;- defData(varname = &quot;gamma&quot;, formula=0, variance = 2, id = &quot;cid&quot;)
+
+### Individal definition
+
+defi &lt;- defDataAdd(varname = &quot;alpha&quot;, formula = 0, variance = 1.3)
+
+### Outcome definition
+
+defC &lt;- defCondition(condition = &quot;period == 0&quot;, 
+                     formula = &quot;3 + gamma + alpha&quot;,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;period == 1&quot;, 
+                     formula = &quot;4 + gamma + alpha&quot;,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;period == 2&quot;, 
+                     formula = &quot;6 + gamma + alpha&quot;,
+                     dist = &quot;nonrandom&quot;)
+
+defy &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;mu&quot;, variance = 1.1)</code></pre>
+<p>To generate the data, first we create the group level records, then the individual level records, and finally the repeated measurements for each individual:</p>
+<pre class="r"><code>set.seed(3483)
+dgrp1 &lt;- genData(100, defg)
+
+dind1 &lt;- genCluster(dgrp1, &quot;cid&quot;, numIndsVar = 20, level1ID = &quot;id&quot;)
+dind1 &lt;- addColumns(defi, dind1)
+
+dper1 &lt;- addPeriods(dind1, nPeriods = 3, idvars = &quot;id&quot;)
+dper1 &lt;- addCondition(defC, dper1, newvar = &quot;mu&quot;)
+
+dper1 &lt;- addColumns(defy, dper1)</code></pre>
+<p>Here is a plot of the outcome data by period, with the grey lines representing individuals, and the red lines representing the group averages:</p>
+<p><img src="/post/2019-10-03-in-simstudy-as-in-r-there-s-always-at-least-two-ways-to-do-the-same-thing.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p>Here is a calculation of the observed covariance matrix. The total variance for each outcome should be close to <span class="math inline">\(\sigma^2_\gamma + \sigma^2_\alpha +\sigma^2_\epsilon = 4.4\)</span>, and the observed covariance should be close to <span class="math inline">\(\sigma^2_\gamma + \sigma^2_\alpha = 3.3\)</span></p>
+<pre class="r"><code>dcor1 &lt;- dcast(dper1, id + cid ~ period, value.var = &quot;y&quot;)
+setnames(dcor1, c(&quot;id&quot;, &quot;cid&quot;, &quot;y0&quot;, &quot;y1&quot;, &quot;y2&quot;))
+
+dcor1[, cov(cbind(y0, y1, y2))]</code></pre>
+<pre><code>##     y0  y1  y2
+## y0 4.5 3.2 3.4
+## y1 3.2 4.2 3.2
+## y2 3.4 3.2 4.6</code></pre>
+<p>The correlation <span class="math inline">\(\rho\)</span> show be close to</p>
+<p><span class="math display">\[ \rho = \frac{\sigma^2_\gamma + \sigma^2_\alpha}{\sigma^2_\gamma + \sigma^2_\alpha +\sigma^2_\epsilon} = \frac{3.3}{4.4} = 0.75\]</span></p>
+<p>(For a more elaborate derivation of correlation coefficients, see this <a href="https://www.rdatagen.net/post/varying-intra-cluster-correlations-over-time/">post</a> on stepped-wedge designs.)</p>
+<pre class="r"><code>dcor1[, cor(cbind(y0, y1, y2))]</code></pre>
+<pre><code>##      y0   y1   y2
+## y0 1.00 0.73 0.75
+## y1 0.73 1.00 0.73
+## y2 0.75 0.73 1.00</code></pre>
+</div>
+<div id="directly-generating-correlated-data" class="section level3">
+<h3>Directly generating correlated data</h3>
+<p>In this second approach, the group-level correlation is once again generated using a group effect. However, the individual-level effect is replaced by noise that is explicitly correlated across time. The model here is</p>
+<p><span class="math display">\[Y_{ijt} = \beta_t + \gamma_j + \phi_{ijt},\]</span></p>
+<p>where the noise <span class="math inline">\(\mathbf{\phi}_{ij}\)</span> is a vector of noise components <span class="math inline">\(\{\phi_{ij0},\phi_{ij3},\phi_{ij6}\} \sim N(\mathbf{0}, \Sigma)\)</span>, and</p>
+<p><span class="math display">\[\Sigma = 
+\left [
+\begin{matrix}
+\sigma^2_\phi &amp; \rho \sigma^2_\phi &amp; \rho \sigma^2_\phi \\
+\rho \sigma^2_\phi &amp; \sigma^2_\phi &amp; \rho \sigma^2_\phi \\
+\rho \sigma^2_\phi &amp; \rho \sigma^2_\phi &amp; \sigma^2_\phi
+\end{matrix}
+\right ]
+\]</span></p>
+<p>In this case <span class="math inline">\(\sigma^2_\gamma\)</span> is still 2, and <span class="math inline">\(\sigma^2_\phi = 2.4\)</span> to ensure that total variation is 4.4. We set <span class="math inline">\(\rho = 0.54167\)</span> so that the <span class="math inline">\(\rho \sigma^2_\phi = 1.3\)</span>, ensuring that the overall covariance of the observed outcome <span class="math inline">\(y\)</span> across periods is <span class="math inline">\(3.3\)</span> as in the first method.</p>
+<pre class="r"><code>defg &lt;- defData(varname = &quot;gamma&quot;, 
+                formula = 0, variance = 2, id = &quot;cid&quot;)
+defg &lt;- defData(defg, varname = &quot;mu&quot;, 
+                formula = 0, dist = &quot;nonrandom&quot;)
+defg &lt;- defData(defg, varname = &quot;phi&quot;, 
+                formula = 2.4, dist = &quot;nonrandom&quot;)
+
+defC &lt;- defCondition(condition = &quot;period == 0&quot;, 
+                     formula = &quot;3 + gamma + e&quot;,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;period == 1&quot;, 
+                     formula = &quot;4 + gamma + e&quot;,
+                     dist = &quot;nonrandom&quot;)
+defC &lt;- defCondition(defC, condition = &quot;period == 2&quot;, 
+                     formula = &quot;6 + gamma + e&quot;,
+                     dist = &quot;nonrandom&quot;)</code></pre>
+<p>In the data generation process, the function <code>addCorGen</code> is used to create the correlated noise across time:</p>
+<pre class="r"><code>set.seed(3483)
+dgrp2 &lt;- genData(100, defg)
+
+dind2 &lt;- genCluster(dgrp2, &quot;cid&quot;, numIndsVar = 20, level1ID = &quot;id&quot;)
+
+dper2 &lt;- addPeriods(dind2, nPeriods = 3, idvars = &quot;id&quot;)
+dper2 &lt;- addCorGen(dper2, &quot;id&quot;, nvars = 3, param1 = &quot;mu&quot;, param2 = &quot;phi&quot;,
+            rho = .54167, dist = &quot;normal&quot;, corstr = &quot;cs&quot;, cnames = &quot;e&quot;)
+dper2 &lt;- addCondition(defC, dper2, newvar = &quot;y&quot;)</code></pre>
+<p>I won’t do a second plot, because it would look identical to the one above. But I am calculating the covariance and correlation matrices for the outcome to illustrate for you that the two slightly different approaches do indeed generate similarly distributed data.</p>
+<pre class="r"><code>dcor2 &lt;- dcast(dper2, id + cid ~ period, value.var = &quot;y&quot;)
+setnames(dcor2, c(&quot;id&quot;, &quot;cid&quot;, &quot;y0&quot;, &quot;y1&quot;, &quot;y2&quot;))
+
+dcor2[, cov(cbind(y0, y1, y2))]</code></pre>
+<pre><code>##     y0  y1  y2
+## y0 4.4 3.4 3.3
+## y1 3.4 4.4 3.4
+## y2 3.3 3.4 4.5</code></pre>
+<pre class="r"><code>dcor2[, cor(cbind(y0, y1, y2))]</code></pre>
+<pre><code>##      y0   y1   y2
+## y0 1.00 0.76 0.75
+## y1 0.76 1.00 0.76
+## y2 0.75 0.76 1.00</code></pre>
+<p>In the example here, I wouldn’t say either approach is better. For some, the purely random effects approach may be more intuitive, and for others the correlated noise might be. However, if we want a more complex correlation pattern, like the AR-1 pattern I mentioned earlier, one approach may in fact be a little more straightforward to implement.</p>
+<p>And no, I don’t respond so thoroughly to every question I get; sometimes it is better for you to struggle a bit to figure something out.</p>
+</div>
