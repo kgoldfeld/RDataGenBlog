@@ -1,0 +1,182 @@
+---
+title: Any one interested in a function to quickly generate data with many predictors?
+author: ''
+date: '2019-10-29'
+slug: any-one-interested-in-a-function-to-quickly-generate-data-with-many-predictors
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+```{r echo = FALSE}
+options(digits = 2)
+```
+
+A couple of months ago, I was contacted about the possibility of creating a simple function in `simstudy` to generate a large dataset that could include possibly 10's or 100's of potential predictors and an outcome. In this function, only a subset of the variables would actually be predictors. The idea is to be able to easily generate data for exploring ridge regression, Lasso regression, or other "regularization" methods. Alternatively, this can be used to very quickly generate correlated data (with one line of code) without going through the definition process.
+
+I'm presenting a new function here as a work-in-progress. I am putting it out there in case other folks have opinions about what might be most useful; feel free to let me know if you do. If not, I am likely to include something very similar to this in the next iteration of `simstudy`, which will be version `0.1.16`.
+
+### Function genMultPred
+
+In its latest iteration, the new function has three interesting arguments. The first two are `predNorm` and `predBin`, which are each vectors of length 2. The first value indicates the number of predictors to generate with either a standard normal distribution or a binary distribution, respectively. The second value in each vector represents the number of variables that will actually be predictive of the outcome. (Obviously, the second value cannot be greater than the first value.) 
+
+The third interesting argument is `corStrength`, which is a non-negative number indicating the overall strength of the correlation between the predictors. When corStrength is set to 0 (which is the default), the variables are generated assuming independence. When corStrength is non-zero, a random correlation matrix is generated using package `clusterGeneration` [Weiliang Qiu and Harry Joe. (2015). clusterGeneration: Random Cluster Generation (with Specified Degree of Separation).] The corStrength value is passed on to the argument `ratioLambda` in the function `genPositiveDefMat`. As the value of corStrength increases, higher levels of correlation are induced in the random correlation matrix for the predictors.
+
+Currently, the outcome can only have one of three distributions: *normal*, *binomial*, or *Poisson*.
+
+One possible enhancement would be to allow the distributions of the predictors to have more flexibility. However, I'm not sure the added complexity would be worth it. Again, you could always take the more standard `simstudy` approach of function `genData` if you wanted more flexibility.
+
+Here's the function, in case you want to take a look under the hood:
+
+```{r, message=FALSE}
+genMultPred <- function(n, predNorm, predBin, 
+                        dist = "normal", sdy = 1, corStrength = 0) {
+  
+  normNames <- paste0("n", 1:predNorm[1])
+  binNames <- paste0("b", 1:predBin[1])
+  
+  ## Create the definition tables to be used by genData
+  
+  defn <- data.table(varname = normNames,
+                     formula = 0,
+                     variance = 1,
+                     dist = "normal",
+                     link = "identity")
+  
+  defb <- data.table(varname = binNames,
+                     formula = 0.5,
+                     variance = NA,
+                     dist = "binary",
+                     link = "identity")
+  
+  defx <- rbind(defn, defb)
+  attr(defx, which = "id") <- "id"
+  
+  ## Create the coefficient values - all normally distributed
+  
+  ncoefs <- rnorm(predNorm[1], 0, 1)
+  setzero <- sample(1:predNorm[1], (predNorm[1] - predNorm[2]), 
+                    replace = FALSE)
+  ncoefs[setzero] <- 0
+  
+  bcoefs <- rnorm(predBin[1], 0, 1)
+  setzero <- sample(1:predBin[1], (predBin[1] - predBin[2]), 
+                    replace = FALSE)
+  bcoefs[setzero] <- 0
+  
+  coefs <- c(ncoefs, bcoefs)
+  names(coefs) <- c(normNames, binNames)
+  
+  ## Generate the predictors
+  
+  if (corStrength <= 0) {     # predictors are independent
+    
+    dx <- genData(n, defx)
+    
+  } else {
+    
+    rLambda <- max(1, corStrength)
+    covx <- cov2cor(genPositiveDefMat(nrow(defx), 
+                        lambdaLow = 1, ratioLambda = rLambda)$Sigma)
+    dx <- genCorFlex(n, defx, corMatrix = covx)
+    
+  }
+  
+  ## Generate the means (given the predictors)
+  
+  mu <- as.matrix(dx[,-"id"]) %*% coefs
+  dx[, mu := mu]
+  
+  ## Generate the outcomes based on the means
+  
+  if (dist == "normal") {
+    dx[, y := rnorm(n, mu, sdy)]
+  } else if (dist == "binary") {
+    dx[, y := rbinom(n, 1, 1/(1 + exp(-mu)))]  # link = logit
+  } else if (dist == "poisson") {
+    dx[, y := rpois(n, exp(mu))]               # link = log
+  } 
+  
+  dx[, mu := NULL]
+  
+  return(list(data = dx[], coefs = coefs))
+}
+```
+  
+## A brief example
+
+Here is an example with 7 normally distributed covariates and 4 binary covariates. Only 3 of the continuous covariates and 2 of the binary covariates will actually be predictive.
+
+```{r, message = FALSE}
+library(simstudy)
+library(clusterGeneration)
+
+set.seed(732521)
+
+dx <- genMultPred(250, c(7, 3), c(4, 2))
+```
+
+The function returns a list of two objects. The first is a data.table containing the generated predictors and outcome:
+
+```{r}
+round(dx$data, 2)
+```
+
+The second object is the set of coefficients that determine the average response conditional on the predictors:
+
+```{r}
+round(dx$coefs, 2)
+```
+
+Finally, we can "recover" the original coefficients with linear regression:
+
+```{r}
+lmfit <- lm(y ~ n1 + n2 + n3 + n4 + n5 + n6 + n7 + b1 + b2 + b3 + b4, 
+            data = dx$data)
+```
+
+Here's a plot showing the 95% confidence intervals of the estimates along with the true values. The yellow lines are covariates where there is truly no association.
+
+```{r, echo = FALSE, fig.height = 5, fig.width = 6}
+dc <- data.table(var = names(coef(lmfit)), est = coef(lmfit), confint(lmfit))
+dc <- dc[-1, ][, true := dx$coefs][]
+dc[, effect := factor(true == 0)]
+   
+ggplot(data = dc, aes(x = est, y = var)) +
+  geom_vline(xintercept = 0, color = "white") + 
+  geom_segment(aes(x = `2.5 %`, xend = `97.5 %`, y = var, yend = var, color = effect),
+               size = 1) +
+  geom_point(aes(x=true, y=var), size = 1.8) +
+  scale_color_manual(values = c("#4978c0", "#c09149")) +
+  scale_x_continuous(limits = c(-2.7, 2.7), 
+        name = "value of coefficient") +
+  theme(legend.position = "none",
+        panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank()
+        )
+```
+
+&nbsp; 
+
+### Addendum: correlation among predictors
+
+Here is a pair of examples using the `corStrength` argument. In the first case, the observed correlations are close to 0, whereas in the second case, the correlations range from -0.50 to 0.25. The impact of `corStrength` will vary depending on the number of potential predictors.
+
+```{r}
+set.seed(291212)
+
+# Case 1
+
+dx <- genMultPred(1000, c(4, 2), c(2, 1), corStrength = 0)
+round(cor(as.matrix(dx$data[, -c(1, 8)])), 2)
+```
+
+```{r}
+# Case 2
+
+dx <- genMultPred(1000, c(4, 2), c(2, 1), corStrength = 50)
+round(cor(as.matrix(dx$data[, -c(1, 8)])), 2)
+```
