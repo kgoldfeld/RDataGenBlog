@@ -1,0 +1,244 @@
+---
+title: What can we really expect to learn from a pilot study?
+author: ''
+date: '2019-11-12'
+slug: what-can-we-really-expect-to-learn-from-a-pilot-study
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I am involved with a very interesting project - the NIA IMPACT Collaboratory - where a primary goal is to fund a large group of pragmatic pilot studies to investigate promising interventions to improve health care and quality of life for people living with Alzheimer’s disease and related dementias. One of my roles on the project team is to advise potential applicants on the development of their proposals. In order to provide helpful advice, it is important that we understand what we should actually expect to learn from a relatively small pilot study of a new intervention.</p>
+<p>There is a rich literature on this topic. For example, these papers by <a href="https://onlinelibrary.wiley.com/doi/full/10.1111/j..2002.384.doc.x"><em>Lancaster et al</em></a> and <a href="https://www.sciencedirect.com/science/article/pii/S002239561000292X"><em>Leon et al</em></a> provide nice discussions about how pilot studies should fit into the context of larger randomized trials. The key point made by both groups of authors is that pilot studies are important sources of information about the <em>feasibility</em> of conducting a larger, more informative study: Can the intervention actually be implemented well enough to study it? Will it be possible to recruit and retain patients? How difficult will it be to measure the primary outcome? Indeed, what is the most appropriate outcome to be measuring?</p>
+<p>Another thing the authors agree on is that the pilot study is <em>not</em> generally well-equipped to provide an estimate of the treatment effect. Because pilot studies are limited in resources (both time and money), sample sizes tend to be quite small. As a result, any estimate of the treatment effect is going to be quite noisy. If we accept the notion that there is some true underlying treatment effect for a particular intervention and population of interest, the pilot study estimate may very well fall relatively far from that true value. As a result, if we use that effect size estimate (rather than the true value) to estimate sample size requirements for the larger randomized trial, we run a substantial risk of designing an RCT that is too small, which may lead us to miss identifying a true effect. (Likewise, we may end up with a study that is too large, using up precious resources.)</p>
+<p>My goal here is to use simulations to see how a small pilot study could potentially lead to poor design decisions with respect to sample size.</p>
+<div id="a-small-two-arm-pilot-study" class="section level3">
+<h3>A small, two-arm pilot study</h3>
+<p>In these simulations, I will assume a two-arm study (intervention and control) with a true intervention effect <span class="math inline">\(\Delta = 50\)</span>. The outcome is a continuous measure with a within-arm standard deviation <span class="math inline">\(\sigma = 100\)</span>. In some fields of research, the effect size would be standardized as <span class="math inline">\(d = \Delta / \sigma\)</span>. (This is also known as <a href="https://rpsychologist.com/d3/cohend/">Cohen’s <span class="math inline">\(d\)</span></a>.) So, in this case the true standardized effect size <span class="math inline">\(d=0.5\)</span>.</p>
+<p>If we knew the true effect size and variance, we could skip the pilot study and proceed directly to estimate the sample size required for 80% power and Type I error rate <span class="math inline">\(\alpha = 0.05\)</span>. Using the <code>pwr.t.test</code> function in the <code>pwr</code> library, we specify the treatment effect (as <span class="math inline">\(d\)</span>), significance level <span class="math inline">\(\alpha\)</span>, and power to get the number of subjects needed for each study arm. In this case, it would be 64 (for a total of 128):</p>
+<pre class="r"><code>library(pwr) 
+pwr.t.test(n = NULL, d =  50/100, sig.level = 0.05, 
+    power = 0.80, type = &quot;two.sample&quot;) </code></pre>
+<pre><code>## 
+##      Two-sample t test power calculation 
+## 
+##               n = 64
+##               d = 0.5
+##       sig.level = 0.05
+##           power = 0.8
+##     alternative = two.sided
+## 
+## NOTE: n is number in *each* group</code></pre>
+<p>If we do not have an estimate of <span class="math inline">\(d\)</span> or even of the individual components <span class="math inline">\(\Delta\)</span> and <span class="math inline">\(\sigma\)</span>, we may decide to do a small pilot study. I simulate a single study with 30 subjects in each arm (for a total study sample size of 60). First, I generate the data set (representing this one version of the hypothetical study) with a treatment indicator <span class="math inline">\(rx\)</span> and an outcome <span class="math inline">\(y\)</span>:</p>
+<pre class="r"><code>library(simstudy)
+
+defd &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;rx * 50&quot;, variance = 100^2)
+ss &lt;- 30
+
+set.seed(22821)
+dd &lt;- genData(n = ss*2)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(defd, dd)
+head(dd)</code></pre>
+<pre><code>##    id rx    y
+## 1:  1  0 -150
+## 2:  2  1   48
+## 3:  3  0 -230
+## 4:  4  1  116
+## 5:  5  1   91
+## 6:  6  1  105</code></pre>
+<p>Once we have collected the data from the pilot study, we probably would try to get sample size requirements for the larger RCT. The question is, what information can we use to inform <span class="math inline">\(d\)</span>? We have a couple of options. In the first case, we can estimate both <span class="math inline">\(\Delta\)</span> and <span class="math inline">\(\sigma\)</span> from the data and use those results directly in power calculations:</p>
+<pre class="r"><code>lmfit &lt;- lm(y ~ rx, data = dd) 
+Delta &lt;- coef(lmfit)[&quot;rx&quot;]
+Delta</code></pre>
+<pre><code>## rx 
+## 78</code></pre>
+<pre class="r"><code>sd.rx &lt;- dd[rx==1, sd(y)]
+sd.ctl &lt;- dd[rx==0, sd(y)]
+
+pool.sd &lt;- sqrt( (sd.rx^2 + sd.ctl^2)  / 2 )
+pool.sd</code></pre>
+<pre><code>## [1] 94</code></pre>
+<p>The estimated standard deviation (94) is less than the true value, and the effect size is inflated (78), so that the estimated <span class="math inline">\(\hat{d}\)</span> is also too large, close to 0.83. This is going to lead us to recruit fewer participants (24 in each group) than the number we actually require (64 in each group):</p>
+<pre class="r"><code>pwr.t.test(n = NULL, d =  Delta/pool.sd, sig.level = 0.05, 
+    power = 0.80, type = &quot;two.sample&quot;) </code></pre>
+<pre><code>## 
+##      Two-sample t test power calculation 
+## 
+##               n = 24
+##               d = 0.83
+##       sig.level = 0.05
+##           power = 0.8
+##     alternative = two.sided
+## 
+## NOTE: n is number in *each* group</code></pre>
+<p>Alternatively, if we had external information that provided some insight into the true effect size, or, absent that, we use a minimally clinically significant effect size, we might get a better result. In this case, we are quite fortunate to use an effect size of 50. However, we will continue to use the variance estimate from the pilot study. Using this approach, the resulting sample size (56) happens to be much closer to the required value (64):</p>
+<pre class="r"><code>pwr.t.test(n = NULL, d =  50/pool.sd, sig.level = 0.05, 
+    power = 0.80, type = &quot;two.sample&quot;) </code></pre>
+<pre><code>## 
+##      Two-sample t test power calculation 
+## 
+##               n = 56
+##               d = 0.53
+##       sig.level = 0.05
+##           power = 0.8
+##     alternative = two.sided
+## 
+## NOTE: n is number in *each* group</code></pre>
+</div>
+<div id="speak-truth-to-power" class="section level3">
+<h3>Speak truth to power</h3>
+<p>Now the question becomes, what is the true expected power of the RCT based on the sample size estimated in the pilot study. To estimate this true power, we use the true effect size and the true variance (i.e. the true <span class="math inline">\(d\)</span>)?</p>
+<p>In the first case, where we actually used the true <span class="math inline">\(d\)</span> to get the sample size estimate, we just recover the 80% power estimate. No surprise there:</p>
+<pre class="r"><code>pwr.t.test(n = 64, d = 0.50, sig.level = 0.05, type = &quot;two.sample&quot;)$power</code></pre>
+<pre><code>## [1] 0.8</code></pre>
+<p>In the second case, where we used <span class="math inline">\(\hat{d} = \hat{\Delta} / \hat{\sigma}\)</span> to get the sample size <span class="math inline">\(n=24\)</span>, the true power of the larger RCT would be 40%:</p>
+<pre class="r"><code>pwr.t.test(n = 24, d = 0.50, sig.level = 0.05, type = &quot;two.sample&quot;)$power</code></pre>
+<pre><code>## [1] 0.4</code></pre>
+<p>And if we had used <span class="math inline">\(\hat{d} = 50 / \hat{\sigma}\)</span> to get the sample size estimate <span class="math inline">\(n=56\)</span>, the true power would have been 75%:</p>
+<pre class="r"><code>pwr.t.test(n = 56, d = 0.50, sig.level = 0.05, type = &quot;two.sample&quot;)$power</code></pre>
+<pre><code>## [1] 0.75</code></pre>
+</div>
+<div id="conservative-estimate-of-standard-deviation" class="section level3">
+<h3>Conservative estimate of standard deviation</h3>
+<p>While the two papers I cited earlier suggest that it is not appropriate to use effect sizes estimated from a pilot study (and more on that in the next and last section), this <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780141709">1995 paper</a> by R.H. Browne presents the idea that we <em>can</em> use the estimated standard deviation from the pilot study. Or rather, to be conservative, we can use the upper limit of a one-sided confidence interval for the standard deviation estimated from the pilot study.</p>
+<p>The confidence interval for the standard deviation is not routinely provided in R. Another <a href="https://www.sciencedirect.com/science/article/pii/S0378375810005070?via%3Dihub">paper</a> analyzes one-sided confidence intervals quite generally under different conditions, and provides a formula in the most straightforward case under assumptions of normality to estimate the <span class="math inline">\(\gamma*100\%\)</span> one-sided confidence interval for <span class="math inline">\(\sigma^2\)</span>:</p>
+<p><span class="math display">\[
+\left( 0,\frac{(N-2)s_{pooled}^2}{\chi^2_{N-2;\gamma}} \right)
+\]</span></p>
+<p>where <span class="math inline">\(\chi^2_{N-2;\gamma}\)</span> is determined by <span class="math inline">\(P(\chi^2_{N-2} &gt; \chi^2_{N-2;\gamma}) = \gamma\)</span>. So, if <span class="math inline">\(\gamma = 0.95\)</span> then we can get a one-sided 95% confidence interval for the standard deviation using that formulation:</p>
+<pre class="r"><code>gamma &lt;- 0.95
+qchi &lt;- qchisq(gamma, df = 2*ss - 2, lower.tail = FALSE)
+ucl &lt;- sqrt( ( (2*ss - 2) * pool.sd^2 ) / qchi  )
+ucl</code></pre>
+<pre><code>## [1] 111</code></pre>
+<p>The point estimate <span class="math inline">\(\hat{\sigma}\)</span> is 94, and the one-sided 95% confidence interval is <span class="math inline">\((0, 111)\)</span>. (I’m happy to provide a simulation to demonstrate that this is in fact the case, but won’t do it here in the interest of space.)</p>
+<p>If we use <span class="math inline">\(\hat{\sigma}_{ucl} = 111\)</span> to estimate the sample size, we get a more conservative sample size requirement (78) than if we used the point estimate <span class="math inline">\(\hat{\sigma} = 94\)</span> (where the sample size requirement was 56):</p>
+<pre class="r"><code>pwr.t.test(n = NULL, d =  50/ucl, sig.level = 0.05, 
+    power = 0.80, type = &quot;two.sample&quot;) </code></pre>
+<pre><code>## 
+##      Two-sample t test power calculation 
+## 
+##               n = 78
+##               d = 0.45
+##       sig.level = 0.05
+##           power = 0.8
+##     alternative = two.sided
+## 
+## NOTE: n is number in *each* group</code></pre>
+<p>Ultimately, using <span class="math inline">\(\gamma = 0.95\)</span> might be too conservative in that it might lead to an excessively large sample size requirement. Browne’s paper uses simulation to to evaluate a range of <span class="math inline">\(\gamma\)</span>’s, from 0.5 to 0.9, which I also do in the next section.</p>
+</div>
+<div id="simulation-of-different-approaches" class="section level3">
+<h3>Simulation of different approaches</h3>
+<p>At this point, we need to generate multiple iterations to see how the various approaches perform over <em>repeated</em> pilot studies based on the same data generating process, rather than looking at a single instance as I did in the simulations above.</p>
+<p>As Browne does in his paper, I would like to evaluate the distribution of power estimates that arise from the various approaches. I compare using an external source or minimally clinically meaningful effect size to estimate <span class="math inline">\(\Delta\)</span> (in the figures below, this would be the columns labeled <em>‘truth’</em>) with using the effect size point estimate from the pilot (labeled <em>pilot</em>). I also compare using a point estimate of <span class="math inline">\(\sigma\)</span> from the pilot (where <span class="math inline">\(\gamma=0\)</span>), with using the upper limit of a one-sided confidence interval defined by <span class="math inline">\(\gamma\)</span>. In these simulations I compare three levels of <span class="math inline">\(\gamma\)</span>: <span class="math inline">\(\gamma \in (0.5, 0.7, 0.9)\)</span>.</p>
+<p>In each of the simulations, I assume 30 subjects per arm, and evaluate true effect sizes of 30 and 75. In all cases, the true standard error <span class="math inline">\(\sigma = 100\)</span> so that true <span class="math inline">\(d\)</span> is 0.30 or 0.75.</p>
+<p>The box plots in the figure represent the distribution of power estimates for the larger RCT under different scenarios. Each scenario was simulated 5000 times each. Ideally, the power estimates should cluster close to 80%, the targeted level of power. In the figure, the percentage next to each box plot reports the percent of simulations with power estimates at or above the target of 80%.</p>
+<p><img src="/img/post-pilot/pilot30.png" style="width:90.0%" /></p>
+<p>Two things jump out at me. First, using the true effect size in the power calculation gives us a much better chance of designing an RCT with close to 80% power, even when a point estimate is used for <span class="math inline">\(\hat{\sigma}\)</span>. In Browne’s paper, the focus is on the fact that even when using the true effect size, there is a high probability of power falling below 80%. This may be the case, but it may be more important to note that when power is lower than the target, it is actually likely to fall relatively close to the 80% target. If the researcher is very concerned about falling below that threshold, perhaps using <span class="math inline">\(\gamma\)</span> higher than 0.6 or 0.7 might provide an adequate cushion.</p>
+<p>Second, it appears <em>using the effect size estimate from the pilot as the basis for an RCT power analysis is risky</em>. The box plots labeled as <em>pilot</em> exhibit much more variation than the <em>‘true’</em> box plots. As a result, there is a high probability that the true power will fall considerably below 80%. And in many other cases, the true power will be unnecessarily large, due to the fact that they have been designed to be larger than they need to be.</p>
+<p>The situation improves somewhat with larger pilot studies, as shown below with 60 patients per arm, where variation seems to be reduced. Still, an argument can be made that using effect sizes from pilot studies is too risky, leading to an under-powered or overpowered study, neither of which is ideal.</p>
+<p><img src="/img/post-pilot/pilot60.png" style="width:90.0%" /></p>
+<p>A question remains about how best to determine what effect size to use for the power calculation if using the estimate from the pilot is risky. I think a principled approach, such as drawing effect size estimates from the existing literature or using clinically meaningful effect sizes, is a much better way to go. And the pilot study should focus on other important feasibility issues that <em>can</em> help improve the design of the RCT.</p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Lancaster, G.A., Dodd, S. and Williamson, P.R., 2004. Design and analysis of pilot studies: recommendations for good practice. Journal of evaluation in clinical practice, 10(2), pp.307-312.</p>
+<p>Leon, A.C., Davis, L.L. and Kraemer, H.C., 2011. The role and interpretation of pilot studies in clinical research. Journal of psychiatric research, 45(5), pp.626-629.</p>
+<p>Browne, R.H., 1995. On the use of a pilot sample for sample size determination. Statistics in medicine, 14(17), pp.1933-1940.</p>
+<p>Cojbasic, V. and Loncar, D., 2011. One-sided confidence intervals for population variances of skewed distributions. Journal of Statistical Planning and Inference, 141(5), pp.1667-1672.</p>
+<p> </p>
+<p>Support:</p>
+This research is supported by the National Institutes of Health National Institute on Aging U54AG063546. The views expressed are those of the author and do not necessarily represent the official position of the funding organizations.
+</font></small>
+</p>
+<p> </p>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>Below is the code I used to run the simulations and generate the plots</p>
+<pre class="r"><code>getPower &lt;- function(ssize, esize, gamma = 0, use.est = FALSE) {
+  
+  estring &lt;- paste0(&quot;rx * &quot;, esize)
+  defd &lt;- defDataAdd(varname = &quot;y&quot;, formula = estring, variance = 100^2)
+  
+  N &lt;- ssize * 2
+  
+  dd &lt;- genData(n = N)
+  dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+  dd &lt;- addColumns(defd, dd)
+  
+  lmfit &lt;- lm(y~rx, data = dd)
+
+  sd.rx &lt;- dd[rx==1, sd(y)]
+  sd.ctl &lt;- dd[rx==0, sd(y)]
+  pool.sd &lt;- sqrt( (sd.rx^2 + sd.ctl^2)  / 2 )
+  
+  qchi &lt;- qchisq(gamma, df = N - 2, lower.tail = FALSE)
+  ucl &lt;- sqrt( ( (N-2) * pool.sd^2 ) / qchi  )
+
+  p.sd &lt;- estsd * (gamma == 0) + ucl * (gamma &gt; 0)
+  p.eff &lt;- esize * (use.est == FALSE) + 
+              coef(lmfit)[&quot;rx&quot;] * (use.est == TRUE)
+  
+  if (abs(p.eff/p.sd) &lt; 0.0002) p.eff &lt;- sign(p.eff) * .0002 * p.sd
+  
+  nstar &lt;- round(pwr.t.test(n = NULL, d =  p.eff/p.sd, sig.level = 0.05, 
+                            power = 0.80, type = &quot;two.sample&quot;)$n,0)  
+  
+  power &lt;- pwr.t.test(n=nstar, d = esize/100, sig.level = 0.05, 
+                      type = &quot;two.sample&quot;)
+  
+  return(data.table(ssize, esize, gamma, use.est,
+    estsd = estsd, ucl = ucl, nstar, power = power$power,
+    est = coef(lmfit)[&quot;rx&quot;], 
+    lcl.est = confint(lmfit)[&quot;rx&quot;,1] , 
+    ucl.est = confint(lmfit)[&quot;rx&quot;,2])
+  )
+  
+}</code></pre>
+<pre class="r"><code>dres &lt;- data.table()
+  
+for (i in c(30, 60)) {
+ for (j in c(30, 75)) {
+  for (k in c(0, .5, .7)) {
+   for (l in c(FALSE, TRUE)) {
+    dd &lt;- rbindlist(lapply(1:5000, 
+      function(x) getPower(ssize = i, esize = j, gamma = k, use.est = l))
+    )
+    dres &lt;- rbind(dres, dd)
+}}}}</code></pre>
+<pre class="r"><code>above80 &lt;- dres[, .(x80 = mean(power &gt;= 0.80)), 
+                  keyby = .(ssize, esize, gamma, use.est)]
+above80[, l80 := scales::percent(x80, accuracy = 1)]
+  
+g_labeller &lt;- function(value) {
+    paste(&quot;\U03B3&quot;, &quot;=&quot;, value) # unicode for gamma
+}
+
+e_labeller &lt;- function(value) {
+  paste(&quot;\U0394&quot;, &quot;=&quot;, value) # unicdoe for Delta
+}
+  
+ggplot(data = dres[ssize == 30], 
+       aes(x=factor(use.est, labels=c(&quot;&#39;truth&#39;&quot;, &quot;pilot&quot;)), y=power)) +
+  geom_hline(yintercept = 0.8, color = &quot;white&quot;) +
+  geom_boxplot(outlier.shape = NA, fill = &quot;#9ba1cf&quot;, width = .4) +
+  theme(panel.grid = element_blank(),
+        panel.background = element_rect(fill = &quot;grey92&quot;),
+        axis.ticks = element_blank(),
+        plot.title = element_text(size = 9, face = &quot;bold&quot;)) +
+  facet_grid(esize ~ gamma, 
+    labeller = labeller(gamma = g_labeller, esize = e_labeller)) +
+  scale_x_discrete(
+    name = &quot;\n source of effect size used for power calculation&quot;) +
+  scale_y_continuous(limits = c(0,1), breaks = c(0, .8),
+                      name = &quot;distribution of power estimates \n&quot;) +
+  ggtitle(&quot;Distribution of power estimates (n = 30 per treatment arm)&quot;) +
+  geom_text(data = above80[ssize == 30], 
+            aes(label = l80), x=rep(c(0.63, 1.59), 6), y = 0.95,
+            size = 2.5)</code></pre>
+</div>
