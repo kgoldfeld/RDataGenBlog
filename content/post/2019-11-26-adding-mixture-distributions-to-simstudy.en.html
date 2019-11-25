@@ -1,0 +1,149 @@
+---
+title: Adding a "mixture" distribution to the simstudy package
+author: ''
+date: '2019-11-26'
+slug: adding-mixture-distributions-to-simstudy
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I am contemplating adding a new distribution option to the package <code>simstudy</code> that would allow users to define a new variable as a mixture of previously defined (or already generated) variables. I think the easiest way to explain how to apply the new <em>mixture</em> option is to step through a few examples and see it in action.</p>
+<div id="specifying-the-mixture-distribution" class="section level3">
+<h3>Specifying the “mixture” distribution</h3>
+<p>As defined here, a mixture of variables is a random draw from a set of variables based on a defined set of probabilities. For example, if we have two variables, <span class="math inline">\(x_1\)</span> and <span class="math inline">\(x_2\)</span>, we have a mixture if, for any particular observation, we take <span class="math inline">\(x_1\)</span> with probability <span class="math inline">\(p_1\)</span> and <span class="math inline">\(x_2\)</span> with probability <span class="math inline">\(p_2\)</span>, where <span class="math inline">\(\sum_i{p_i} = 1\)</span>, <span class="math inline">\(i \in (1, 2)\)</span>. So, if we have already defined <span class="math inline">\(x_1\)</span> and <span class="math inline">\(x_2\)</span> using the <code>defData</code> function, we can create a third variable <span class="math inline">\(x_{mix}\)</span> with this definition:</p>
+<pre class="r"><code>def &lt;- defData(def, varname = &quot;xMix&quot;, 
+               formula = &quot;x1 | 0.4 + x2 | 0.6&quot;, 
+               dist = &quot;mixture&quot;)</code></pre>
+<p>In this example, we will draw <span class="math inline">\(x_1\)</span> with probability 0.4 and <span class="math inline">\(x_2\)</span> with probability 0.6. We are, however, not limited to mixing only two variables; to make that clear, I’ll start off with an example that shows a mixture of three normally distributed variables.</p>
+</div>
+<div id="mixture-of-3-normal-distributions" class="section level3">
+<h3>Mixture of 3 normal distributions</h3>
+<p>In this case, we have <span class="math inline">\(x_1 \sim N(1,1)\)</span>, <span class="math inline">\(x_2 \sim N(5,4)\)</span>, and <span class="math inline">\(x_3 \sim N(9,1)\)</span>. The mixture will draw from <span class="math inline">\(x_1\)</span> 30% of the time, from <span class="math inline">\(x_2\)</span> 40%, and from <span class="math inline">\(x_3\)</span> 30%:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;x1&quot;, formula = 1, variance = 1)
+def &lt;- defData(def, varname = &quot;x2&quot;, formula = 5, variance = 4)
+def &lt;- defData(def, varname = &quot;x3&quot;, formula = 9, variance = 1)
+def &lt;- defData(def, varname = &quot;xMix&quot;, 
+               formula = &quot;x1 | .3 + x2 | .4 + x3 | .3&quot;, 
+               dist = &quot;mixture&quot;)</code></pre>
+<p>The data generation now proceeds as usual in <code>simstudy</code>:</p>
+<pre class="r"><code>set.seed(2716)
+dx &lt;- genData(1000, def)
+dx</code></pre>
+<pre><code>##         id     x1   x2    x3   xMix
+##    1:    1  1.640 4.12  7.13  4.125
+##    2:    2 -0.633 6.89  9.07 -0.633
+##    3:    3  1.152 2.95  8.71  1.152
+##    4:    4  1.519 5.53  8.82  5.530
+##    5:    5  0.206 5.55  9.31  5.547
+##   ---                              
+##  996:  996  2.658 1.87  8.09  1.870
+##  997:  997  2.604 4.44  9.09  2.604
+##  998:  998  0.457 5.56 10.87 10.867
+##  999:  999 -0.400 4.29  9.03 -0.400
+## 1000: 1000  2.838 4.78  9.17  9.174</code></pre>
+<p>Here are two plots. The top shows the densities for the original distributions separately, and the bottom plot shows the mixture distribution (which is the distribution of <code>xMix</code>):</p>
+<p><img src="/post/2019-11-26-adding-mixture-distributions-to-simstudy.en_files/figure-html/unnamed-chunk-5-1.png" width="576" /></p>
+<p>And it is easy to show that the mixture proportions are indeed based on the probabilities that were defined:</p>
+<pre class="r"><code>dx[, .(p1=mean(xMix == x1), p2=mean(xMix == x2), p3=mean(xMix == x3))]</code></pre>
+<pre><code>##       p1    p2    p3
+## 1: 0.298 0.405 0.297</code></pre>
+</div>
+<div id="zero-inflated" class="section level3">
+<h3>Zero-inflated</h3>
+<p>One classic mixture model is the <em>zero-inflated Poisson</em> model. We can easily generate data from this model using a mixture distribution. In this case, the outcome is <span class="math inline">\(0\)</span> with probability <span class="math inline">\(p\)</span> and is a draw from a Poisson distribution with mean (and variance) <span class="math inline">\(\lambda\)</span> with probability <span class="math inline">\(1-p\)</span>. As a result, there will be an over-representation of 0’s in the observed data set.
+In this example <span class="math inline">\(p\)</span> = 0.2 and <span class="math inline">\(\lambda = 2\)</span>:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;x0&quot;, formula = 0, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, varname = &quot;xPois&quot;, formula = 2, dist = &quot;poisson&quot;)
+def &lt;- defData(def, varname = &quot;xMix&quot;, formula = &quot;x0 | .2 + xPois | .8&quot;, 
+               dist = &quot;mixture&quot;)
+
+set.seed(2716)
+dx &lt;- genData(1000, def)</code></pre>
+<p>The figure below shows a histogram of the Poisson distributed <span class="math inline">\(x_{pois}\)</span> on top and a histogram of the mixture on the bottom. It is readily apparent that the mixture distribution has “too many” zeros relative to the Poisson distribution:</p>
+<p><img src="/post/2019-11-26-adding-mixture-distributions-to-simstudy.en_files/figure-html/unnamed-chunk-8-1.png" width="480" /></p>
+<p>I am fitting model below (using the <code>pscl</code> package) to see if it is possible to recover the assumptions I used in the data generation process. With 1000 observations, of course, it is easy:</p>
+<pre class="r"><code>library(pscl)
+zfit &lt;- zeroinfl(xMix ~ 1 | 1, data = dx)
+
+summary(zfit)</code></pre>
+<pre><code>## 
+## Call:
+## zeroinfl(formula = xMix ~ 1 | 1, data = dx)
+## 
+## Pearson residuals:
+##    Min     1Q Median     3Q    Max 
+## -1.035 -1.035 -0.370  0.296  4.291 
+## 
+## Count model coefficients (poisson with log link):
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)   0.6959     0.0306    22.8   &lt;2e-16 ***
+## 
+## Zero-inflation model coefficients (binomial with logit link):
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)   -1.239      0.107   -11.5   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1 
+## 
+## Number of iterations in BFGS optimization: 9 
+## Log-likelihood: -1.66e+03 on 2 Df</code></pre>
+<p>The estimated value of <span class="math inline">\(lambda\)</span> from the model is the exponentiated value of the coefficient from the Poisson model: <span class="math inline">\(e^{0.6959}\)</span>. The estimate is quite close to the true value <span class="math inline">\(\lambda = 2\)</span>:</p>
+<pre class="r"><code>exp(coef(zfit)[1])</code></pre>
+<pre><code>## count_(Intercept) 
+##              2.01</code></pre>
+<p>And the estimated probability of drawing a zero (i.e. <span class="math inline">\(\hat{p}\)</span>) is based on a simple transformation of the coefficient of the binomial model (<span class="math inline">\(-1.239\)</span>), which is on the logit scale. Again, the estimate is quite close to the true value <span class="math inline">\(p = 0.2\)</span>:</p>
+<pre class="r"><code>1/(1 + exp(-coef(zfit)[2]))</code></pre>
+<pre><code>## zero_(Intercept) 
+##            0.225</code></pre>
+</div>
+<div id="outlier-in-linear-regression" class="section level3">
+<h3>Outlier in linear regression</h3>
+<p>In this final example, I use the mixture option to generate outliers in the context of a regression model. This is done first by generating outcomes <span class="math inline">\(y\)</span> as a function of a predictor <span class="math inline">\(x\)</span>. Next, alternative outcomes <span class="math inline">\(y_{outlier}\)</span> are generated independent of <span class="math inline">\(x\)</span>. The observed outcomes <span class="math inline">\(y_{obs}\)</span> are a mixture of the outliers <span class="math inline">\(y_{outlier}\)</span> and the predicted <span class="math inline">\(y\)</span>’s. In this simulation, 2.5% of the observations will be drawn from the outliers:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = 0, variance = 9, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, formula = &quot;3+2*x&quot;, variance = 7, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;yOutlier&quot;, formula = 12, variance = 6, 
+               dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;yObs&quot;, 
+               formula = &quot;y | .975 + yOutlier | .025&quot;, 
+               dist = &quot;mixture&quot;)
+
+set.seed(2716)
+dx &lt;- genData(100, def)</code></pre>
+<p>This scatter plot shows the relationship between <span class="math inline">\(y_{obs}\)</span> and <span class="math inline">\(x\)</span>; the red dots represent the observations drawn from the outlier distribution:</p>
+<p><img src="/post/2019-11-26-adding-mixture-distributions-to-simstudy.en_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>Once again, it is illustrative to fit a few models to estimate the linear relationships between the <span class="math inline">\(y\)</span> and <span class="math inline">\(x\)</span>. The model that includes the true value of <span class="math inline">\(y\)</span> (as opposed to the outliers) unsurprisingly recovers the true relationship. The model that includes the observed outcomes (the mixture distribution) underestimates the relationship. And a robust regression model (using the <code>rlm</code> function <code>MASS</code> package) provides a less biased estimate:</p>
+<pre class="r"><code>lm1 &lt;- lm( y ~ x, data = dx)
+lm2 &lt;- lm( yObs ~ x, data = dx)
+
+library(MASS)
+rr &lt;- rlm(yObs ~ x , data = dx)</code></pre>
+<pre class="r"><code>library(stargazer)
+
+stargazer(lm1, lm2, rr, type = &quot;text&quot;,
+          omit.stat = &quot;all&quot;, omit.table.layout = &quot;-asn&quot;,
+          report = &quot;vcs&quot;)</code></pre>
+<pre><code>## 
+## ================================
+##            Dependent variable:  
+##          -----------------------
+##             y         yObs      
+##            OLS     OLS   robust 
+##                          linear 
+##            (1)     (2)     (3)  
+## x         2.210   2.030   2.150 
+##          (0.093) (0.136) (0.111)
+##                                 
+## Constant  2.780   3.310   2.950 
+##          (0.285) (0.417) (0.341)
+##                                 
+## ================================</code></pre>
+<p>The scatter plot below includes the fitted lines from the estimated models: the blue line is the true regression model, the red line is the biased estimate based on the data that includes outliers, and the black line is the robust regression line that is much closer to the truth:</p>
+<p><img src="/post/2019-11-26-adding-mixture-distributions-to-simstudy.en_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>The mixture option is still experimental, though it is available on <a href="https://github.com/kgoldfeld/simstudy">github</a>. One enhancement I hope to make is to allow the mixture probability to be a function of covariates. The next release on CRAN will certainly include some form of this new distribution option.</p>
+<p> </p>
+</div>
