@@ -1,0 +1,185 @@
+---
+title: Repeated measures can improve estimation when we only care about a single endpoint
+author: ''
+date: '2019-12-10'
+slug: using-repeated-measures-might-improve-effect-estimation-even-when-single-endpoint-is-the-focus
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I’ve been participating in the design of a new study that will evaluate interventions aimed at reducing both pain and opioid use for patients on dialysis. This study is likely to be somewhat complicated, involving multiple clusters, three interventions, a sequential and adaptive randomization scheme, and a composite binary outcome. I’m not going into any of that here.</p>
+<p>There <em>was</em> one issue that came up that should be fairly generalizable to other studies. In this case, individual measures will be collected repeatedly over time but the primary outcome of interest will be the measure collected during the last follow-up period. I wanted to explore what, if anything, can be gained by analyzing all of the available data rather than focusing only the final end point.</p>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>In this simulation scenario, there will be 200 subjects randomized at the individual level to one of two treatment arms, intervention (<span class="math inline">\(rx = 1\)</span>) and control (<span class="math inline">\(rx = 0\)</span>). Each person will be followed for 5 months, with a binary outcome measure collected at the end of each month. In the data, period 0 is the first month, and period 4 is the final month.</p>
+<pre class="r"><code>library(simstudy)
+
+set.seed(281726)
+
+dx &lt;- genData(200)
+dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+dx &lt;- addPeriods(dx, nPeriods = 5)</code></pre>
+<p>Here are the data for a single individual:</p>
+<pre class="r"><code>dx[id == 142]</code></pre>
+<pre><code>##     id period rx timeID
+## 1: 142      0  1    706
+## 2: 142      1  1    707
+## 3: 142      2  1    708
+## 4: 142      3  1    709
+## 5: 142      4  1    710</code></pre>
+<p>The probabilities of the five binary outcomes for each individual are a function of time and intervention status.</p>
+<pre class="r"><code>defP &lt;- defDataAdd(varname = &quot;p&quot;, 
+                   formula = &quot;-2 + 0.2*period + 0.5*rx&quot;, 
+                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
+  
+dx &lt;- addColumns(defP, dx)</code></pre>
+<p>The outcomes for a particular individual are correlated, with outcomes in two adjacent periods are more highly correlated than outcomes collected further apart. (I use an auto-regressive correlation structure to generate these data.)</p>
+<pre class="r"><code>dx &lt;- addCorGen(dtOld = dx, idvar = &quot;id&quot;, nvars = 5, rho = 0.6, 
+                corstr = &quot;ar1&quot;, dist = &quot;binary&quot;, param1 = &quot;p&quot;, 
+                method = &quot;ep&quot;, formSpec = &quot;-2 + 0.2*period + 0.5*rx&quot;,
+                cnames = &quot;y&quot;)
+
+dx[id == 142]</code></pre>
+<pre><code>##     id period rx timeID    p y
+## 1: 142      0  1    706 0.18 0
+## 2: 142      1  1    707 0.21 0
+## 3: 142      2  1    708 0.25 1
+## 4: 142      3  1    709 0.29 0
+## 5: 142      4  1    710 0.33 0</code></pre>
+<p>In the real world, there will be loss to follow up - not everyone will be observed until the end. In the first case, I will be assuming the data are missing completely at random (MCAR), where missingness is independent of all observed and unobserved variables. (I have <a href="https://www.rdatagen.net/post/musings-on-missing-data/">mused on missingess</a> before.)</p>
+<pre class="r"><code>MCAR &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-2.6&quot;,
+                logit.link = TRUE, monotonic = TRUE
+)
+
+dm &lt;- genMiss(dx, MCAR, &quot;id&quot;, repeated = TRUE, periodvar = &quot;period&quot;)
+dObs &lt;- genObs(dx, dm, idvars = &quot;id&quot;)
+
+dObs[id == 142]</code></pre>
+<pre><code>##     id period rx timeID    p  y
+## 1: 142      0  1    706 0.18  0
+## 2: 142      1  1    707 0.21  0
+## 3: 142      2  1    708 0.25  1
+## 4: 142      3  1    709 0.29 NA
+## 5: 142      4  1    710 0.33 NA</code></pre>
+<p>In this data set only about 70% of the total sample is observed - though by chance there is different dropout for each of the treatment arms:</p>
+<pre class="r"><code>dObs[period == 4, .(prop.missing = mean(is.na(y))), keyby = rx]</code></pre>
+<pre><code>##    rx prop.missing
+## 1:  0         0.28
+## 2:  1         0.38</code></pre>
+</div>
+<div id="estimating-the-intervention-effect" class="section level3">
+<h3>Estimating the intervention effect</h3>
+<p>If we are really only interested in the probability of a successful outcome in the final period, we could go ahead and estimate the treatment effect using a simple logistic regression using individuals who were available at the end of the study. The true value is 0.5 (on the logistic scale), and the estimate here is close to 1.0 with a standard error just under 0.4:</p>
+<pre class="r"><code>fit.l &lt;- glm(y ~ rx, data = dObs[period == 4], family = binomial)
+coef(summary(fit.l))</code></pre>
+<pre><code>##             Estimate Std. Error z value Pr(&gt;|z|)
+## (Intercept)    -1.25       0.28    -4.4  9.9e-06
+## rx              0.99       0.38     2.6  9.3e-03</code></pre>
+<p>But, can we do better? Fitting a longitudinal model might provide a more stable and possibly less biased estimate, particularly if the specified model is the correct one. In this case, I suspect it will be an improvement, since the data was generated using a process that is amenable to a GEE (generalized estimating equation) model.</p>
+<pre class="r"><code>library(geepack)
+  
+fit.m &lt;- geeglm(y ~ period + rx, id = id, family = binomial, 
+         data = dObs, corstr = &quot;ar1&quot;)
+
+coef(summary(fit.m))</code></pre>
+<pre><code>##             Estimate Std.err Wald Pr(&gt;|W|)
+## (Intercept)    -2.33   0.259   81  0.00000
+## period          0.30   0.072   17  0.00003
+## rx              0.83   0.263   10  0.00152</code></pre>
+<p>And finally, it is reasonable to expect that a model that is based on a data set without any missing values would provide the most efficient estimate. And that does seem to be case if we look at the standard error of the effect estimate.</p>
+<pre class="r"><code>fit.f &lt;- geeglm(y ~ period + rx, id = id, family = binomial, 
+         data = dx, corstr = &quot;ar1&quot;)
+
+coef(summary(fit.f))</code></pre>
+<pre><code>##             Estimate Std.err Wald Pr(&gt;|W|)
+## (Intercept)    -2.15   0.227 89.2  0.0e+00
+## period          0.30   0.062 23.1  1.5e-06
+## rx              0.54   0.233  5.4  2.1e-02</code></pre>
+<p>Of course, we can’t really learn much of anything from a single simulated data set. Below is a plot of the mean estimate under each modeling scenario (along with the blue line that represents <span class="math inline">\(\pm 2\)</span> <em>sd</em>) based on 2500 simulated data sets with missingness completely at random. (The code for these replications is included in the addendum.)</p>
+<p>It is readily apparent that under an assumption of MCAR, all estimation models yield unbiased estimates (the true effect size is 0.5), though using the last period only is inherently more variable (given that there are fewer observations to work with).</p>
+<p><img src="/post/2019-12-10-using-repeated-measures-might-improve-effect-estimation-even-when-single-endpoint-is-the-focus.en_files/figure-html/unnamed-chunk-11-1.png" width="384" /></p>
+</div>
+<div id="missing-at-random" class="section level3">
+<h3>Missing at random</h3>
+<p>When the data are MAR (missing at random), using the last period only no longer provides an unbiased estimate of the effect size. In this case, the probability of missingness is a function of time, intervention status, and the outcome from the prior period, all of which are observed. This is how I’ve defined the MAR process:</p>
+<pre class="r"><code>MAR &lt;- defMiss(varname = &quot;y&quot;, 
+               formula = &quot;-2.9 + 0.2*period - 2*rx*LAG(y)&quot;,
+               logit.link = TRUE, monotonic = TRUE
+)</code></pre>
+<p>The mean plots based on 2500 iterations reveal the bias of the last period only. It is interesting to see that the GEE model is <em>not</em> biased, because we have captured all of the relevant covariates in the model. (It is well known that a likelihood method can yield unbiased estimates in the case of MAR, and while GEE is not technically a likelihood, it is a <em>quasi</em>-likelihood method.)</p>
+<p><img src="/post/2019-12-10-using-repeated-measures-might-improve-effect-estimation-even-when-single-endpoint-is-the-focus.en_files/figure-html/unnamed-chunk-13-1.png" width="384" /></p>
+</div>
+<div id="missing-not-at-random" class="section level3">
+<h3>Missing not at random</h3>
+<p>When missingness depends on unobserved data, such as the outcome itself, then GEE estimates are also biased. For the last set of simulations, I defined missingness of <span class="math inline">\(y\)</span> in any particular time period to be a function of itself. Specifically, if the outcome was successful and the subject was in the intervention, the subject would be more likely to be observed:</p>
+<pre class="r"><code>NMAR &lt;- defMiss(varname = &quot;y&quot;, 
+                formula = &quot;-2.9 + 0.2*period - 2*rx*y&quot;,
+                logit.link = TRUE, monotonic = TRUE
+)</code></pre>
+<p>Under the assumption of missingness not at random (NMAR), both estimation approaches based on the observed data set with missing values yields an biased estimate, though using all of the data appears to reduce the bias somewhat:</p>
+<p><img src="/post/2019-12-10-using-repeated-measures-might-improve-effect-estimation-even-when-single-endpoint-is-the-focus.en_files/figure-html/unnamed-chunk-15-1.png" width="384" /></p>
+</div>
+<div id="addendum-generating-replications" class="section level3">
+<h3>Addendum: generating replications</h3>
+<pre class="r"><code>iter &lt;- function(n, np, defM) {
+  
+  dx &lt;- genData(n)
+  dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+  dx &lt;- addPeriods(dx, nPeriods = np)
+  
+  defP &lt;- defDataAdd(varname = &quot;p&quot;, formula = &quot;-2 + 0.2*period + .5*rx&quot;, 
+                    dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
+  
+  dx &lt;- addColumns(defP, dx)
+  dx &lt;- addCorGen(dtOld = dx, idvar = &quot;id&quot;, nvars = np, rho = .6, 
+                  corstr = &quot;ar1&quot;, dist = &quot;binary&quot;, param1 = &quot;p&quot;, 
+                  method = &quot;ep&quot;, formSpec = &quot;-2 + 0.2*period + .5*rx&quot;,
+                  cnames = &quot;y&quot;)
+  
+  dm &lt;- genMiss(dx, defM, &quot;id&quot;, repeated = TRUE, periodvar = &quot;period&quot;)
+  dObs &lt;- genObs(dx, dm, idvars = &quot;id&quot;)
+  
+  fit.f &lt;- geeglm(y ~ period + rx, id = id, family = binomial, 
+         data = dx, corstr = &quot;ar1&quot;)
+  
+  fit.m &lt;- geeglm(y ~ period + rx, id = id, family = binomial, 
+         data = dObs, corstr = &quot;ar1&quot;)
+  
+  fit.l &lt;- glm(y ~ rx, data = dObs[period == (np - 1)], family = binomial)
+  
+  return(data.table(full = coef(fit.f)[&quot;rx&quot;], 
+                    miss = coef(fit.m)[&quot;rx&quot;],
+                    last = coef(fit.l)[&quot;rx&quot;])
+         )
+}
+
+## defM
+
+MCAR &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-2.6&quot;,
+                logit.link = TRUE, monotonic = TRUE
+)
+
+MAR &lt;- defMiss(varname = &quot;y&quot;, 
+               formula = &quot;-2.9 + 0.2*period - 2*rx*LAG(y)&quot;,
+               logit.link = TRUE, monotonic = TRUE
+)
+
+NMAR &lt;- defMiss(varname = &quot;y&quot;, 
+                formula = &quot;-2.9 + 0.2*period - 2*rx*y&quot;,
+                logit.link = TRUE, monotonic = TRUE
+)
+
+##
+
+library(parallel)
+
+niter &lt;- 2500
+
+resMCAR &lt;- rbindlist(mclapply(1:niter, function(x) iter(200, 5, MCAR)))
+resMAR &lt;- rbindlist(mclapply(1:niter, function(x) iter(200, 5, MAR)))
+resNMAR &lt;- rbindlist(mclapply(1:niter, function(x) iter(200, 5, NMAR)))</code></pre>
+</div>
