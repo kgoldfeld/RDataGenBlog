@@ -1,0 +1,226 @@
+---
+title: Clustered randomized trials and the design effect
+author: ''
+date: '2020-02-18'
+slug: what-exactly-is-the-design-effect
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I am always saying that simulation can help illuminate interesting statistical concepts or ideas. The <em>design effect</em> that underlies much of clustered analysis is could benefit from a little exploration through simulation. I’ve written about clustered-related methods so much on this blog that I won’t provide links - just peruse the list of entries on the home page and you are sure to spot a few. But, I haven’t written explicitly about the design effect.</p>
+<p>When individual outcomes in a group are correlated, we learn less about the group from adding a new individual than we might think. Take an extreme example where every individual in a group is perfectly correlated with all the others: we will learn nothing new about the group by adding someone new. In fact, we might as well just look at a single member, since she is identical to all the others. The design effect is a value that in a sense quantifies how much information we lose (or, surprisingly, possibly gain) by this interdependence.</p>
+<p>Let’s just jump right into it.</p>
+<div id="the-context" class="section level3">
+<h3>The context</h3>
+<p>Imagine a scenario where an underlying population of interest is structurally defined by a group of clusters. The classic case is students in schools or classrooms. I don’t really do any school-based education (I learned from debating my teacher-wife that is a dangerous area to tread), but this example seems so clear. We might be interested in measuring the effect of some intervention (it may or may not take place in school) on an educational attainment outcome of high school-aged kids in a city (I am assuming a continuous outcome here just because it is so much easier to visualize). It does not seem crazy to think that the outcomes of kids from the same school might be correlated, either because the school itself does such a good (or poor) job of teaching or similar types of kids tend to go to the same school.</p>
+</div>
+<div id="the-unit-of-randomization" class="section level3">
+<h3>The unit of randomization</h3>
+<p>We have at least three ways to design our study. We could just recruit kids out and about in city and randomize them each individually to intervention or control. In the second approach, we decide that it is easier to randomize the schools to intervention or control - and recruit kids from each of the schools. This means that <em>all</em> kids from one school will be in the same intervention arm. And for the third option, we can go half way: we go to each school and recruit kids, randomizing half of the kids in each school to control, and the other half to the intervention. This last option assumes that we could ensure that the kids in the school exposed to the intervention would not influence their unexposed friends.</p>
+<p>In all three cases the underlying assumptions are the same - there is a school effect on the outcome, an individual effect, and an intervention effect. But it turns out that the variability of the intervention effect depends entirely on how we randomize. And since variability of the outcome affects sample size, each approach has implications for sample size. (I’ll point you to a book by <a href="https://books.google.com/books/about/Design_and_Analysis_of_Cluster_Randomiza.html?id=QJZrQgAACAAJ&amp;source=kp_cover">Donner &amp; Klar</a>, which gives a comprehensive and comprehensible overview of cluster randomized trials.)</p>
+</div>
+<div id="simulation-of-each-design" class="section level3">
+<h3>Simulation of each design</h3>
+<p>Just to be clear about these different randomization designs, I’ll simulate 1500 students using each. I’ve set a seed in case you’d like to recreate the results shown here (and indicate the libraries I am using).</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(clusterPower)
+library(parallel)
+library(lmerTest)
+
+RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;) # enables seed for parallel process
+set.seed(987)</code></pre>
+<div id="randomization-by-student" class="section level4">
+<h4>Randomization by student</h4>
+<p>I’ve written a function for each of the three designs to generate the data, because later I am going to need to generate multiple iterations of each design. In the first case, randomization is applied to the full group of students:</p>
+<pre class="r"><code>independentData &lt;- function(N, d1) {
+  
+  di &lt;- genData(N)
+  di &lt;- trtAssign(di, grpName = &quot;rx&quot;)
+  di &lt;- addColumns(d1, di)
+  di[]
+  
+}</code></pre>
+<p>The outcome is a function of intervention status and a combined effect of the student’s school and the student herself. We cannot disentangle the variance components, because we do not know the identity of the school:</p>
+<pre class="r"><code>defI1 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;0.8 * rx&quot;, 
+                variance = 10, dist = &quot;normal&quot;)
+
+dx &lt;- independentData(N = 30 * 50, defI1)</code></pre>
+<p>The observed effect size and variance should be close to the specified parameters of 0.8 and 10, respectively:</p>
+<pre class="r"><code>dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
+<pre><code>## [1] 1</code></pre>
+<pre class="r"><code>dx[, var(y)]</code></pre>
+<pre><code>## [1] 10.3</code></pre>
+<p>Here is a plot of the individual observations that highlights the group differences and individual variation:</p>
+<p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-6-1.png" width="576" /></p>
+</div>
+<div id="randomization-by-site" class="section level4">
+<h4>Randomization by site</h4>
+<p>Next, the intervention status is assigned to each of the <span class="math inline">\(k\)</span> schools/clusters before generating <span class="math inline">\(m\)</span> students per cluster. In this case, the outcome (defined by <code>defI2</code>) is a function of the cluster effect, individual effect, and the intervention status. Note here, the variance components are disentangled, but together they sum to 10, suggesting that total variance should be the same as the first scenario:</p>
+<pre class="r"><code>clusteredData &lt;- function(k, m, d1, d2) {
+  
+  dc &lt;- genData(k, d1)
+  dc &lt;- trtAssign(dc, grpName = &quot;rx&quot;)
+  
+  di &lt;- genCluster(dc, &quot;site&quot;, m, level1ID = &quot;id&quot;)
+  di &lt;- addColumns(d2, di)
+  di[]
+  
+}</code></pre>
+<pre class="r"><code>defC &lt;- defData(varname = &quot;ceff&quot;, formula = 0, 
+                variance = 0.5, id = &quot;site&quot;, dist = &quot;normal&quot;)
+
+defI2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;ceff + 0.8 * rx&quot;, 
+                   variance = 9.5, dist = &quot;normal&quot;)</code></pre>
+<pre class="r"><code>dx &lt;- clusteredData(k = 30, m = 50, defC, defI2)</code></pre>
+<p>The effect size and variation across all observations should be be quite similar to the previous design, though now the data has a structure that is determined by the clusters:</p>
+<pre class="r"><code>dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
+<pre><code>## [1] 1.4</code></pre>
+<pre class="r"><code>dx[, var(y)]</code></pre>
+<pre><code>## [1] 11</code></pre>
+<p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+</div>
+<div id="randomization-within-site" class="section level4">
+<h4>Randomization within site</h4>
+<p>In the last design, the treatment assignment is made <em>after</em> both the clusters and individuals have been generated. Cluster randomization within site is specified using the <code>strata</code> argument:</p>
+<pre class="r"><code>withinData &lt;- function(k, m, d1, d2) {
+  
+  dc &lt;- genData(k, d1)
+  
+  di &lt;- genCluster(dc, &quot;site&quot;, m, &quot;id&quot;)
+  di &lt;- trtAssign(di, strata=&quot;site&quot;, grpName = &quot;rx&quot;)
+  di &lt;- addColumns(d2, di)
+  
+  di[]
+
+}</code></pre>
+<pre class="r"><code>dx &lt;- withinData(30, 50, defC, defI2)
+
+dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
+<pre><code>## [1] 0.787</code></pre>
+<pre class="r"><code>dx[, var(y)]</code></pre>
+<pre><code>## [1] 10.1</code></pre>
+<p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+</div>
+</div>
+<div id="the-design-effect" class="section level3">
+<h3>The design effect</h3>
+<p>There’s a really nice paper by <a href="https://link.springer.com/article/10.1186/1471-2288-9-39">Vierron &amp; Giraudeau</a> that describes many of the issues I am only touching on here. In particular, they define the design effect and then relate this definition to formulas that are frequently used simplify the estimation of the design effect.</p>
+<p>Consider the statistics <span class="math inline">\(\sigma^2_{\Delta_{bc}}\)</span> and <span class="math inline">\(\sigma^2_{\Delta_{i}}\)</span>, which are the variance of the effect sizes under the cluster randomization and the individual randomization designs, respectively:</p>
+<p><span class="math display">\[\sigma^2_{\Delta_{bc}} = Var(\bar{Y}_1^{bc} - \bar{Y}_0^{bc})\]</span></p>
+<p>and</p>
+<p><span class="math display">\[\sigma^2_{\Delta_{i}} =Var(\bar{Y}_1^{i} - \bar{Y}_0^{i})\]</span></p>
+<p>These variances are never observed, since they are based on a very large (really, an infinite) number of repeated experiments. However, the theoretical variances can be derived (as they are in the paper), and can be simulated (as they will be here). The design effect <span class="math inline">\(\delta_{bc}\)</span> is defined as</p>
+<p><span class="math display">\[\delta_{bc} = \frac{\sigma^2_{\Delta_{bc}}}{\sigma^2_{\Delta_{i}}}\]</span></p>
+<p>This ratio represents the required adjustment in sample size required to make the two designs equivalent in the sense that they provide the same amount of information. This will hopefully become clear with the simulations below.</p>
+<p>I have decided to use <span class="math inline">\(k = 50\)</span> simulations to ensure enough clusters to estimate the proper variance. I need to know how many individuals per cluster are required for 80% power in the cluster randomized design, given the effect size and variance assumptions I’ve been using here. I’ll use the <code>clusterPower</code> package (which unfortunately defines the number of clusters in each as <span class="math inline">\(m\)</span>, so don’t let that confuse you). Based on this, we should have 18 students per school, for a total sample of 900 students:</p>
+<pre class="r"><code>crtpwr.2mean(m = 50/2, d = 0.8, icc = 0.05, varw = 9.5)</code></pre>
+<pre><code>##    n 
+## 17.9</code></pre>
+<p>Now, I am ready to generate effect sizes for each of 2000 iterations of the experiment assuming randomization by cluster. With this collection of effect sizes in hand, I will be able to estimate their variance:</p>
+<pre class="r"><code>genDifFromClust &lt;- function(k, m, d1, d2) {
+  dx &lt;- clusteredData(k, m, d1, d2)
+  dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)] 
+}
+
+resC &lt;- unlist(mclapply(1:niters, 
+   function(x) genDifFromClust(k= 50, m=18, defC, defI2)))</code></pre>
+<p>Here is an estimate of <span class="math inline">\(\sigma^2_{\Delta_{bc}}\)</span> based on the repeated experiments:</p>
+<pre class="r"><code>(s2.D_bc &lt;- var(resC))</code></pre>
+<pre><code>## [1] 0.0818</code></pre>
+<p>And here is the estimate of <span class="math inline">\(\sigma^2_{\Delta_{i}}\)</span> (the variance of the effect sizes based on individual-level randomization experiments):</p>
+<pre class="r"><code>genDifFromInd &lt;- function(N, d1) {
+  dx &lt;- independentData(N, d1)
+  dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)] 
+}
+
+resI &lt;- unlist(mclapply(1:niters, 
+          function(x) genDifFromInd(N = 50*18, defI1)))
+
+(s2.D_i &lt;- var(resI))</code></pre>
+<pre><code>## [1] 0.0432</code></pre>
+<p>So, now we can use these variance estimates to derive the estimate of the design effect <span class="math inline">\(\delta_{bc}\)</span>, which, based on the earlier definition, is:</p>
+<pre class="r"><code>(d_bc &lt;- s2.D_bc / s2.D_i)</code></pre>
+<pre><code>## [1] 1.89</code></pre>
+<p>The Vierron &amp; Giraudeau paper derives a simple formula for the design effect assuming equal cluster sizes and an ICC <span class="math inline">\(\rho\)</span>. This (or some close variation, when cluster sizes are not equal) is quite commonly used:</p>
+<p><span class="math display">\[\delta_{bc} = 1 + (m-1)*\rho\]</span></p>
+<p>As the ICC increases, the design effect increases. Based on the parameters for <span class="math inline">\(m\)</span> and <span class="math inline">\(\rho\)</span> we have been using in these simulations (note that <span class="math inline">\(\rho = 0.5/(0.5+9.5) = 0.05\)</span>), the standard formula gives us this estimate of <span class="math inline">\(\delta_{bc.formula}\)</span> that is quite close to our experimental value:</p>
+<pre class="r"><code>( d_bc_form &lt;- 1 + (18-1) * (0.05) )</code></pre>
+<pre><code>## [1] 1.85</code></pre>
+<p> </p>
+</div>
+<div id="but-what-is-the-design-effect" class="section level3">
+<h3>But what is the design effect?</h3>
+<p>OK, finally, we can now see what the design effect actually represents. As before, we will generate repeated data sets; this time, we will estimate the treatment effect using an appropriate model. (In the case of the cluster randomization, this is a linear mixed effects model, and in the case of individual randomization, this is linear regression model.) For each iteration, I am saving the p-value for the treatment effect parameter in the model. We expect close to 80% of the p-values to be lower than 0.05 (this is 80% power given a true treatment effect of 0.8).</p>
+<p>First, here is the cluster randomized experiment and the estimate of power:</p>
+<pre class="r"><code>genEstFromClust &lt;- function(k, m, d1, d2) {
+  dx &lt;- clusteredData(k, m, d1, d2)
+  summary(lmerTest::lmer(y ~ rx + (1|site), data = dx))$coef[&quot;rx&quot;, 5]
+}
+
+resCest &lt;- unlist(mclapply(1:niters, 
+          function(x) genEstFromClust(k=50, m = 18, defC, defI2)))
+
+mean(resCest &lt; 0.05) # power</code></pre>
+<pre><code>## [1] 0.805</code></pre>
+<p>In just over 80% of the cases, we would have rejected the null.</p>
+<p>And here is the estimated power under the individual randomization experiment, but with a twist. Since the design effect is 1.85, the cluster randomized experiment needs a relative sample size 1.85 times higher than an equivalent (individual-level) RCT to provide the same information, or to have equivalent power. So, in our simulations, we will use a reduced sample size for the individual RCT. Since we used 900 individuals in the CRT, we need only <span class="math inline">\(900/1.85 = 487\)</span> individuals in the RCT:</p>
+<pre class="r"><code>( N.adj &lt;- ceiling( 50 * 18 / d_bc_form ) )</code></pre>
+<pre><code>## [1] 487</code></pre>
+<pre class="r"><code>genEstFromInd &lt;- function(N, d1) {
+  dx &lt;- independentData(N, d1)
+  summary(lm(y ~ rx, data = dx))$coef[&quot;rx&quot;, 4]
+}
+
+resIest &lt;- unlist(mclapply(1:niters, 
+          function(x) genEstFromInd(N = N.adj, defI1)))</code></pre>
+<p>The power for this second experiment is also quite close to 80%:</p>
+<pre class="r"><code>mean(resIest &lt; 0.05) # power</code></pre>
+<pre><code>## [1] 0.796</code></pre>
+</div>
+<div id="within-cluster-randomization" class="section level3">
+<h3>Within cluster randomization</h3>
+<p>It is interesting to see what happens when we randomize within the cluster. I think there may be some confusion here, because I have seen folks incorrectly apply the standard formula for <span class="math inline">\(\delta_{bc}\)</span>, rather than this formula for <span class="math inline">\(\delta_{wc}\)</span> that is derived (again, under the assumption of equal cluster sizes) in the Vierron &amp; Giraudeau paper as</p>
+<p><span class="math display">\[ \delta_{wc} = 1- \rho\]</span></p>
+<p>This implies that the sample size requirement actually declines as intra-cluster correlation increases! In this case, since <span class="math inline">\(\rho = 0.05\)</span>, the total sample size for the within-cluster randomization needs to be only 95% of the sample size for the individual RCT.</p>
+<p>As before, let’s see if the simulated data confirms this design effect based on the definition</p>
+<p><span class="math display">\[ \delta_{wc} = \frac{\sigma^2_{\Delta_{wc}}}{\sigma^2_{\Delta_{i}}}\]</span></p>
+<pre class="r"><code>genDifFromWithin &lt;- function(k, m, d1, d2) {
+  dx &lt;- withinData(k, m, d1, d2)
+  dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)] 
+}
+
+resW &lt;- unlist(mclapply(1:niters, 
+   function(x) genDifFromWithin(k = 50, m = 18, defC, defI2)))
+
+(s2.D_wc &lt;- var(resW))</code></pre>
+<pre><code>## [1] 0.0409</code></pre>
+<p>The estimated design effect is quite close to the expected design effect of 0.95:</p>
+<pre class="r"><code>(d_wc &lt;- s2.D_wc / s2.D_i)</code></pre>
+<pre><code>## [1] 0.947</code></pre>
+<p>And to finish things off, if we estimate an adjusted cluster size based on the design effects (first reducing the cluster size <span class="math inline">\(m=18\)</span> for the cluster randomized trial by <span class="math inline">\(\delta_{bc.formula}\)</span> to derive the appropriate sample size for the RCT, and then adjusting by <span class="math inline">\(\delta_{wc} = 0.95\)</span>) to get the appropriate cluster size for the within cluster randomization, which is about 9 students. This study will only have 450 students, fewer than the RCT:</p>
+<pre class="r"><code>(m.adj &lt;- round( (18 / d_bc_form) * 0.95, 0))</code></pre>
+<pre><code>## [1] 9</code></pre>
+<pre class="r"><code>genEstFromWithin &lt;- function(k, m, d1, d2) {
+  dx &lt;- withinData(k, m, d1, d2)
+  summary(lmerTest::lmer(y ~ rx + (1|site), data = dx))$coef[&quot;rx&quot;, 5]
+}
+
+resWest &lt;- unlist(mclapply(1:niters, 
+  function(x) genEstFromWithin(k = 50, m = ceiling(m.adj), defC, defI2)))
+
+mean(resWest &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.786</code></pre>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Donner, Allan, and Neil Klar. “Design and analysis of cluster randomization trials in health research.” New York (2010).</p>
+Vierron, Emilie, and Bruno Giraudeau. “Design effect in multicenter studies: gain or loss of power?.” BMC medical research methodology 9, no. 1 (2009): 39.
+</font></small>
+</p>
+</div>
