@@ -1,0 +1,278 @@
+---
+title: 
+  'Alternatives to reporting a p-value: the case of a contingency table'
+author: ''
+date: '2020-03-03'
+slug: to-report-a-p-value-or-not-the-case-of-a-contingency-table
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>I frequently find myself in discussions with collaborators about the merits of reporting p-values, particularly in the context of pilot studies or exploratory analysis. Over the past several years, the <a href="https://www.amstat.org/"><em>American Statistical Association</em></a> has made several strong statements about the need to consider approaches that measure the strength of evidence or uncertainty that don’t necessarily rely on p-values. In <a href="https://amstat.tandfonline.com/doi/full/10.1080/00031305.2016.1154108">2016</a>, the ASA attempted to clarify the proper use and interpretation of the p-value by highlighting key principles “that could improve the conduct or interpretation of quantitative science, according to widespread consensus in the statistical community.” These principles are worth noting here in case you don’t make it over to the original paper:</p>
+<ul>
+<li>p-values can indicate how incompatible the data are with a specified statistical model.</li>
+<li>p-values do not measure the probability that the studied hypothesis is true, or the probability that the data were produced by random chance alone.<br />
+</li>
+<li>scientific conclusions and business or policy decisions should not be based only on whether a p-value passes a specific threshold.</li>
+<li>proper inference requires full reporting and transparency</li>
+<li>a p-value, or statistical significance, does not measure the size of an effect or the importance of a result.</li>
+<li>by itself, a p-value does not provide a good measure of evidence regarding a model or hypothesis.</li>
+</ul>
+<p>More recently, the ASA <a href="https://www.tandfonline.com/doi/full/10.1080/00031305.2019.1583913">elaborated</a> on this point view, responding to those who thought the initial paper was too negative, a list of many things <em>not</em> to do. In this new paper, the ASA argues that “knowing what not to do with p-values is indeed necessary, but it does not suffice.” We also need to know what we <em>should</em> do. One of those things should be focusing on effect sizes (and some measure of uncertainty, such as a confidence or credible interval) in order to evaluate an intervention or exposure.</p>
+<div id="applying-principled-thinking-to-a-small-problem" class="section level3">
+<h3>Applying principled thinking to a small problem</h3>
+<p>Recently, I was discussing the presentation of results for a pilot study. I was arguing that we should convey the findings in a way that highlighted the general trends without leading readers to make overly strong conclusions, which p-values might do. So, I was arguing that, rather than presenting p-values, we should display effect sizes and confidence intervals, and avoid drawing on the concept of “statistical significance.”</p>
+<p>Generally, this is not a problem; we can estimate an effect size like a difference in means, a difference in proportions, a ratio of proportions, a ratio of odds, or even the log of a ratio of odds. In this case, the outcome was a Likert-type survey where the response was “none”, “a little”, and “a lot”, and there were three comparison groups, so we had a <span class="math inline">\(3\times3\)</span> contingency table with one ordinal (i.e. ordered) factor. In this case, it is not so clear what the effect size measurement should be.</p>
+<p>One option is to calculate a <span class="math inline">\(\chi^2\)</span> statistic, report the associated p-value, and call it a day. However, since the <span class="math inline">\(\chi^2\)</span> is not a measure of effect and the p-value is not necessarily a good measure of evidence, I considered estimating a cumulative odds model that would provide a measure of the association between group and response. However, I was a little concerned, because the typical version of this model makes an assumption of proportional odds, which I wasn’t sure would be appropriate here. (I’ve written about these models before, <a href="https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/">here</a> and <a href="https://www.rdatagen.net/post/generating-and-displaying-likert-type-data/">here</a>, if you want to take a look.) It is possible to fit a cumulative odds model without the proportionality assumption, but then the estimates are harder to interpret since the effect size varies by group and response.</p>
+<p>Fortunately, there is a more general measure of association for contingency tables with at least one, but possibly two, nominal factors: <em>Cramer’s V</em>. This measure which makes no assumptions about proportionality.</p>
+<p>My plan is to simulate contingency table data, and in this post, I will explore the cumulative odds models. Next time, I’ll describe the <em>Cramer’s V</em> measure of association.</p>
+</div>
+<div id="non-proportional-cumulative-odds" class="section level3">
+<h3>Non-proportional cumulative odds</h3>
+<p>In the cumulative odds model (again, take a look <a href="https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/">here</a> for a little more description of these models), we assume that all the log-odds ratios are proportional. This may actually not be an unreasonable assumption, but I wanted to start with a data set that is generated without explicitly assuming proportionality. In the following data definition, the distribution of survey responses (<em>none</em>, <em>a little</em>, and <em>a lot</em>) across the three groups (<em>1</em>, <em>2</em>, and <em>3</em>) are specified uniquely for each group:</p>
+<pre class="r"><code>library(simstudy)
+
+# define the data
+
+def &lt;- defData(varname = &quot;grp&quot;, 
+            formula = &quot;0.3; 0.5; 0.2&quot;, dist = &quot;categorical&quot;)
+
+defc &lt;- defCondition(condition = &quot;fgrp == 1&quot;, 
+            formula = &quot;0.70; 0.20; 0.10&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;fgrp == 2&quot;, 
+            formula = &quot;0.10; 0.60; 0.30&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;fgrp == 3&quot;, 
+            formula = &quot;0.05; 0.25; 0.70&quot;, dist = &quot;categorical&quot;)
+
+# generate the data
+
+set.seed(99)
+
+dx &lt;- genData(180, def)
+dx &lt;- genFactor(dx, &quot;grp&quot;, replace = TRUE)
+dx &lt;- addCondition(defc, dx, &quot;rating&quot;)
+dx &lt;- genFactor(dx, &quot;rating&quot;, replace = TRUE, 
+         labels = c(&quot;none&quot;, &quot;a little&quot;, &quot;a lot&quot;))
+
+dx[]</code></pre>
+<pre><code>##       id fgrp  frating
+##   1:   1    2 a little
+##   2:   2    3 a little
+##   3:   3    3    a lot
+##   4:   4    2 a little
+##   5:   5    2 a little
+##  ---                  
+## 176: 176    2    a lot
+## 177: 177    1     none
+## 178: 178    3    a lot
+## 179: 179    2 a little
+## 180: 180    2 a little</code></pre>
+<p>A distribution plot based on these 180 observations indicates that the odds are not likely proportional; the “tell” is the large bulge for those in group <em>2</em> who respond <em>a little</em>.</p>
+<pre class="r"><code>library(likert)
+
+items &lt;- dx[, .(frating)]
+names(items) &lt;- c(frating = &quot;rating&quot;)
+
+likert.data &lt;- likert(items = items, grouping = dx$fgrp)
+plot(likert.data, wrap = 100, low.color = &quot;#DAECED&quot;, 
+  high.color = &quot;#CECD7B&quot;)</code></pre>
+<p><img src="/post/2020-03-03-to-report-a-p-value-or-not-the-case-of-a-contingency-table.en_files/figure-html/pdata-1.png" width="672" /></p>
+<p>The <span class="math inline">\(\chi^2\)</span> test, not so surprisingly indicates that there likely differences in responses across the three groups:</p>
+<pre class="r"><code>chisq.test(table(dx[, .(fgrp, frating)]))</code></pre>
+<pre><code>## 
+##  Pearson&#39;s Chi-squared test
+## 
+## data:  table(dx[, .(fgrp, frating)])
+## X-squared = 84, df = 4, p-value &lt;2e-16</code></pre>
+<p>But, since we are trying to provide a richer picture of the association that will be less susceptible to small sample sizes, here is the cumulative (proportional) odds model fit using the <code>clm</code> function in the <code>ordinal</code> package.</p>
+<pre class="r"><code>library(ordinal)
+
+clmFit.prop &lt;- clm(frating ~ fgrp, data = dx)
+summary(clmFit.prop)</code></pre>
+<pre><code>## formula: frating ~ fgrp
+## data:    dx
+## 
+##  link  threshold nobs logLik  AIC    niter max.grad cond.H 
+##  logit flexible  180  -162.95 333.91 5(0)  4.61e-08 2.8e+01
+## 
+## Coefficients:
+##       Estimate Std. Error z value Pr(&gt;|z|)    
+## fgrp2    2.456      0.410    5.98  2.2e-09 ***
+## fgrp3    3.024      0.483    6.26  3.9e-10 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Threshold coefficients:
+##                Estimate Std. Error z value
+## none|a little     0.335      0.305    1.10
+## a little|a lot    2.945      0.395    7.45</code></pre>
+<p>A plot of the observed proportions (show by the line) with the modeled proportions (shown as points) indicates that the model that makes the proportional assumption might not be doing a great job:</p>
+<p><img src="/post/2020-03-03-to-report-a-p-value-or-not-the-case-of-a-contingency-table.en_files/figure-html/unnamed-chunk-2-1.png" width="288" /></p>
+<p>If we fit a model that does not make the proportionality assumption and compare using either AIC statistic (lower is better) or a likelihood ratio test (small p-value indicates that the saturated/non-proportional model is better), it is clear that the non-proportional odds model for this dataset is a better fit.</p>
+<pre class="r"><code>clmFit.sat &lt;- clm(frating ~ 1, nominal = ~ fgrp, data = dx)
+summary(clmFit.sat)</code></pre>
+<pre><code>## formula: frating ~ 1
+## nominal: ~fgrp
+## data:    dx
+## 
+##  link  threshold nobs logLik  AIC    niter max.grad cond.H 
+##  logit flexible  180  -149.54 311.08 7(0)  8.84e-11 4.7e+01
+## 
+## Threshold coefficients:
+##                            Estimate Std. Error z value
+## none|a little.(Intercept)     0.544      0.296    1.83
+## a little|a lot.(Intercept)    1.634      0.387    4.23
+## none|a little.fgrp2          -4.293      0.774   -5.54
+## a little|a lot.fgrp2         -0.889      0.450   -1.98
+## none|a little.fgrp3          -2.598      0.560   -4.64
+## a little|a lot.fgrp3         -1.816      0.491   -3.70</code></pre>
+<pre class="r"><code>anova(clmFit.prop, clmFit.sat)</code></pre>
+<pre><code>## Likelihood ratio tests of cumulative link models:
+##  
+##             formula:       nominal: link: threshold:
+## clmFit.prop frating ~ fgrp ~1       logit flexible  
+## clmFit.sat  frating ~ 1    ~fgrp    logit flexible  
+## 
+##             no.par AIC logLik LR.stat df Pr(&gt;Chisq)    
+## clmFit.prop      4 334   -163                          
+## clmFit.sat       6 311   -150    26.8  2    1.5e-06 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1</code></pre>
+<p>It is possible that the poor fit is just a rare occurrence. Below is a plot that shows the average result (<span class="math inline">\(\pm 1 \ sd\)</span>) for 1000 model fits for 1000 data sets using the same data generation process. It appears those initial results were not an aberration - the proportional odds model fits a biased estimate, particularly for groups <em>1</em> and <em>2</em>. (The code to do this simulation is shown in the addendum.)</p>
+<p><img src="/post/2020-03-03-to-report-a-p-value-or-not-the-case-of-a-contingency-table.en_files/figure-html/unnamed-chunk-4-1.png" width="288" /></p>
+</div>
+<div id="proportional-assumption-fulfilled" class="section level3">
+<h3>Proportional assumption fulfilled</h3>
+<p>Here the data generation process is modified so that the proportionality assumption is incorporated.</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;grp&quot;, formula = &quot;.3;.5;.2&quot;, 
+               dist = &quot;categorical&quot;)
+def &lt;- defData(def, varname = &quot;z&quot;, formula = &quot;1*I(grp==2) + 2*I(grp==3)&quot;, 
+               dist = &quot;nonrandom&quot;)
+
+baseprobs &lt;- c(0.7, 0.2, 0.1)
+
+dx &lt;- genData(180, def)
+dx &lt;- genFactor(dx, &quot;grp&quot;, replace = TRUE)
+dx &lt;- genOrdCat(dx, adjVar = &quot;z&quot;, baseprobs, catVar = &quot;rating&quot;)
+dx &lt;- genFactor(dx, &quot;rating&quot;, replace = TRUE,
+          labels = c(&quot;none&quot;, &quot;a little&quot;, &quot;a lot&quot;)
+)</code></pre>
+<p>This is what proportional odds looks like - there are no obvious bulges, just a general shift rightward as we move from group <em>1</em> to <em>3</em>:</p>
+<p><img src="/post/2020-03-03-to-report-a-p-value-or-not-the-case-of-a-contingency-table.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>When we fit the proportional model and compare it to the saturated model, we see no reason to reject the assumption of proportionality (based on either the AIC or LR statistics).</p>
+<pre class="r"><code>clmFit.prop &lt;- clm(frating ~ fgrp, data = dx)
+summary(clmFit.prop)</code></pre>
+<pre><code>## formula: frating ~ fgrp
+## data:    dx
+## 
+##  link  threshold nobs logLik  AIC    niter max.grad cond.H 
+##  logit flexible  180  -176.89 361.77 4(0)  3.04e-09 2.7e+01
+## 
+## Coefficients:
+##       Estimate Std. Error z value Pr(&gt;|z|)    
+## fgrp2    1.329      0.359    3.70  0.00022 ***
+## fgrp3    2.619      0.457    5.73    1e-08 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Threshold coefficients:
+##                Estimate Std. Error z value
+## none|a little     0.766      0.299    2.56
+## a little|a lot    2.346      0.342    6.86</code></pre>
+<pre class="r"><code>clmFit.sat &lt;- clm(frating ~ 1, nominal = ~ fgrp, data = dx)
+anova(clmFit.prop, clmFit.sat)</code></pre>
+<pre><code>## Likelihood ratio tests of cumulative link models:
+##  
+##             formula:       nominal: link: threshold:
+## clmFit.prop frating ~ fgrp ~1       logit flexible  
+## clmFit.sat  frating ~ 1    ~fgrp    logit flexible  
+## 
+##             no.par AIC logLik LR.stat df Pr(&gt;Chisq)
+## clmFit.prop      4 362   -177                      
+## clmFit.sat       6 365   -177    0.56  2       0.75</code></pre>
+<p>And here is a plot summarizing a second set of 1000 iterations, this one using the proportional odds assumption. The estimates appear to be unbiased:</p>
+<p><img src="/post/2020-03-03-to-report-a-p-value-or-not-the-case-of-a-contingency-table.en_files/figure-html/unnamed-chunk-8-1.png" width="288" /></p>
+<p>I suspect that in many instances, Likert-type responses will look more like the second case than the first case, so that the cumulative proportional odds model could very well be useful in characterizing the association between group and response. Even if the assumption is not reasonable, the bias might not be terrible, and the estimate might still be useful as a measure of association. However, we might prefer a measure that is free of any assumptions, such as <em>Cramer’s V</em>. I’ll talk about that next time.</p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Ronald L. Wasserstein &amp; Nicole A. Lazar (2016) The ASA Statement on p-Values: Context, Process, and Purpose, The American Statistician, 70:2, 129-133.</p>
+Ronald L. Wasserstein, Allen L. Schirm &amp; Nicole A. Lazar (2019) Moving to a World Beyond “p &lt; 0.05”, The American Statistician, 73:sup1, 1-19.
+</font></small>
+</p>
+<p> </p>
+</div>
+<div id="addendum-code-for-replicated-analysis" class="section level2">
+<h2>Addendum: code for replicated analysis</h2>
+<pre class="r"><code>library(parallel)
+RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)  # to set seed for parallel process
+
+dat.nonprop &lt;- function(iter, n) {
+  
+  dx &lt;- genData(n, def)
+  dx &lt;- genFactor(dx, &quot;grp&quot;, replace = TRUE)
+  dx &lt;- addCondition(defc, dx, &quot;rating&quot;)
+  dx &lt;- genFactor(dx, &quot;rating&quot;, replace = TRUE,
+            labels = c(&quot;none&quot;, &quot;a little&quot;, &quot;a lot&quot;)
+  )
+
+  clmFit &lt;- clm(frating ~ fgrp, data = dx)
+  
+  dprob.obs &lt;- data.table(iter, 
+      prop.table(dx[, table(fgrp, frating)], margin = 1))
+  
+  setkey(dprob.obs, fgrp, frating)
+  setnames(dprob.obs, &quot;N&quot;, &quot;p.obs&quot;)
+  
+  dprob.mod &lt;- data.table(iter, fgrp = levels(dx$fgrp),
+      predict(clmFit, newdata = data.frame(fgrp = levels(dx$fgrp)))$fit)
+  
+  dprob.mod &lt;- melt(dprob.mod, id.vars = c(&quot;iter&quot;, &quot;fgrp&quot;), 
+                    variable.name = &quot;frating&quot;, value.name = &quot;N&quot;)
+  
+  setkey(dprob.mod, fgrp, frating)
+  setnames(dprob.mod, &quot;N&quot;, &quot;p.fit&quot;)
+  
+  dprob &lt;- dprob.mod[dprob.obs]
+  dprob[, frating := factor(frating, 
+                        levels=c(&quot;none&quot;, &quot;a little&quot;, &quot;a lot&quot;))]
+  
+  dprob[]
+  
+}
+
+def &lt;- defData(varname = &quot;grp&quot;, formula = &quot;.3;.5;.2&quot;, 
+            dist = &quot;categorical&quot;)
+
+defc &lt;- defCondition(condition = &quot;fgrp == 1&quot;, 
+            formula = &quot;0.7;0.2;0.1&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;fgrp == 2&quot;, 
+            formula = &quot;0.1;0.6;0.3&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;fgrp == 3&quot;, 
+            formula = &quot;0.05;0.25;0.70&quot;, dist = &quot;categorical&quot;)
+
+res.nonp &lt;- rbindlist(mclapply(1:1000, 
+                        function(iter) dat.nonprop(iter,180)))
+
+sum.nonp &lt;- res.nonp[, .(mfit = mean(p.fit), sfit = sd(p.fit), 
+              mobs = mean(p.obs), sobs = sd(p.obs)), 
+              keyby = .(fgrp, frating)]
+
+sum.nonp[, `:=`(lsd = mfit - sfit, usd = mfit + sfit)]
+
+ggplot(data = sum.nonp, aes(x = frating, y = mobs)) +
+  geom_line(aes(group = fgrp), color = &quot;grey60&quot;) +
+  geom_errorbar(aes(ymin = lsd, ymax = usd,  color = fgrp), 
+                width = 0) +
+  geom_point(aes(y = mfit, color = fgrp)) +
+  theme(panel.grid = element_blank(),
+        legend.position = &quot;none&quot;,
+        axis.title.x = element_blank()) +
+  facet_grid(fgrp ~ .) +
+  scale_y_continuous(limits = c(0, 0.85), name = &quot;probability&quot;) +
+  scale_color_manual(values = c(&quot;#B62A3D&quot;, &quot;#EDCB64&quot;, &quot;#B5966D&quot;))</code></pre>
+</div>
