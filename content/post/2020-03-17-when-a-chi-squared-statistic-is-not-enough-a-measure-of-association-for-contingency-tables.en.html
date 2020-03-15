@@ -1,0 +1,156 @@
+---
+title: 'When you want more than a chi-squared test, consider a measure of association for contingency tables'
+author: ''
+date: '2020-03-17'
+slug: when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+
+
+<p>In my last <a href="https://www.rdatagen.net/post/to-report-a-p-value-or-not-the-case-of-a-contingency-table/">post</a>, I made the point that p-values should not necessarily be considered sufficient evidence (or evidence at all) in drawing conclusions about associations we are interested in exploring. When it comes to contingency tables that represent the outcomes for two categorical variables, it isn’t so obvious what measure of association should augment (or replace) the <span class="math inline">\(\chi^2\)</span> statistic.</p>
+<p>I described a model-based measure of effect to quantify the strength of an association in the particular case where one of the categorical variables is ordinal. This can arise, for example, when we want to compare Likert-type responses across multiple groups. The measure of effect I focused on - the cumulative proportional odds - is quite useful, but is potentially limited for two reasons. First, the proportional odds assumption may not be reasonable, potentially leading to biased estimates. Second, both factors may be nominal (i.e. not ordinal), it which case cumulative odds model is inappropriate.</p>
+<p>An alternative, non-parametric measure of association that can be broadly applied to any contingency table is <em>Cramér’s V</em>, which is calculated as</p>
+<p><span class="math display">\[
+V = \sqrt{\frac{\chi^2/N}{min(r-1, c-1)}}
+\]</span>
+where <span class="math inline">\(\chi^2\)</span> is from the Pearson’s chi-squared test, <span class="math inline">\(N\)</span> is the total number of responses across all groups, <span class="math inline">\(r\)</span> is the number of rows in the contingency table, and <span class="math inline">\(c\)</span> is the number of columns. <span class="math inline">\(V\)</span> ranges from <span class="math inline">\(0\)</span> to <span class="math inline">\(1\)</span>, with <span class="math inline">\(0\)</span> indicating no association, and <span class="math inline">\(1\)</span> indicating the strongest possible association. (In the <a href="#addendum">addendum</a>, I provide a little detail as to why <span class="math inline">\(V\)</span> cannot exceed <span class="math inline">\(1\)</span>.)</p>
+<div id="simulating-independence" class="section level3">
+<h3>Simulating independence</h3>
+<p>In this first example, the distribution of ratings is independent of the group membership. In the data generating process, the probability distribution for <code>rating</code> has no reference to <code>grp</code>, so we would expect similar distributions of the response across the groups:</p>
+<pre class="r"><code>library(simstudy)
+
+def &lt;- defData(varname = &quot;grp&quot;, 
+         formula = &quot;0.3; 0.5; 0.2&quot;, dist = &quot;categorical&quot;)
+def &lt;- defData(def, varname = &quot;rating&quot;, 
+         formula = &quot;0.2;0.3;0.4;0.1&quot;, dist = &quot;categorical&quot;)
+
+set.seed(99)
+dind &lt;- genData(500, def)</code></pre>
+<p>And in fact, the distributions across the 4 rating options do appear pretty similar for each of the 3 groups:</p>
+<p><img src="/post/2020-03-17-when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables.en_files/figure-html/unnamed-chunk-2-1.png" width="576" /></p>
+<p>In order to estimate <span class="math inline">\(V\)</span> from this sample, we use the <span class="math inline">\(\chi^2\)</span> formula (I explored the chi-squared test with simulations in a two-part post <a href="https://www.rdatagen.net/post/a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence/">here</a> and <a href="https://www.rdatagen.net/post/a-little-intuition-and-simulation-behind-the-chi-square-test-of-independence-part-2/">here</a>):</p>
+<p><span class="math display">\[
+\sum_{i,j} {\frac{(O_{ij} - E_{ij})^2}{E_{ij}}}
+\]</span></p>
+<pre class="r"><code>observed &lt;- dind[, table(grp, rating)]
+obs.dim &lt;- dim(observed)
+
+getmargins &lt;- addmargins(observed, margin = seq_along(obs.dim), 
+                         FUN = sum, quiet = TRUE)
+
+rowsums &lt;- getmargins[1:obs.dim[1], &quot;sum&quot;]
+colsums &lt;- getmargins[&quot;sum&quot;, 1:obs.dim[2]]
+
+expected &lt;- rowsums %*% t(colsums) / sum(observed)
+X2 &lt;- sum( ( (observed - expected)^2) / expected)
+
+X2</code></pre>
+<pre><code>## [1] 3.45</code></pre>
+<p>And to check our calculation, here’s a comparison with the estimate from the <code>chisq.test</code> function:</p>
+<pre class="r"><code>chisq.test(observed)</code></pre>
+<pre><code>## 
+##  Pearson&#39;s Chi-squared test
+## 
+## data:  observed
+## X-squared = 3.5, df = 6, p-value = 0.8</code></pre>
+<p>With <span class="math inline">\(\chi^2\)</span> in hand, we can estimate <span class="math inline">\(V\)</span>, which we expect to be quite low:</p>
+<pre class="r"><code>sqrt( (X2/sum(observed)) / (min(obs.dim) - 1) )</code></pre>
+<pre><code>## [1] 0.05874</code></pre>
+<p>Again, to verify the calculation, here is an alternative estimate using the <code>DescTools</code> package, with a 95% confidence interval:</p>
+<pre class="r"><code>library(DescTools)
+
+CramerV(observed, conf.level = 0.95)</code></pre>
+<pre><code>## Cramer V   lwr.ci   upr.ci 
+##  0.05874  0.00000  0.08426</code></pre>
+<p> </p>
+</div>
+<div id="group-membership-matters" class="section level3">
+<h3>Group membership matters</h3>
+<p>In this second scenario, the distribution of <code>rating</code> is specified directly as a function of group membership. This is an extreme example, designed to elicit a very high value of <span class="math inline">\(V\)</span>:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;grp&quot;, 
+            formula = &quot;0.3; 0.5; 0.2&quot;, dist = &quot;categorical&quot;)
+
+defc &lt;- defCondition(condition = &quot;grp == 1&quot;, 
+            formula = &quot;0.75; 0.15; 0.05; 0.05&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;grp == 2&quot;, 
+            formula = &quot;0.05; 0.75; 0.15; 0.05&quot;, dist = &quot;categorical&quot;)
+defc &lt;- defCondition(defc, condition = &quot;grp == 3&quot;, 
+            formula = &quot;0.05; 0.05; 0.15; 0.75&quot;, dist = &quot;categorical&quot;)
+
+# generate the data
+
+dgrp &lt;- genData(500, def)
+dgrp &lt;- addCondition(defc, dgrp, &quot;rating&quot;)</code></pre>
+<p>It is readily apparent that the structure of the data is highly dependent on the group:</p>
+<p><img src="/post/2020-03-17-when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables.en_files/figure-html/unnamed-chunk-8-1.png" width="576" /></p>
+<p>And, as expected, the estimated <span class="math inline">\(V\)</span> is quite high:</p>
+<pre class="r"><code>observed &lt;- dgrp[, table(grp, rating)]
+
+CramerV(observed, conf.level = 0.95)</code></pre>
+<pre><code>## Cramer V   lwr.ci   upr.ci 
+##   0.7400   0.6744   0.7987</code></pre>
+<p> </p>
+</div>
+<div id="interpretation-of-cramérs-v-using-proportional-odds" class="section level3">
+<h3>Interpretation of Cramér’s V using proportional odds</h3>
+<p>A key question is how we should interpret V? Some folks suggest that <span class="math inline">\(V \le 0.10\)</span> is very weak and anything over <span class="math inline">\(0.25\)</span> could be considered quite strong. I decided to explore this a bit by seeing how various cumulative odds ratios relate to estimated values of <span class="math inline">\(V\)</span>.</p>
+<p>To give a sense of what some log odds ratios (LORs) look like, I have plotted distributions generated from cumulative proportional odds models, using LORs ranging from 0 to 2. At 0.5, there is slight separation between the groups, and by the time we reach 1.0, the differences are considerably more apparent:</p>
+<p><img src="/post/2020-03-17-when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables.en_files/figure-html/unnamed-chunk-10-1.png" width="288" /></p>
+<p>My goal was to see how estimated values of <span class="math inline">\(V\)</span> change with the underlying LORs. I generated 100 data sets for each LOR ranging from 0 to 3 (increasing by increments of 0.05) and estimated <span class="math inline">\(V\)</span> for each data set (of which there were 6100). The plot below shows the mean <span class="math inline">\(V\)</span> estimate (in yellow) at each LOR, with the individual estimates represented by the grey points. I’ll let you draw you own conclusions, but (in this scenario at least), it does appear that 0.25 (the dotted horizontal line) signifies a pretty strong relationship, as LORs larger than 1.0 generally have estimates of <span class="math inline">\(V\)</span> that exceed this threshold.</p>
+<p><img src="/post/2020-03-17-when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables.en_files/figure-html/unnamed-chunk-11-1.png" width="480" /></p>
+<p> </p>
+</div>
+<div id="p-values-and-cramérs-v" class="section level3">
+<h3>p-values and Cramér’s V</h3>
+<p>To end, I am just going to circle back to where I started at the beginning of the previous <a href="https://www.rdatagen.net/post/to-report-a-p-value-or-not-the-case-of-a-contingency-table/">post</a>, thinking about p-values and effect sizes. Here, I’ve generated data sets with a relatively small between-group difference, using a modest LOR of 0.40 that translates to a measure of association <span class="math inline">\(V\)</span> just over 0.10. I varied the sample size from 200 to 1000. For each data set, I estimated <span class="math inline">\(V\)</span> and recorded whether or not the p-value from a chi-square test would have been deemed “significant” (i.e. p-value <span class="math inline">\(&lt; 0.05\)</span>) or not. The key point here is that as the sample size increases and we rely solely on the chi-squared test, we are increasingly likely to attach importance to the findings even though the measure of association is quite small. However, if we actually consider a measure of association like Cramér’s <span class="math inline">\(V\)</span> (or some other measure that you might prefer) in drawing our conclusions, we are less likely to get over-excited about a result when perhaps we shouldn’t.</p>
+<p>I should also comment that at smaller sample sizes, we will probably over-estimate the measure of association. Here, it would be important to consider some measure of uncertainty, like a 95% confidence interval, to accompany the point estimate. Otherwise, as in the case of larger sample sizes, we would run the risk of declaring success or finding a difference when it may not be warranted.</p>
+<p><img src="/post/2020-03-17-when-a-chi-squared-statistic-is-not-enough-a-measure-of-association-for-contingency-tables.en_files/figure-html/unnamed-chunk-12-1.png" width="384" /></p>
+<p><a name="addendum"></a></p>
+<p> </p>
+</div>
+<div id="addendum-why-is-cramérs-v-le-1" class="section level3">
+<h3>Addendum: Why is <em>Cramér’s V</em> <span class="math inline">\(\le\)</span> 1?</h3>
+<p>Cramér’s <span class="math inline">\(V = \sqrt{\frac{\chi^2/N}{min(r-1, c-1)}}\)</span>, which cannot be lower than 0. <span class="math inline">\(V=0\)</span> when <span class="math inline">\(\chi^2 = 0\)</span>, which will only happen when the observed cell counts for all cells equal the expected cell counts for all cells. In other words, <span class="math inline">\(V=0\)</span> only when there is complete independence.</p>
+<p>It is also the case that <span class="math inline">\(V\)</span> cannot exceed <span class="math inline">\(1\)</span>. I will provide some intuition for this using a relatively simple example and some algebra. Consider the following contingency table which represents complete separation of the three groups:</p>
+<p><img src="/img/post-cramersv/contingency-dep.png" height="225" /></p>
+<p>I would argue that this initial <span class="math inline">\(3 \times 4\)</span> table is equivalent to the following <span class="math inline">\(3 \times 3\)</span> table that collapses responses <span class="math inline">\(1\)</span> and <span class="math inline">\(2\)</span> - no information about the dependence has been lost or distorted. In this case <span class="math inline">\(n_A = n_{A1} + n_{A2}\)</span>.</p>
+<p><img src="/img/post-cramersv/contingency-collapsed.png" height="200" /></p>
+<p>In order to calculate <span class="math inline">\(\chi^2\)</span>, we need to derive the expected values based on this collapsed contingency table. If <span class="math inline">\(p_{ij}\)</span> is the probability for cell row <span class="math inline">\(i\)</span> and column <span class="math inline">\(j\)</span>, and <span class="math inline">\(p_i.\)</span> and <span class="math inline">\(p._j\)</span> are the row <span class="math inline">\(i\)</span> and column <span class="math inline">\(j\)</span> totals, respectively then independence implies that <span class="math inline">\(p_{ij} = p_i.p._j\)</span>. In this example, under independence, the expected cell count for cell <span class="math inline">\(i,j\)</span> is <span class="math inline">\(\frac{n_i}{N} \frac{n_j}{N} N = \frac{n_in_j}{N}\)</span>:</p>
+<p><img src="/img/post-cramersv/contingency-collapsed-ind.png" height="200" /></p>
+<p>If we consider the contribution of group <span class="math inline">\(A\)</span> to <span class="math inline">\(\chi^2\)</span>, we start with the <span class="math inline">\(\sum_{group \  A} (O_j - E_j)^2/E_j\)</span> and end up with <span class="math inline">\(N - n_A\)</span>:</p>
+<p><span class="math display">\[
+\begin{aligned}
+\chi^2_{\text{rowA}} &amp;= \frac{\left ( n_A - \frac{n_A^2}{N} \right )^2}{\frac{n_A^2}{N}} + \frac{\left ( \frac{n_An_B}{N} \right )^2}{\frac{n_An_B}{N}} + \frac{\left ( \frac{n_An_C}{N} \right )^2}{\frac{n_An_C}{N}} \\ \\
+&amp;= \frac{\left ( n_A - \frac{n_A^2}{N} \right )^2}{\frac{n_A^2}{N}} +  \frac{n_An_B}{N}+ \frac{n_An_C}{N} \\ \\
+&amp;=N  \left ( \frac{n_A^2 - \frac{2n_A^3}{N} +\frac{n_A^4}{N^2}} {n_A^2} \right ) + \frac{n_An_B}{N}+ \frac{n_An_C}{N} \\ \\
+&amp;=N  \left (  1 - \frac{2n_A}{N} +\frac{n_A^2}{N^2} \right ) + \frac{n_An_B}{N}+ \frac{n_An_C}{N} \\ \\
+&amp;= N - 2n_A +\frac{n_A^2}{N}  + \frac{n_An_B}{N}+ \frac{n_An_C}{N} \\ \\
+&amp;= N - 2n_A + \frac{n_A}{N} \left ( {n_A}  + n_B + n_C \right ) \\ \\ 
+&amp;= N - 2n_A + \frac{n_A}{N} N \\ \\ 
+&amp;= N - n_A
+\end{aligned}
+\]</span></p>
+<p>If we repeat this on rows 2 and 3 of the table, we will find that <span class="math inline">\(\chi^2_{\text{rowB}} = N - n_B\)</span>, and <span class="math inline">\(\chi^2_{\text{rowC}} = N - n_C\)</span>, so</p>
+<p><span class="math display">\[
+\begin{aligned}
+\chi^2 &amp;= \chi^2_\text{rowA} +\chi^2_\text{rowB}+\chi^2_\text{rowC} \\ \\
+&amp;=(N - n_A) + (N - n_B) + (N - n_C) \\ \\
+&amp;= 3N - (n_A + n_B + n_C) \\ \\
+&amp;= 3N - N \\ \\
+\chi^2 &amp;= 2N
+\end{aligned}
+\]</span></p>
+<p>And</p>
+<p><span class="math display">\[
+\frac{\chi^2}{2 N} = 1
+\]</span></p>
+<p>So, under this scenario of extreme separation between groups,</p>
+<p><span class="math display">\[
+V = \sqrt{\frac{\chi^2}{\text{min}(r-1, c-1) \times N}} = 1
+\]</span></p>
+<p>where <span class="math inline">\(\text{min}(r - 1, c - 1) = \text{min}(2, 3) = 2\)</span>.</p>
+</div>
