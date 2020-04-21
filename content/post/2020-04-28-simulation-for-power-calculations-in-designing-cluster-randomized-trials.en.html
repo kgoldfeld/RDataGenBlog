@@ -1,0 +1,161 @@
+---
+title: Simulation for power in designing cluster randomized trials
+author: Keith Goldfeld
+date: '2020-04-28'
+slug: simulation-for-power-calculations-in-designing-cluster-randomized-trials
+categories: []
+tags:
+  - R
+subtitle: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>As a biostatistician, I like to be involved in the design of a study as early as possible. I always like to say that I hope one of the first conversations an investigator has is with me, so that I can help clarify the research questions before getting into the design questions related to measurement, unit of randomization, and sample size. In the worst case scenario - and this actually doesn’t happen to me any more - a researcher would approach me after everything is done except the analysis. (I guess this is the appropriate time to pull out the quote made by the famous statistician Ronald Fisher: “To consult the statistician after an experiment is finished is often merely to ask him to conduct a post-mortem examination. He can perhaps say what the experiment died of.”)</p>
+<p>In these times, when researchers are scrambling to improve care for patients the Covid-19, there isn’t often time for those early conversations, or they are happening with many different people. Recently, I’ve been asked to help figure out what the sample size requirements are for four or five studies involving promising therapies for Covid-19 patients at various stages of the disease. In most cases, randomization is at the patient, so power/sample size calculations are much simpler. In other situations, cluster randomization at the unit or hospital floor level is being considered, so the sample size estimates are a little more involved.</p>
+<p>There are analytic/formula solutions for sample size estimates in non-clustered randomization. And if the outcome is continuous, adjustments can be made using an estimate of the <em>design effect</em>, which I wrote about <a href="https://www.rdatagen.net/post/what-exactly-is-the-design-effect/">recently</a>. When the outcome is binary, or the number of clusters is small, or the cluster sizes themselves are small, I feel more comfortable using simulation methods. Indeed, the <code>simstudy</code> package grew out of my work to facilitate data generation for this very reason.</p>
+<p>My intention here is to provide code to help others in case they want to conduct these relatively simple power analyses. One of the proposed studies expected to have a large number of small-sized clusters, so that is what I’ll simulate here.</p>
+<div id="the-data-generation-process" class="section level3">
+<h3>The data generation process</h3>
+<p>To estimate power under a range of scenarios, I’ve written two functions to define the data generation process, one to generate the data, and a final one to generate a single data set and estimate the parameters of a mixed effects model.</p>
+<div id="data-definitions" class="section level4">
+<h4>data definitions</h4>
+<p>The variance of the cluster-level random effect is based on a conversion of the intra-cluster correlation (<em>ICC</em>) to the logistic scale, which is done through a call to the function <code>iccRE</code>. The definition of the outcome is based on this random effect plus a log odds-ratio that is derived from the control proportion and the assumed percent change:</p>
+<pre class="r"><code>library(simstudy)
+library(lme4)
+
+defRE &lt;- function(icc, dist = &quot;binary&quot;, varW = NULL) {
+  
+  setVar &lt;- iccRE(ICC = icc, dist = dist, varWithin = varW)
+  def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = setVar, id = &quot;cluster&quot;)
+  
+  return(def)
+}
+
+defBinOut &lt;- function(p1, pctdelta) {
+    
+  p2 &lt;- (1 - pctdelta) * p1
+    
+  int &lt;- round(log( p1/(1-p1) ), 4)
+  effect &lt;- round(log( (p2/(1-p2)) / (p1/(1-p1) )), 4)
+  formula &lt;- genFormula( c(int, effect, 1), c(&quot;rx&quot;,&quot;a&quot;) )
+    
+  def &lt;- defDataAdd(varname = &quot;y&quot;, formula = formula, dist = &quot;binary&quot;, 
+                  link = &quot;logit&quot;)
+  return(def)
+}</code></pre>
+</div>
+<div id="data-generation" class="section level4">
+<h4>data generation</h4>
+<p>The data generation follows from the data definitions. First, cluster-level data are generated (along with treatment assignment), and then the individual patient level data.</p>
+<pre class="r"><code>genDataSet &lt;- function(nclust, clustsize, re.def, out.def) {
+  
+  dClust &lt;- genData(nclust, re.def)
+  dClust &lt;- trtAssign(dClust, grpName = &quot;rx&quot;)
+  
+  dPat &lt;- genCluster(dtClust = dClust, cLevelVar = &quot;cluster&quot;, 
+                     numIndsVar = clustsize, level1ID = &quot;id&quot;)
+  dPat &lt;- addColumns(out.def, dPat)
+  
+  return(dPat)
+}</code></pre>
+</div>
+<div id="model-estimation" class="section level4">
+<h4>model estimation</h4>
+<p>The <em>p-values</em> used for the power calculation are estimated using <code>glmer</code> of the <code>lme4</code> package, a generalized mixed effects model. (If the outcome were continuous, we would use <code>lmer</code> instead.) Unfortunately, this can be relatively resource-intensive, so the repeated estimations over a wide range of scenarios can be rather time consuming.</p>
+<p>One way to speed things up is eliminate a step in the <code>glmer</code> algorithm to that takes considerable time, but has the side effect of excluding information about whether or not the model estimation has converged. Convergence can be a particular problem if variation across clusters is low, as when the <em>ICC</em> is low. The function below keeps track of whether an iteration has converged (but only if <code>fast</code> is set to FALSE). One might want to explore how frequently there is a failure to converge before turning on the <code>fast</code> flag.</p>
+<p>This function returns the convergence status, the estimate of the random effects variance, and the effect parameter estimate, standard error, and p-value.</p>
+<p><br></p>
+<pre class="r"><code>genBinEsts &lt;- function(nclust, clustsize, re.def, out.def, fast = FALSE) {
+  
+  dP &lt;- genDataSet(nclust, clustsize, re.def, out.def)
+
+  mod.re &lt;- glmer(y ~ rx + (1|cluster), data = dP, family = binomial,
+      control = glmerControl( optimizer = &quot;bobyqa&quot;, calc.derivs = !(fast) ))
+
+  convStatus &lt;- as.numeric(length(summary(mod.re)$optinfo$conv$lme4))
+  
+  res &lt;- data.table(convStatus, re = VarCorr(mod.re)$cluster,
+              t(coef(summary(mod.re))[&quot;rx&quot;,]))
+  
+  return(res)
+}</code></pre>
+</div>
+</div>
+<div id="single-data-set" class="section level3">
+<h3>Single data set</h3>
+<p>Here is an example setting the <em>ICC</em> at 0.025, the control proportion at 40%, and an effect size that translates to a 30% reduction (so that the treatment proportion will be 28%).</p>
+<pre class="r"><code>(defa &lt;- defRE(icc = 0.025))</code></pre>
+<pre><code>##    varname formula variance   dist     link
+## 1:       a       0   0.0844 normal identity</code></pre>
+<pre class="r"><code>(defy &lt;- defBinOut(0.40, 0.30))</code></pre>
+<pre><code>##    varname                       formula variance   dist  link
+## 1:       y -0.4055 + -0.539 * rx + 1 * a        0 binary logit</code></pre>
+<p>And when we generate a single data set and estimate the parameters by calling the last function:</p>
+<pre class="r"><code>RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(2711)
+
+genBinEsts(40, 10, defa, defy)</code></pre>
+<pre><code>##    convStatus re.(Intercept) Estimate Std. Error z value Pr(&gt;|z|)
+## 1:          0          0.284   -0.625      0.279   -2.24   0.0249</code></pre>
+</div>
+<div id="estimating-power" class="section level3">
+<h3>Estimating power</h3>
+<p>Everything is set up now to estimate power with repeated calls to this group of functions. This process can be done using the <code>mclapply</code> function in the <code>parallel</code> package, as I illustrated in earlier <a href="https://www.rdatagen.net/post/parallel-processing-to-add-a-little-zip-to-power-simulations/">post</a>. Here, I am showing a <em>for loop</em> implementation.</p>
+<p>The variables <code>ICC</code>, <code>SS</code>, <code>nClust</code>, <code>ctlPROB</code>, and <code>pctDELTA</code> are vectors containing all the possible scenarios for which power will be estimated. In this case, power will be based on 1000 iterations under set of assumptions.</p>
+<p><br></p>
+<pre class="r"><code>library(parallel)
+
+nIters &lt;- 1000
+results &lt;- NULL
+
+for (icc in ICC) {
+  for (ss in SS) {
+    for (nclust in nCLUST) {
+      for (p1 in ctlPROB) {
+        for (pdelta in pctDELTA) {
+          
+          clustsize &lt;- ss %/% nclust
+          p2 &lt;- p1 * (1 - pdelta)
+          
+          defa &lt;- defRE(icc)
+          defy &lt;- defBinOut(p1, pdelta)
+          
+          res &lt;- rbindlist(mclapply(1:nIters, 
+                        function(x) genBinEsts(nclust, clustsize, defa, defy)))
+          
+          dres &lt;- data.table(icc, ss, nclust, clustsize, p1, p2, pdelta,
+                             converged = res[, mean(convStatus == 0)],
+                             p.conv = res[convStatus == 0, mean(`Pr(&gt;|z|)` &lt; 0.05)],
+                             p.all = res[convStatus != 2, mean(`Pr(&gt;|z|)` &lt; 0.05)])
+          
+          print(dres)
+          results &lt;- rbind(results, dres)
+          
+        }
+      }
+    }
+  }
+}</code></pre>
+<p>The first set of simulations evaluated power at a range of <em>ICC’s</em>, sample sizes, and effect sizes (in terms of percentage reduction). The number of clusters was fixed at 40, so the cluster size increased along with sample size. The probability of an event for a patient in the control group was also fixed at 10%.</p>
+<pre class="r"><code>ICC &lt;- seq(0.025, .10, 0.025)
+SS &lt;- seq(200, 1600, 200)
+pctDELTA &lt;- c(.2, .3, .4, .5, .6)
+nCLUST &lt;- 40
+ctlPROB &lt;- 0.10</code></pre>
+<p>The plot shows that at total sample sizes less 800, we would only be able detect effect sizes of 60% when the control proportion is 10%.</p>
+<p><img src="/post/2020-04-28-simulation-for-power-calculations-in-designing-cluster-randomized-trials.en_files/figure-html/unnamed-chunk-10-1.png" width="1056" /></p>
+<p>When the control proportion is at 40%, there is clearly a much higher probability that the study will detect an effect even at the smaller sample sizes. Under these scenarios, the <em>ICC</em> has a much greater impact on power than when the control proportion is much lower.</p>
+<p><img src="/post/2020-04-28-simulation-for-power-calculations-in-designing-cluster-randomized-trials.en_files/figure-html/unnamed-chunk-11-1.png" width="1056" /></p>
+</div>
+<div id="other-properties-of-the-design" class="section level3">
+<h3>Other properties of the design</h3>
+<p>Of course, power is only one concern of many. For example, we may need to understand how a study’s design relates to bias and variance. In this case, I wondered how well the standard error estimates would compare to observed standard errors, particularly when the cluster sizes were on the lower end. Here are two plots comparing the two.</p>
+<p>The lines represent the observed standard errors (the standard deviation of the measure of effect, or the parameter representing the log odds-ratio) at each sample size (assuming 40 clusters and an effect size of 30% reduction.) The points are the average estimate of the standard error with error bars that reflect <span class="math inline">\(\pm\)</span> 1 standard deviation.</p>
+<p>In the first set scenarios, the control probability is set at 10%. For all <em>ICCs</em> except perhaps 0.10, it appears that the standard error estimates are, on average, too large, though there is quite a bit of variability. The over-estimation declines as between cluster variance increases.</p>
+<p><img src="/post/2020-04-28-simulation-for-power-calculations-in-designing-cluster-randomized-trials.en_files/figure-html/unnamed-chunk-12-1.png" width="1056" /></p>
+<p>In the second set of scenarios, where the control probability is at 40%, there is less variation in the standard error estimates (as reflected in the shorter length error bars), and there appears to be a slight underestimate of variation, particularly with the larger <em>ICCs</em>.</p>
+<p><img src="/post/2020-04-28-simulation-for-power-calculations-in-designing-cluster-randomized-trials.en_files/figure-html/unnamed-chunk-13-1.png" width="1056" /></p>
+<p>I have only scratched the surface here in terms of the scenarios that can be investigated. In addition there are other measurements to consider. Clearly, it would be useful to know if these observed biases in the standard error estimates disappear with larger cluster sizes, or how the number of clusters relates to this bias. And, I didn’t even look at the whether effect size estimates are biased in different scenarios. The point is, while power is important, we must also understand the quality of our estimates.</p>
+</div>
