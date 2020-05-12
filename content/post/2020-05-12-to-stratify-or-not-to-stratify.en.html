@@ -1,0 +1,174 @@
+---
+title: To stratify or not to stratify? It might not actually matter
+author: Keith Goldfeld
+date: '2020-05-12'
+slug: to-stratify-or-not-to-stratify
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Continuing with the theme of <em>exploring small issues that come up in trial design</em>, I recently used simulation to assess the impact of stratifying (or not) in the context of a multi-site Covid-19 trial with a binary outcome. The investigators are concerned that baseline health status will affect the probability of an outcome event, and are interested in randomizing by health status. The goal is to ensure balance across the two treatment arms with respect to this important variable. This randomization would be paired with an estimation model that adjusts for health status.</p>
+<p>An alternative strategy is to ignore health status in the randomization, but to pre-specify an outcome model that explicitly adjusts for health status, just as in the stratification scenario. The question is, how do the operating characteristics (e.g. <em>power</em>, <em>variance</em>, and <em>bias</em>) of each approach compare. Are the (albeit minimal) logistics necessary for stratification worth the effort?</p>
+<div id="simulation" class="section level3">
+<h3>Simulation</h3>
+<p>Simulations under a variety of scenarios suggest that stratification might not be necessary. (See this <a href="https://www.sciencedirect.com/science/article/pii/S0895435698001383">paper</a> for a much deeper, richer discussion of these issues.)</p>
+<div id="define-the-data" class="section level4">
+<h4>Define the data</h4>
+<p>In these simulations, I assume that there are a small number of clusters. The proportion of high risk cases in each cluster varies (specified by <code>p</code>), as do the event rates (specified by <code>a</code>). The simulations vary the log odds of an outcome (<code>baseLO</code>), effect sizes/log-odds ratio (<code>effLOR</code>), and the effect of poor health status <code>xLOR</code>):</p>
+<pre class="r"><code>library(simstudy)
+library(parallel)
+
+setDefs &lt;- function(pX, precX, varRE, baseLO, effLOR, xLOR) {
+  
+  defc &lt;- defData(varname = &quot;p&quot;, formula = pX, variance = precX, 
+                  dist = &quot;beta&quot;, id = &quot;site&quot;)
+  defc &lt;- defData(defc, varname = &quot;a&quot;, formula = 0, variance = varRE)
+  
+  form &lt;- genFormula(c(baseLO, effLOR, xLOR, 1), vars = c(&quot;rx&quot;, &quot;x&quot;, &quot;a&quot;))
+  
+  defi1 &lt;- defDataAdd(varname = &quot;x&quot;, formula = &quot;p&quot;, dist = &quot;binary&quot;)
+  defi2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = form, dist = &quot;binary&quot;, link = &quot;logit&quot;)
+  
+  return(list(defc = defc, defi1 = defi1, defi2 = defi2))
+  
+}</code></pre>
+</div>
+<div id="generate-the-data-and-estimates" class="section level4">
+<h4>Generate the data and estimates</h4>
+<p>Under each scenario, the data definitions are established by a call to <code>setDefs</code> and treatment is randomized, stratified by <em>site</em> only, or by <em>site</em> <strong>and</strong> <em>health status</em> <code>x</code>. (There is a slight bug in the <code>trtAssign</code> function that will generate an error if there is only a single observation in a site and particular strata - which explains my use of the <code>try</code> function to prevent the simulations from grinding to a halt. This should be fixed soon.)</p>
+<p>For each generated data set under each scenario, we estimate a <em>generalized linear model</em>:</p>
+<p><span class="math display">\[ 
+logit(y_{ij}) = \beta_0 + \gamma_j + \beta_1r_i + \beta_2x_i \ ,
+\]</span>
+where <span class="math inline">\(y_{ij}\)</span> is the outcome for patient <span class="math inline">\(i\)</span> at site <span class="math inline">\(j\)</span>, <span class="math inline">\(r_i\)</span> is the treatment indicator, and <span class="math inline">\(x_i\)</span> is the health status indicator. <span class="math inline">\(\gamma_j\)</span> is a fixed site-level effect. The function returns parameter estimate for the log-odds ratio (the treatment effect <span class="math inline">\(\beta_1\)</span>), as well as its standard error estimate and p-value.</p>
+<pre class="r"><code>genEsts &lt;- function(strata, nclust, clustsize, pX, precX, 
+                    varRE, baseLO, effLOR, xLOR) {
+  
+  defs &lt;- setDefs(pX, precX, varRE, baseLO, effLOR, xLOR)
+  
+  dc &lt;- genData(nclust, defs$defc)
+  
+  dx &lt;- genCluster(dc, &quot;site&quot;, clustsize , &quot;id&quot;)
+  dx &lt;- addColumns(defs$defi1, dx)
+  
+  dx &lt;- try(trtAssign(dx, strata = strata, grpName = &quot;rx&quot;), silent = TRUE)
+  
+  if ( (class(dx)[1]) == &quot;try-error&quot;) {
+    return(NULL)
+  }
+  
+  dx &lt;- addColumns(defs$defi2, dx)
+  
+  glmfit &lt;- glm(y~factor(site) + rx + x, data = dx, family = &quot;binomial&quot;)
+  
+  estrx &lt;- t(coef(summary(glmfit))[&quot;rx&quot;, ])
+  
+  return(data.table(estrx))
+}</code></pre>
+</div>
+<div id="iterate-through-multiple-scenarios" class="section level4">
+<h4>Iterate through multiple scenarios</h4>
+<p>We will “iterate” through different scenarios using the <code>mclapply</code> function the <code>parallel</code> package. For each scenario, we generate 2500 data sets and parameter estimates. For each of these scenarios, we calculate the</p>
+<pre class="r"><code>forFunction &lt;- function(strata, nclust, clustsize, pX, precX, 
+                         varRE, baseLO, effLOR, xLOR) {
+  
+  res &lt;- rbindlist(mclapply(1:2500, function(x) 
+    genEsts(strata, nclust, clustsize, pX, precX, varRE, baseLO, effLOR, xLOR)))
+  
+  data.table(strata = length(strata), nclust, clustsize, pX, precX, 
+             varRE, baseLO, effLOR, xLOR, 
+             est = res[, mean(Estimate)],
+             se.obs = res[, sd(Estimate)],
+             se.est = res[, mean(`Std. Error`)],
+             pval = res[, mean(`Pr(&gt;|z|)` &lt; 0.05)]
+             )
+}</code></pre>
+</div>
+<div id="specify-the-scenarios" class="section level4">
+<h4>Specify the scenarios</h4>
+<p>We specify all the scenarios by creating a data table of parameters. Each row of this table represents a specific scenario, for which 2500 data sets will be generated and parameters estimated. For these simulations that I am reporting here, I varied the strata for randomization, the cluster size, the baseline event rate, and the effect size, for a total of 336 scenarios (<span class="math inline">\(2 \times 6 \times 4 \times 7\)</span>).</p>
+<pre class="r"><code>strata &lt;- list(&quot;site&quot;, c(&quot;site&quot;, &quot;x&quot;))
+nclust &lt;- 8
+clustsize &lt;- c(30, 40, 50, 60, 70, 80)
+pX &lt;- 0.35
+precX &lt;- 30
+varRE &lt;- .5
+baseLO &lt;- c(-1.5, -1.25, -1.0, -0.5)
+effLOR &lt;- seq(0.5, 0.8, by = .05)
+xLOR &lt;- c(.75)
+
+dparam &lt;- data.table(expand.grid(strata, nclust, clustsize, pX, precX, 
+              varRE, baseLO, effLOR, xLOR))
+
+setnames(dparam, c(&quot;strata&quot;,&quot;nclust&quot;, &quot;clustsize&quot;, &quot;pX&quot;, &quot;precX&quot;, 
+                   &quot;varRE&quot;, &quot;baseLO&quot;, &quot;effLOR&quot;, &quot;xLOR&quot;))
+
+dparam</code></pre>
+<pre><code>##      strata nclust clustsize   pX precX varRE baseLO effLOR xLOR
+##   1:   site      8        30 0.35    30   0.5   -1.5    0.5 0.75
+##   2: site,x      8        30 0.35    30   0.5   -1.5    0.5 0.75
+##   3:   site      8        40 0.35    30   0.5   -1.5    0.5 0.75
+##   4: site,x      8        40 0.35    30   0.5   -1.5    0.5 0.75
+##   5:   site      8        50 0.35    30   0.5   -1.5    0.5 0.75
+##  ---                                                            
+## 332: site,x      8        60 0.35    30   0.5   -0.5    0.8 0.75
+## 333:   site      8        70 0.35    30   0.5   -0.5    0.8 0.75
+## 334: site,x      8        70 0.35    30   0.5   -0.5    0.8 0.75
+## 335:   site      8        80 0.35    30   0.5   -0.5    0.8 0.75
+## 336: site,x      8        80 0.35    30   0.5   -0.5    0.8 0.75</code></pre>
+</div>
+<div id="run-the-simulation" class="section level4">
+<h4>Run the simulation</h4>
+<p>Everything is now set up. We go through each row of the scenario table <code>dparam</code> to generate the summaries for each scenario by repeated calls to <code>forFunction</code>, again using <code>mclapply</code>.</p>
+<pre class="r"><code>resStrata &lt;- mclapply(1:nrow(dparam), function(x) with(dparam[x,],  
+    forFunction(strata[[1]], nclust, clustsize, pX, precX, varRE, baseLO, effLOR, xLOR)))
+
+resStrata &lt;- rbindlist(resStrata)
+resStrata[, .(strata,  baseLO, effLOR, xLOR,  est, se.obs, se.est, pval)]</code></pre>
+<pre><code>##      strata baseLO effLOR  est se.obs se.est pval
+##   1:      1   -1.5    0.5 0.53   0.33   0.31 0.38
+##   2:      2   -1.5    0.5 0.52   0.32   0.31 0.39
+##   3:      1   -1.5    0.5 0.52   0.28   0.27 0.49
+##   4:      2   -1.5    0.5 0.51   0.27   0.27 0.48
+##   5:      1   -1.5    0.5 0.51   0.24   0.24 0.58
+##  ---                                             
+## 332:      2   -0.5    0.8 0.82   0.21   0.20 0.98
+## 333:      1   -0.5    0.8 0.82   0.19   0.19 0.99
+## 334:      2   -0.5    0.8 0.82   0.19   0.19 1.00
+## 335:      1   -0.5    0.8 0.82   0.18   0.17 1.00
+## 336:      2   -0.5    0.8 0.81   0.18   0.17 1.00</code></pre>
+</div>
+</div>
+<div id="plotting-the-results" class="section level3">
+<h3>Plotting the results</h3>
+<p>The plots below compare the estimates of the two different stratification strategies. Each point represents a specific scenario under stratification by site alone and stratification by site along and health status. If there are differences in the two strategies, we would expect to see the points diverge from the horizontal line. For all four plots, there appears to be little if any divergence, suggesting that, for these scenarios at least, little difference between stratification scenarios.</p>
+<div id="power" class="section level4">
+<h4>Power</h4>
+<p>In this first scatter plot, the estimated power under each stratification strategy is plotted. Power is estimated by the proportion of p-values in the 2500 iterations that were less than 0.05. Regardless of whether observed power for a particular scenario is high or low, we generally observe the same power under both strategies. The points do not diverge far from the red line, which represents perfect equality.</p>
+<p><img src="/post/2020-05-12-to-stratify-or-not-to-stratify.en_files/figure-html/unnamed-chunk-8-1.png" width="576" /></p>
+</div>
+<div id="standard-errors" class="section level4">
+<h4>Standard errors</h4>
+<p>There are two ways to look at the variability of the two strategies. First, we can look at the observed variability of the effect estimates across the 2500 iterations. And second, we can look at the average of the standard error estimates across the iterations. In general, the two randomization schemes appear quite similar with respect to both observed and estimated variation.</p>
+<p><img src="/post/2020-05-12-to-stratify-or-not-to-stratify.en_files/figure-html/unnamed-chunk-9-1.png" width="576" /></p>
+<p><img src="/post/2020-05-12-to-stratify-or-not-to-stratify.en_files/figure-html/unnamed-chunk-10-1.png" width="576" /></p>
+</div>
+<div id="treatment-effects" class="section level4">
+<h4>Treatment effects</h4>
+<p>In this last plot, the average estimated treatment effect is shown for each scenario. The two stratification strategies both appear to provide the same unbiased estimates of the treatment effect.</p>
+<p><img src="/post/2020-05-12-to-stratify-or-not-to-stratify.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+Kernan, Walter N., Catherine M. Viscoli, Robert W. Makuch, Lawrence M. Brass, and Ralph I. Horwitz. “Stratified randomization for clinical trials.” <em>Journal of clinical epidemiology</em> 52, no. 1 (1999): 19-26.
+</font></small>
+</p>
+</div>
+</div>
