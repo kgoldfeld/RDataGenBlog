@@ -1,0 +1,222 @@
+---
+title: Considering the number of categories in an ordinal outcome
+author: Keith Goldfeld
+date: '2020-05-26'
+slug: the-advantage-of-increasing-the-number-of-categories-in-an-ordinal-outcome
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+```{r, echo=FALSE, message=FALSE}
+options(digits = 3)
+load(file = "DataPowerOrd/powerord.Rdata")
+```
+
+In two Covid-19-related trials I'm involved with, the primary or key secondary outcome is the status of a patient at 14 days based on a World Health Organization ordered rating scale. In this particular ordinal scale, there are 11 categories ranging from 0 (uninfected) to 10 (death). In between, a patient can be infected but well enough to remain at home, hospitalized with milder symptoms, or hospitalized with severe disease. If the patient is hospitalized with severe disease, there are different stages of oxygen support the patient can be receiving, such as high flow oxygen or mechanical ventilation.
+
+It is common to analyze ordinal categorical outcomes like the WHO status measure using a cumulative proportional odds model. (I've described these models in a number of posts, starting [here](https://www.rdatagen.net/post/ordinal-regression/) and [here](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/).) We've be been wrestling with the question of whether to use the full 11-point scale or to collapse categories to create a simpler outcome of four or five groups. One issue that comes up is whether this reduction would increase or decrease our ability to detect a treatment effect, assuming of course that there is a treatment effect.  To explore the issue, I turned to simulation.
+
+### A very quick recap of the model
+
+In the cumulative proportional odds model, we are comparing a series of cumulative odds across two groups, and we make an assumption that the ratio of these cumulative odds for the two groups is consistent throughout, the proportional odds assumption.
+
+The cumulative odds for the control group that the status is $x$ is
+
+$$
+\text{cOdds}_{c}(x) = \frac{P(Status \le x | rx = Control)}{P(Status \gt x |rx = Control)}
+$$
+
+And the cumulative odds ***ratio*** comparing *Control* to *Treated* is 
+
+$$
+\text{COR}_{ct}(x) = \frac{\text{cOdds}_c(x)}{\text{cOdds}_t(x)}
+$$
+
+In the proportional odds model, with a measure that has $K$ levels we make the assumption that 
+
+$$
+\text{COR}_{ct}(1) = \text{COR}_{ct}(2) = \dots =\text{COR}_{ct}(K)
+$$
+
+The model that we estimate is 
+
+$$
+\text{logit}(P(Status \le x)) = \alpha_x - \beta * I(rx = Treat)
+$$
+where $\alpha_x$ is the log cumulative odds for a particular levels $x$, and $-\beta = \text{COR}_{ct}(k)$, the (proportional) log odds ratio across all $k$ status levels.
+
+### Conceputalizing the categories
+
+I am comparing estimates of models for outcome scales that use a range of categories, from 2 to 16. (I expanded beyond 11 to get a better sense of the results when the gradations become quite fine.) The figure shows the 16-group structure collapsing into 2 groups. The first row depicts the distribution of the control group across 16 categories. The second row combines the 2 rightmost purple categories of the first row into a single category, resulting in 15 total categories. Moving downwards, a pair of adjacent categories are combined at each step, until only 2 categories remain at the bottom.
+
+```{r, echo = FALSE}
+baseprobs <- list(
+  c(0.0375*8, 0.0875*8),               
+  c(rep(0.0375*8, 1), rep(0.0875*4, 2)), 
+  c(rep(0.0375*4, 2), rep(0.0875*4, 2)),  
+  c(rep(0.0375*4, 2), rep(0.0875*4, 1), rep(0.0875*2, 2)),
+  c(rep(0.0375*2, 2), rep(0.0375*4, 1), rep(0.0875*4, 1), rep(0.0875*2, 2)),
+  c(rep(0.0375*2, 2), rep(0.0375*4, 1), rep(0.0875*2, 4)),
+  c(rep(0.0375*2, 4), rep(0.0875*2, 4)),
+  c(rep(0.0375*2, 4), rep(0.0875*2, 3), rep(0.0875, 2)),
+  c(rep(0.0375, 2), rep(0.0375*2, 3), rep(0.0875*2, 3), rep(0.0875, 2)),
+  c(rep(0.0375, 2), rep(0.0375*2, 3), rep(0.0875*2, 2), rep(0.0875, 4)),
+  c(rep(0.0375, 4), rep(0.0375*2, 2), rep(0.0875*2, 2), rep(0.0875, 4)),
+  c(rep(0.0375, 4), rep(0.0375*2, 2), rep(0.0875*2, 1), rep(0.0875, 6)),
+  c(rep(0.0375, 6), rep(0.0375*2, 1), rep(0.0875*2, 1), rep(0.0875, 6)),
+  c(rep(0.0375, 6), rep(0.0375*2, 1), rep(0.0875, 8)),
+  rep(c(.0375, 0.0875), each = 8)
+)
+```
+
+```{r, echo = FALSE, fig.width = 8, fig.height = 4}
+getRecCoords <- function(x) {
+  
+  lenx <- length(x)
+  n1 <- floor(lenx/2)
+  n2 <- ceiling(lenx/2)
+  
+  data.table(xstart = c(0, cumsum(x)[-lenx]), 
+             xend = cumsum(x), 
+             ymin = lenx - 2 + 0.3, 
+             ymax = lenx - 1 - 0.3,
+             grp = factor(rep(c(1, 2), times = c(n1, n2)))
+  )
+}
+  
+dx <- rbindlist(lapply(baseprobs, function(x) getRecCoords(x)))
+
+dxlab <- data.table(label = paste(c(2:16), "categories"), 
+                    x = 1.2, y = seq(0.5, 14.5, 1))
+
+ggplot(data = dx) +
+  geom_rect(aes(xmin= xstart, xmax = xend, ymin = ymin, ymax = ymax, 
+                      fill = grp), color = "grey45", size = 1) +
+  geom_text(data = dxlab, aes(label = label, x = x, y = y), size = 3.25) +
+  scale_fill_manual(values = c("#deb0ca", "#cadeb0")) +
+  scale_x_continuous(limits = c(0, 1.5), expand = c(0,0)) +
+  theme(panel.grid = element_blank(),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        legend.position = "none",
+        panel.background = element_rect(fill = "white"),
+        plot.title = element_text(face="bold")) +
+  ggtitle("Distribution across categories")
+```
+
+And here are the actual probabilities for the bottom seven rows, from 8 categories down to 2:
+
+```{r}
+baseprobs[7:1]
+```
+
+### Generating the data
+
+To simulate the data, I use the function `genOrdCat` in `simstudy` that uses the base probabilities and the log-odds ratio transforming variable, which in this case is $z$. (I introduced this function a while [back](https://www.rdatagen.net/post/generating-and-displaying-likert-type-data/).) In this case the log odds ratio $(-\beta)$ is 1, which translates to a cumulative odds ratio of $exp(1) = 2.72$.
+
+```{r}
+library(simstudy)
+
+defA <- defDataAdd(varname = "z", formula = "-1.0 * rx", dist = "nonrandom")
+
+genDT <- function(nobs, baseprobs, defA) {
+  
+  dT <- genData(nobs)
+  dT <- trtAssign(dT, grpName = "rx")
+  dT <- addColumns(defA, dT)
+  
+  dT <- genOrdCat(dT, adjVar = "z", baseprobs, catVar = "r")
+  dT[]
+}
+```
+
+A single data set of 5000 observations with 6 categories looks like this:
+
+```{r}
+set.seed(7891237)
+(dx <- genDT(5000, baseprobs[[5]], defA ))
+```
+
+Here are the distributions by treatment arm:
+
+```{r}
+prop.table(dx[, table(rx, r)], margin = 1)
+```
+
+Here are the cumulative odds and the odds ratio for a response being 2 or less:
+
+```{r}
+(dcodds <- dx[, .(codds = mean(as.numeric(r) <= 2)/mean(as.numeric(r) > 2)), keyby = rx])
+
+dcodds[rx == 1, codds] / dcodds[rx==0, codds]
+```
+
+And here are the cumulative odds and COR for a response being 4 or less.
+
+```{r}
+(dcodds <- dx[, .(codds = mean(as.numeric(r) <= 4)/mean(as.numeric(r) > 4)), keyby = rx])
+
+dcodds[rx == 1, codds] / dcodds[rx==0, codds]
+```
+
+The CORs are both close to the true COR of 2.72.
+
+### Running the experiment
+
+I was particularly interested in understanding the impact of increasing the number of categories $K$ on the probability of observing a treatment effect (i.e. the power). This required generating many (in this case 10,000) data sets under each scenario defined by the number of categories ranging from 2 to 16, and then estimating a cumulative odds model for each data set. I used the `clm` function in the `ordinal` package.
+
+Two functions implement this iteration. `analyzeDT` generates a data set and returns a model fit. `iterate` repeatedly calls `analyzeDT` and estimates power for a particular scenario by calculating the proportion of p-values that are less than 0.05:
+
+```{r, eval=FALSE}
+library(ordinal)
+
+analyzeDT <- function(nobs, baseprobs, defA) {
+
+  dT <- genDT(nobs, baseprobs, defA)
+  clmFit <- clm(r ~ rx, data = dT)
+  coef(summary(clmFit))
+  
+}
+
+iterate <- function(niter, nobs, baseprobs, defA) {
+  res <- lapply(1:niter, function(x) analyzeDT(nobs, baseprobs, defA))
+  mean( sapply(res, function(x) x["rx",  "Pr(>|z|)"]) < 0.05) 
+}
+```
+
+`lapply` is used here to cycle through each scenario (for enhanced speed `mclapply` in the `parallel` package could be used):
+
+```{r, eval=FALSE}
+set.seed(1295)
+power <- lapply(baseprobs, function(x) iterate(niter = 10000, 
+            nobs = 100, x, defA))
+```
+
+### Effect of K on power
+
+A plot of the estimates suggests a strong relationship between the number of categories and power:
+
+```{r, echo=FALSE, fig.height = 4, message=FALSE}
+
+dp <- data.table(cats = unlist(lapply(baseprobs, function(x) length(x))), 
+    power = unlist(power)
+)
+
+ggplot(data = dp, aes(x = cats, y = power)) +
+  geom_smooth(se = FALSE, size = 1) +
+  geom_point(size = 1.5) +
+  scale_x_continuous(breaks = dp$cats, name = "K (number of categories)") +
+  scale_y_continuous(limits = c(.65, .85), breaks = c(.7, .75, .8), 
+                     name = "estimated power") +
+  theme(panel.grid.minor = element_blank(), 
+        panel.grid.major.x = element_blank())
+```
+
+In this particular case, it seems apparent there are benefits to increasing from 2 to 6 categories. However, there are slight gains to be had by increasing the number of categories much beyond this; indeed, extending to the full 16 categories may not be worth the trouble, as the gains in power are minimal. 
+
+These minimal gains need to be weighed against the potential difficulty in acquiring the finely grained categorical outcomes. In cases where the defined categories are completely objective and are naturally collected as part of an operating environment - as in the WHO scale that might be gathered from an electronic health record - there is no real added burden to maximizing the number of categories. However, if the outcome scores are based on patient responses to a survey, the quality of data collection may suffer. Adding additional categories may confuse the patient and make the data collection process more burdensome, resulting in unreliable responses or even worse, missing data. In this case, the potential gains in power may be offset by poor data quality.
