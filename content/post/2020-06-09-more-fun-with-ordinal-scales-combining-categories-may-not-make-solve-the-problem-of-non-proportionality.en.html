@@ -1,0 +1,194 @@
+---
+title: "When proportional odds is a poor assumption, collapsing categories is probably not going to save you"
+author: Keith Goldfeld
+date: '2020-06-09'
+slug: more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Continuing the discussion on cumulative odds models I started <a href="https://www.rdatagen.net/post/the-advantage-of-increasing-the-number-of-categories-in-an-ordinal-outcome/">last time</a>, I want to investigate a solution I always assumed would help mitigate a failure to meet the proportional odds assumption. I’ve believed if there is a large number of categories and the relative cumulative odds between two groups don’t appear proportional across all categorical levels, then a reasonable approach is to reduce the number of categories. In other words, fewer categories translates to proportional odds. I’m not sure what led me to this conclusion, but in this post I’ve created some simulations that seem to throw cold water on that idea.</p>
+<div id="when-the-odds-are-proportional" class="section level3">
+<h3>When the odds <em>are</em> proportional</h3>
+<p>I think it is illustrative to go through a base case where the odds are actually proportional. This will allow me to introduce the data generation and visualization that I’m using to explore this issue. I am showing a lot of code here, because I think it is useful to see how it is possible to visualize cumulative odds data and the model estimates.</p>
+<p>The first function <code>genDT</code> generates a data set with two treatment arms and an ordinal outcome. <code>genOrdCat</code> uses a base set of probabilities for the control arm, and the experimental arm probabilities are generated under an assumption of proportional cumulative odds (see the <a href="https://www.rdatagen.net/post/the-advantage-of-increasing-the-number-of-categories-in-an-ordinal-outcome/">previous post</a> for more details on what cumulative odds are and what the model is).</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+
+genDT &lt;- function(nobs, baseprobs, defA) {
+  
+  dT &lt;- genData(nobs)
+  dT &lt;- trtAssign(dT, grpName = &quot;rx&quot;)
+  dT &lt;- addColumns(defA, dT)
+  
+  dT &lt;- genOrdCat(dT, adjVar = &quot;z&quot;, baseprobs, catVar = &quot;r&quot;)
+  dT[]
+}</code></pre>
+<p>In this case, I’ve set the base probabilities for an ordinal outcome of 8 categories. The log of the cumulative odds ratio comparing experimental arm to control is 1.0 (and is parameterized as -1.0). In this case, the proportional odds ratio should be about 2.7.</p>
+<pre class="r"><code>baseprobs &lt;- c(0.05, 0.10, 0.15, 0.25, .20, 0.15, .05, .05)
+defA &lt;- defDataAdd(varname = &quot;z&quot;, formula = &quot;-1.0 * rx&quot;, dist = &quot;nonrandom&quot;)
+
+set.seed(29672) # 19779
+dT.prop &lt;- genDT(200, baseprobs, defA)</code></pre>
+<p>Calculation of the observed cumulative odds ratio at each response level doesn’t provide an entirely clear picture about proportionality, but the sample size is relatively small given the number of categories.</p>
+<pre class="r"><code>codds &lt;- function(cat, dx) {
+  dcodds &lt;- dx[, .(codds = mean(as.numeric(r) &lt;= cat)/mean(as.numeric(r) &gt; cat)), 
+               keyby = rx]
+  round(dcodds[rx == 1, codds] / dcodds[rx==0, codds], 2)
+}
+
+sapply(1:7, function(x) codds(x, dT.prop))</code></pre>
+<pre><code>## [1] 1.48 3.81 3.12 1.83 2.05 3.59 2.02</code></pre>
+<div id="a-visual-assessment" class="section level4">
+<h4>A visual assessment</h4>
+<p>An excellent way to assess proportionality is to do a visual comparison of the <em>observed</em> cumulative probabilities with the <em>estimated</em> cumulative probabilities from the cumulative odds model that makes the assumption of proportional odds.</p>
+<p>I’ve written three functions that help facilitate this comparison. <code>getCumProbs</code> converts the parameter estimates of cumulative odds from the model to estimates of cumulative probabilities.</p>
+<pre class="r"><code>getCumProbs &lt;- function(coefs) {
+  
+  cumprob0 &lt;- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != &quot;rx&quot;)])), 1),
+    r = factor(1 : nrow(coefs)),
+    rx = 0
+  )
+  
+  cumprob1 &lt;- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != &quot;rx&quot;)] + 
+                             coefs[&quot;rx&quot;, 1])), 1),
+    r = factor(1 : nrow(coefs)),
+    rx = 1
+  )
+  
+  rbind(cumprob0, cumprob1)[]
+ 
+}</code></pre>
+<p>The function <code>bootCumProb</code> provides a single bootstrap from the data so that we can visualize the uncertainty of the estimated cumulative probabilities. In this procedure, a random sample is drawn (with replacement) from the data set, a <code>clm</code> model is fit, and the cumulative odds are converted to cumulative probabilities.</p>
+<pre class="r"><code>library(ordinal)
+
+bootCumProb &lt;- function(bootid, dx) {
+  
+  sampid &lt;- dx[, .(srow = sample(.I, replace = TRUE)), keyby = rx][, srow]
+  dtBoot &lt;- dx[sampid,]
+  
+  bootFit &lt;- clm(r ~ rx, data = dtBoot)
+  bcoefs &lt;- coef(summary(bootFit))
+  
+  bcumProbs &lt;- getCumProbs(bcoefs)
+  bcumProbs[, bootid := bootid]
+  
+  bcumProbs[]
+}</code></pre>
+<p>The third function <code>fitPlot</code> fits a <code>clm</code> model to the original data set, collects the bootstrapped estimates, calculates the observed cumulative probabilities, converts the estimated odds to estimated probabilities, and generates a plot of the observed data, the model fit, and the bootstrap estimates.</p>
+<pre class="r"><code>library(ggplot2)
+library(paletteer)
+
+fitPlot &lt;- function(dx) {
+  
+  clmFit &lt;- clm(r ~ rx, data = dx)
+  coefs &lt;- coef(summary(clmFit))
+  
+  bootProbs &lt;- rbindlist(lapply(1:500, function(x) bootCumProb(x, dx)))
+  
+  cumObsProbs &lt;- dx[, .N, keyby = .(rx, r)]
+  cumObsProbs[, cumprob := cumsum(N)/sum(N) , keyby = rx]
+  
+  cumModProbs &lt;- getCumProbs(coefs)
+  
+  ggplot(data = cumObsProbs, aes(x = r, y = cumprob , color = factor(rx))) +
+    geom_line(data = cumModProbs, alpha = 1, aes(group=rx)) +
+    geom_line(data = bootProbs, alpha = .01, 
+              aes(group = interaction(rx, bootid))) + 
+    geom_point() +
+    ylab(&quot;cumulative probability&quot;) +
+    xlab(&quot;ordinal category&quot;) +
+    theme(panel.grid = element_blank(),
+          legend.position = &quot;none&quot;) +
+    scale_color_paletteer_d(&quot;jcolors::pal6&quot;)
+}</code></pre>
+<p>Here is a plot based on the original data set of 200 observations. The observed values are quite close to the modeled estimates, and well within the range of the bootstrap estimates.</p>
+<pre class="r"><code>fitPlot(dT.prop)</code></pre>
+<p><img src="/post/2020-06-09-more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality.en_files/figure-html/unnamed-chunk-7-1.png" width="528" /></p>
+</div>
+<div id="collapsing-the-categories" class="section level4">
+<h4>Collapsing the categories</h4>
+<p>Continuing with the same data set, let’s see what happens when we collapse categories together. I’ve written a function <code>collapseCat</code> that takes a list of vectors of categories that are to be combined and returns a new, modified data set.</p>
+<pre class="r"><code>collapseCat &lt;- function(dold, collapse) {
+  
+  dx &lt;- copy(dold)
+  for (i in 1:length(collapse)) {
+    dx[r %in% collapse[[i]], r:= min(collapse[[i]])]
+  }
+  
+  dx[, r := factor(r)]
+  dx[, r := factor(r, labels = c(1:length(levels(r))))]
+  
+  dx[]
+}</code></pre>
+<p>Here is the distribution of the original data set:</p>
+<pre class="r"><code>dT.prop[, table(rx, r)]</code></pre>
+<pre><code>##    r
+## rx   1  2  3  4  5  6  7  8
+##   0  7  4 14 31 19 15  8  2
+##   1 10 22 19 19 16 11  2  1</code></pre>
+<p>And if we combine categories 1, 2, and 3 together, as well as 7 and 8, here is the resulting distribution based on the remaining five categories. Here’s a quick check to see that the categories were properly combined:</p>
+<pre class="r"><code>collapse &lt;- list(c(1,2,3), c(7,8))
+collapseCat(dT.prop, collapse)[, table(rx, r)]</code></pre>
+<pre><code>##    r
+## rx   1  2  3  4  5
+##   0 25 31 19 15 10
+##   1 51 19 16 11  3</code></pre>
+<p>If we create four modified data sets based on different combinations of groups, we can fit models and plot the cumulative probabilities for all for of them. In all cases the proportional odds assumption still seems pretty reasonable.</p>
+<pre class="r"><code>collapse &lt;- list(list(c(3, 4), c(6, 7)),
+                 list(c(1,2,3), c(7,8)),
+                 list(c(1,2,3), c(4, 5), c(7,8)),
+                 list(c(1,2), c(3, 4, 5),  c(6, 7, 8))
+)
+
+dC.prop &lt;- lapply(collapse, function(x) collapseCat(dT.prop, x))
+
+cplots &lt;- lapply(dC.prop, function(x) fitPlot(x))
+gridExtra::grid.arrange(grobs = cplots, nrow = 2)</code></pre>
+<p><img src="/post/2020-06-09-more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality.en_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+</div>
+</div>
+<div id="non-proportional-cumulative-odds" class="section level3">
+<h3>Non-proportional cumulative odds</h3>
+<p>That was all just a set-up to explore what happens in the case of non-proportional odds. To do that, there’s just one more function to add - we need to generate data that does not assume proportional cumulative odds. I use the <code>rdirichlet</code> in the <code>gtools</code> package to generate values between 0 and 1, which sum to 1. The key here is that there is no pattern in the data - so that the ratio of the cumulative odds will not be constant.</p>
+<pre class="r"><code>genDTnon &lt;- function(nobs, ncat) {
+  
+  ps &lt;- gtools::rdirichlet(2, rep(2, ncat))
+  
+  p0 &lt;- paste(ps[1, -ncat], collapse = &quot;;&quot;)
+  p1 &lt;- paste(ps[2, -ncat], collapse = &quot;;&quot;)
+  
+  defc &lt;- defCondition(condition = &quot;rx == 0&quot;, formula = p0, 
+    dist = &quot;categorical&quot;)
+  defc &lt;- defCondition(defc, condition = &quot;rx == 1&quot;, formula = p1, 
+    dist = &quot;categorical&quot;)
+  
+  dx &lt;- genData(nobs)
+  dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+  dx &lt;- addCondition(defc, dx, &quot;r&quot;)
+  
+  dx[, r := factor(r)]
+
+  dx[]
+}</code></pre>
+<p>Again, we generate a data set with 200 observations and an ordinal categorical outcome with 8 levels. The plot of the observed and estimated cumulative probabilities suggests that the proportional odds assumption is not a good one here. Some of the observed probabilities are quite far from the fitted lines, particularly at the low end of the ordinal scale. It may not be a disaster to to use a <code>clm</code> model here, but it is probably not a great idea.</p>
+<pre class="r"><code>dT.nonprop &lt;- genDTnon(200, 8)
+fitPlot(dT.nonprop)</code></pre>
+<p><img src="/post/2020-06-09-more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality.en_files/figure-html/unnamed-chunk-13-1.png" width="528" /></p>
+<p>The question remains - if we reduce the number of categories does the assumption of proportional odds come into focus? The four scenarios shown here do not suggest much improvement. The observed data still fall outside or at the edge of the bootstrap bands for some levels in each case.</p>
+<pre class="r"><code>dC.nonprop &lt;- lapply(collapse, function(x) collapseCat(dT.nonprop, x))
+
+cplots &lt;- lapply(dC.nonprop, function(x) fitPlot(x))
+gridExtra::grid.arrange(grobs = cplots, nrow = 2)</code></pre>
+<p><img src="/post/2020-06-09-more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
+<p>What should we do in this case? That is a tough question. The proportional odds model for the original data set with eight categories is probably just as reasonable as estimating a model using any of the combined data sets; there is no reason to think that any one of the alternatives with fewer categories will be an improvement. And, as we learned <a href="https://www.rdatagen.net/post/the-advantage-of-increasing-the-number-of-categories-in-an-ordinal-outcome/">last time</a>, we may actually lose power by collapsing some of the categories. So, it is probably best to analyze the data set using its original structure, and find the best model for that data set. Ultimately, that best model may need to relax the proportionality assumption; a post on that will need to be written another time.</p>
+</div>
