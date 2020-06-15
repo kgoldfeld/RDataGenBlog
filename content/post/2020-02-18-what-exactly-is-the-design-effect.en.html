@@ -9,6 +9,7 @@ tags:
 subtitle: ''
 ---
 
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
 <p>I am always saying that simulation can help illuminate interesting statistical concepts or ideas. The <em>design effect</em> that underlies much of clustered analysis is could benefit from a little exploration through simulation. I’ve written about clustered-related methods so much on this blog that I won’t provide links - just peruse the list of entries on the home page and you are sure to spot a few. But, I haven’t written explicitly about the design effect.</p>
@@ -53,9 +54,9 @@ set.seed(987)</code></pre>
 dx &lt;- independentData(N = 30 * 50, defI1)</code></pre>
 <p>The observed effect size and variance should be close to the specified parameters of 0.8 and 10, respectively:</p>
 <pre class="r"><code>dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
-<pre><code>## [1] 1</code></pre>
+<pre><code>## [1] 0.597</code></pre>
 <pre class="r"><code>dx[, var(y)]</code></pre>
-<pre><code>## [1] 10.3</code></pre>
+<pre><code>## [1] 10.2</code></pre>
 <p>Here is a plot of the individual observations that highlights the group differences and individual variation:</p>
 <p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-6-1.png" width="576" /></p>
 </div>
@@ -80,9 +81,9 @@ defI2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;ceff + 0.8 * rx&
 <pre class="r"><code>dx &lt;- clusteredData(k = 30, m = 50, defC, defI2)</code></pre>
 <p>The effect size and variation across all observations should be be quite similar to the previous design, though now the data has a structure that is determined by the clusters:</p>
 <pre class="r"><code>dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
-<pre><code>## [1] 1.4</code></pre>
+<pre><code>## [1] 0.203</code></pre>
 <pre class="r"><code>dx[, var(y)]</code></pre>
-<pre><code>## [1] 11</code></pre>
+<pre><code>## [1] 10.5</code></pre>
 <p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
 </div>
 <div id="randomization-within-site" class="section level4">
@@ -102,7 +103,7 @@ defI2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;ceff + 0.8 * rx&
 <pre class="r"><code>dx &lt;- withinData(30, 50, defC, defI2)
 
 dx[rx == 1, mean(y)] - dx[rx == 0, mean(y)]</code></pre>
-<pre><code>## [1] 0.787</code></pre>
+<pre><code>## [1] 0.813</code></pre>
 <pre class="r"><code>dx[, var(y)]</code></pre>
 <pre><code>## [1] 10.1</code></pre>
 <p><img src="/post/2020-02-18-what-exactly-is-the-design-effect.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
@@ -167,7 +168,7 @@ resCest &lt;- unlist(mclapply(1:niters,
           function(x) genEstFromClust(k=50, m = 18, defC, defI2)))
 
 mean(resCest &lt; 0.05) # power</code></pre>
-<pre><code>## [1] 0.805</code></pre>
+<pre><code>## [1] 0.778</code></pre>
 <p>In just over 80% of the cases, we would have rejected the null.</p>
 <p>And here is the estimated power under the individual randomization experiment, but with a twist. Since the design effect is 1.85, the cluster randomized experiment needs a relative sample size 1.85 times higher than an equivalent (individual-level) RCT to provide the same information, or to have equivalent power. So, in our simulations, we will use a reduced sample size for the individual RCT. Since we used 900 individuals in the CRT, we need only <span class="math inline">\(900/1.85 = 487\)</span> individuals in the RCT:</p>
 <pre class="r"><code>( N.adj &lt;- ceiling( 50 * 18 / d_bc_form ) )</code></pre>
@@ -181,7 +182,7 @@ resIest &lt;- unlist(mclapply(1:niters,
           function(x) genEstFromInd(N = N.adj, defI1)))</code></pre>
 <p>The power for this second experiment is also quite close to 80%:</p>
 <pre class="r"><code>mean(resIest &lt; 0.05) # power</code></pre>
-<pre><code>## [1] 0.796</code></pre>
+<pre><code>## [1] 0.794</code></pre>
 </div>
 <div id="within-cluster-randomization" class="section level3">
 <h3>Within cluster randomization</h3>
@@ -215,13 +216,14 @@ resWest &lt;- unlist(mclapply(1:niters,
   function(x) genEstFromWithin(k = 50, m = ceiling(m.adj), defC, defI2)))
 
 mean(resWest &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.786</code></pre>
+<pre><code>## [1] 0.779</code></pre>
 <p>
 <p><small><font color="darkkhaki">
 References:</p>
 <p>Donner, Allan, and Neil Klar. “Design and analysis of cluster randomization trials in health research.” New York (2010).</p>
 <p>Vierron, Emilie, and Bruno Giraudeau. “Design effect in multicenter studies: gain or loss of power?.” BMC medical research methodology 9, no. 1 (2009): 39.</p>
-This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA Imbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+<p>Support:</p>
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
 </font></small>
 </p>
 </div>
