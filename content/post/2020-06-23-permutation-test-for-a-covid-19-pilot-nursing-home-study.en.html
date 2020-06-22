@@ -1,0 +1,183 @@
+---
+title: 'Consider a permutation test for a small pilot study'
+author: Keith Goldfeld
+date: '2020-06-23'
+slug: permutation-test-for-a-covid-19-pilot-nursing-home-study
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Recently I <a href="https://www.rdatagen.net/post/what-can-we-really-expect-to-learn-from-a-pilot-study/">wrote</a> about the challenges of trying to learn too much from a small pilot study, even if it is a randomized controlled trial. There are limitations on how much you can learn about a treatment effect given the small sample size and relatively high variability of the estimate. However, the temptation for researchers is usually just too great; it is only natural to want to see if there is any kind of signal of an intervention effect, even though the pilot study is focused on questions of feasibility and acceptability.</p>
+<p>Through my work with the <a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>, I have been involved with planning a research initiative to test the feasibility of studying a highly innovative strategy in nursing homes to reduce the risk of Covid-19 infections among both residents and staffs. Given that the strategy is so novel, there are big questions about whether it can even be implemented, and how the outcome measures can be collected. So, it may be premature to figure out if the approach will reduce infection. But still, it is hard not to try to gain a little insight into the potential effect of the intervention.</p>
+<p>One of the lead investigators suggested a permutation test, because we know the sample is going to be small and we might not want to be forced to make parametric assumptions about the outcome. In the context of a pilot study, the permutation test might give a crude indication about the potential impact of an intervention. Would the full-blown follow-up study be conducted if there is no observed effect in the pilot? That is a bigger question. But, the suggestion of some sort of signal might provide additional motivation if feasibility was no longer a question; we would still need to be <a href="https://www.rdatagen.net/post/what-can-we-really-expect-to-learn-from-a-pilot-study/">careful</a> about how we incorporate these findings into planning for the bigger study.</p>
+<div id="permutation-test-explained-briefly" class="section level3">
+<h3>Permutation test explained, briefly</h3>
+<p>Typically, if we are comparing outcomes for two treatment arms, we calculate a statistic that quantifies the comparison. For example, this could be a difference in group means, a risk ratio, or a log-odds ratio. For whatever statistic we use, there would be an underlying sampling distribution of that statistic under the assumption that there is no difference between the two groups. Typically, the sampling distribution would be estimated analytically using additional assumptions about the underlying distributions of the observed data, such as normal or Poisson. We then use the sampling distribution to calculate a <em>p-value</em> for the observed value of the statistic.</p>
+<p>The permutation approach is an alternative way to generate the sampling distribution of the statistic under an assumption of no group differences <em>without</em> making any assumptions about the distributions of the data. If group membership does not influence the outcome, it wouldn’t matter if we re-arranged all the treatment assignments in the data. We could do that and estimate the statistic. In fact, we could do that for all the possible arrangements, and that would give us a distribution of the statistic for that sample under the assumption of no group effect. (If the number of possible arrangements is excessive, we could just take a large sample of those possible arrangements, which is what I do below.) To get a <em>p-value</em>, we compare the observed statistic to this manufactured distribution.</p>
+<p>Now to the simulations.</p>
+</div>
+<div id="the-data-generation-process" class="section level3">
+<h3>The data generation process</h3>
+<p>In this proposed study, we are interested in measuring the rate of Covid-19 infection in 8 nursing homes. Given the nature of the spread of disease and the inter-relationship of the infections between residents, the nursing home is the logical unit of analysis. So, we will only have 8 observations - hardly anything to hang your hat on. But, can the permutation provide any useful information?</p>
+<p>The data generation process starts with generating a pool of residents at each site, about 15 per home. The study will run for followed for 4 months (or 120 days), and residents will come and go during that period. We are going to assume that the average residence time is 50 days at each home, but there will be some variability. Based on the number of patients and average length of stay, we can calculate the number of patient-days per site. The number of infected patients <span class="math inline">\(y\)</span> at a site is a function of the intervention and the time of exposure (patient-days). We will be comparing the average rates (<span class="math inline">\(y/patDays\)</span>) for the two groups.</p>
+<p>In the first simulation, I am assuming no treatment effect, because I want to assess the Type 1 error (the probability of concluding there is an effect given we know there is no effect).</p>
+<p>Here is a function to generate the data definitions and a second function to go through the simple data generation process:</p>
+<pre class="r"><code>library(simstudy)
+library(parallel)</code></pre>
+<pre class="r"><code>defs &lt;- function() {
+  
+  def &lt;- defDataAdd(varname = &quot;nRes&quot;, formula = 15, dist = &quot;poisson&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;nDays&quot;, formula = 50, dist = &quot;poisson&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;patDays&quot;, 
+                    formula = &quot;nRes * pmin(120, nDays)&quot;,
+                    dist = &quot;nonrandom&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;y&quot;, 
+                    formula = &quot;-4 - 0.0 * rx + log(patDays)&quot;, 
+                    variance = 1,
+                    dist = &quot;negBinomial&quot;, link = &quot;log&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;rate&quot;, 
+                    formula = &quot;y/patDays&quot;, 
+                    dist = &quot;nonrandom&quot;)
+  
+  return(def[])
+
+}</code></pre>
+<pre class="r"><code>gData &lt;- function(n, def) {
+  
+  dx &lt;- genData(n)
+  dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+  dx &lt;- addColumns(def, dx)
+  
+  dx[]
+  
+}</code></pre>
+<p>And here we actually generate a single data set:</p>
+<pre class="r"><code>RNGkind(kind = &quot;L&#39;Ecuyer-CMRG&quot;)
+#set.seed(72456)
+set.seed(82456)
+
+def &lt;- defs()
+dx &lt;- gData(8, def)
+dx</code></pre>
+<pre><code>##    id rx nRes nDays patDays  y        rate
+## 1:  1  1   16    40     640  0 0.000000000
+## 2:  2  0    9    59     531  8 0.015065913
+## 3:  3  1   20    57    1140 58 0.050877193
+## 4:  4  1   14    51     714 14 0.019607843
+## 5:  5  1    7    59     413  4 0.009685230
+## 6:  6  0   14    38     532  4 0.007518797
+## 7:  7  0   10    40     400 19 0.047500000
+## 8:  8  0   11    56     616 22 0.035714286</code></pre>
+<p>The observed difference in rates is quite close to 0:</p>
+<pre class="r"><code>dx[, mean(rate), keyby = rx]</code></pre>
+<pre><code>##    rx         V1
+## 1:  0 0.02644975
+## 2:  1 0.02004257</code></pre>
+<pre class="r"><code>obs.diff &lt;- dx[, mean(rate), keyby = rx][, diff(V1)]
+obs.diff</code></pre>
+<pre><code>## [1] -0.006407182</code></pre>
+</div>
+<div id="the-permutation-test" class="section level3">
+<h3>The permutation test</h3>
+<p>With 8 sites, there are <span class="math inline">\(8!\)</span> possible permutations, or a lot ways to scramble the treatment assignments.</p>
+<pre class="r"><code>factorial(8)</code></pre>
+<pre><code>## [1] 40320</code></pre>
+<p>I decided to implement this myself in a pretty rudimentary way, though there are R packages out there that can certainly do this better. Since I am comparing averages, I am creating a vector that represents the contrast.</p>
+<pre class="r"><code>rx &lt;- dx$rx/sum(dx$rx)
+rx[rx==0] &lt;- -1/(length(dx$rx) - sum(dx$rx))
+
+rx</code></pre>
+<pre><code>## [1]  0.25 -0.25  0.25  0.25  0.25 -0.25 -0.25 -0.25</code></pre>
+<p>I’m taking a random sample of 5000 permutations of the contrast vector, storing the results in a matrix:</p>
+<pre class="r"><code>perm &lt;- t(sapply(1:5000, function(x) sample(rx, 8, replace = FALSE)))
+head(perm)</code></pre>
+<pre><code>##       [,1]  [,2]  [,3]  [,4]  [,5]  [,6]  [,7]  [,8]
+## [1,] -0.25 -0.25  0.25 -0.25  0.25  0.25 -0.25  0.25
+## [2,] -0.25 -0.25  0.25 -0.25  0.25 -0.25  0.25  0.25
+## [3,]  0.25 -0.25 -0.25  0.25 -0.25 -0.25  0.25  0.25
+## [4,]  0.25 -0.25  0.25  0.25 -0.25  0.25 -0.25 -0.25
+## [5,] -0.25 -0.25 -0.25  0.25  0.25  0.25  0.25 -0.25
+## [6,]  0.25 -0.25  0.25 -0.25  0.25 -0.25  0.25 -0.25</code></pre>
+<p>Using a simple operation of matrix multiplication, I’m calculating a rate difference for each of the sampled permutations:</p>
+<pre class="r"><code>perm.diffs &lt;- perm %*% dx$rate
+head(perm.diffs)</code></pre>
+<pre><code>##              [,1]
+## [1,]  0.005405437
+## [2,]  0.025396039
+## [3,]  0.004918749
+## [4,] -0.007490399
+## [5,] -0.004336380
+## [6,]  0.007538896</code></pre>
+<p>Here is an estimate of the 2-sided <em>p-value</em>:</p>
+<pre class="r"><code>mean(abs(perm.diffs) &gt; abs(obs.diff))</code></pre>
+<pre><code>## [1] 0.7166</code></pre>
+<p>And finally, here is a histogram of the permuted rate differences, with the observed rate different overlaid as a red line. The observed value lies pretty much right in the middle of the distribution, which is what the <em>p-value</em> suggests:</p>
+<pre class="r"><code>ggplot(data = data.frame(perm.diffs), aes(x = perm.diffs)) +
+  geom_histogram(binwidth = .005, color = &quot;white&quot;) +
+  geom_vline(xintercept = obs.diff, color = &quot;red&quot;) +
+  scale_y_continuous(expand = c(0,0), breaks = seq(2500, 10000, 2500)) +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="/post/2020-06-23-permutation-test-for-a-covid-19-pilot-nursing-home-study.en_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+</div>
+<div id="operating-characteristics" class="section level3">
+<h3>Operating characteristics</h3>
+<p>As in a power analysis by simulation, we can estimate the Type 1 error rate by generating many data sets, and for each one calculate a <em>p-value</em> using the permutation test. The proportion of <em>p-values</em> less than 0.05 would represent the Type 1 error rate, which should be close to 0.05.</p>
+<pre class="r"><code>iter &lt;- function(n) {
+  
+  dx&lt;- gData(n, defs())
+  obs.diff &lt;- dx[, mean(rate), keyby = rx][, diff(V1)]
+
+  rx &lt;- dx$rx/sum(dx$rx)
+  rx[rx==0] &lt;- -1/(n - sum(dx$rx))
+  
+  perm &lt;- t(sapply(1:20000, function(x) sample(rx, n, replace = FALSE)))
+  
+  perm.diffs &lt;- perm %*% dx$rate
+  mean(abs(perm.diffs) &gt; abs(obs.diff))
+}</code></pre>
+<p>Here we use 5000 data sets to estimate the Type 1 error rate under the data generating process we’ve been using all along, and for each of those data sets we use 5000 permutations to estimate the p-value.</p>
+<pre class="r"><code>res &lt;- unlist(mclapply(1:5000, function(x) iter(8), mc.cores = 4))
+mean(res &lt; .05)</code></pre>
+<pre><code>## [1] 0.0542</code></pre>
+</div>
+<div id="the-risks-of-using-a-model-with-assumptions" class="section level3">
+<h3>The risks of using a model (with assumptions)</h3>
+<p>If we go ahead and try to find a signal using a parametric model, there’s a chance we’ll be led astray. These data are count data, so it would not be strange to consider Poisson regression model to estimate the treatment effect (in this case, the effect would be a rate <em>ratio</em> rather than a rate <em>difference</em>). Given that the data are quite limited, we may not really be in a position to verify whether the Poisson distribution is appropriate; as a result, it might be hard to actually select the right model. (In reality, I know that this model <em>will</em> lead us astray, because we used a negative binomial distribution, a distribution with more variance than the Poisson, to generate the count data.)</p>
+<p>Just as before, we generate 5000 data sets. For each one we fit a generalized linear model with a Poisson distribution and a log link, and store the effect estimate along with the <em>p-value</em>.</p>
+<pre class="r"><code>chkglm &lt;- function(n) {
+  
+  dx &lt;- gData(n, defs())
+  glmfit &lt;- glm( y ~ rx + offset(log(patDays)), family = poisson, data = dx)
+  
+  data.table(t(coef(summary(glmfit))[&quot;rx&quot;,]))
+  
+}
+
+glm.res &lt;- rbindlist(mclapply(1:5000, function(x) chkglm(8)))</code></pre>
+<p>The estimated Type 1 error is far greater than 0.05; there would be a pretty good chance that we will be over-enthusiastic about the potential success of our new nursing home strategy if it was not actually effective.</p>
+<pre class="r"><code>glm.res[, .(mean(`Pr(&gt;|z|)` &lt; 0.05))]</code></pre>
+<pre><code>##        V1
+## 1: 0.6152</code></pre>
+</div>
+<div id="when-there-is-a-treatment-effect" class="section level3">
+<h3>When there is a treatment effect</h3>
+<p>In the case where there is actually a treatment effect, the observed effect size is more likely to fall closer to one of the distribution’s tails, depending on the direction of the effect. If the treatment reduces the number infections, we would expect the rate difference to be <span class="math inline">\(&lt; 0\)</span>, as it is in this particular case:</p>
+<pre class="r"><code>def &lt;- updateDefAdd(def, changevar = &quot;y&quot;, 
+          newformula = &quot;-4 - 1.2 * rx + log(patDays)&quot; )</code></pre>
+<p><img src="/post/2020-06-23-permutation-test-for-a-covid-19-pilot-nursing-home-study.en_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p>At the end of the day, if you feel like you must estimate the treatment effect in a pilot study before moving on to the larger trial, one option is to use a non-parametric approach like a permutation test that requires fewer assumptions to lead you astray.</p>
+<p>In the end, though, we opted for a different model. If we do get the go ahead to conduct this study, we will fit a Bayesian model instead. We hope this will be flexible enough to accommodate a range of assumptions and give us a potentially more informative posterior probability of a treatment effect. If we actually get the opportunity to do this, I’ll consider describing that model here.</p>
+<p>
+<p><small><font color="darkkhaki">
+Support:</p>
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small>
+</p>
+</div>
