@@ -1,0 +1,139 @@
+---
+title: Simulating multiple RCTs to simulate a meta-analysis
+author: Keith Goldfeld
+date: '2020-07-07'
+slug: simulating-mutliple-studies-to-simulate-a-meta-analysis
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>I am currently involved with an RCT that is struggling to recruit eligible patients (by no means an unusual problem), increasing the risk that findings might be inconclusive. A possible solution to this conundrum is to find similar, ongoing trials with the aim of pooling data in a single analysis, to conduct a <em>meta-analysis</em> of sorts.</p>
+<p>In an ideal world, this theoretical collection of sites would have joined forces to develop a single study protocol, but often there is no structure or funding mechanism to make that happen. However, this group of studies may be similar enough - based on the target patient population, study inclusion and exclusion criteria, therapy protocols, comparison or control condition, randomization scheme, and outcome measurement - that it might be reasonable to estimate a single treatment effect and some measure of uncertainty.</p>
+<p>This pooling approach would effectively be a prospective meta-analysis using <em>individual participant data</em>. The goal is to estimate a single treatment effect for this intervention or therapy that has been evaluated by different groups under varying research conditions, with possibly different treatment effects in each study.</p>
+<p>To explore how all of this works, I generated some data and fit some models. As usual I thought the code would be more useful sitting on this blog rather than hidden away on some secure server.</p>
+<div id="the-model" class="section level3">
+<h3>The model</h3>
+<p>In this simulation, I am using a generic continuous outcome <span class="math inline">\(y_{ik}\)</span>, for individual <span class="math inline">\(i\)</span> who is participating in study <span class="math inline">\(k\)</span>. The individual outcome is a function of the study itself and whether that individual received the experimental therapy (<span class="math inline">\(x_{ik} = 1\)</span> for patients in the experimental arm):</p>
+<p><span class="math display">\[ y_{ik} = \alpha_k + \delta_k x_{ik} + e_{ik} \\
+\\  
+\delta_k = \delta_0 + v_k
+\]</span>
+<span class="math inline">\(\alpha_k\)</span> is the intercept for study <span class="math inline">\(k\)</span>, or the average outcome for patients in study <span class="math inline">\(k\)</span> in the control arm. <span class="math inline">\(\delta_k\)</span> is the treatment effect in study <span class="math inline">\(k\)</span> and can be decomposed into a common treatment effect across all studies <span class="math inline">\(\delta_0\)</span> and a study-specific effect <span class="math inline">\(v_k\)</span>. <span class="math inline">\(v_k\)</span> is often assumed to be normally distributed, <span class="math inline">\(v_k \sim N(0, \tau^2)\)</span>. An individual effect, <span class="math inline">\(e_{ik}\)</span> is also assumed to be normally distributed, <span class="math inline">\(e_{ik} \sim N(0, \sigma_k^2)\)</span>. Note that the variance <span class="math inline">\(\sigma_k^2\)</span> of individual effects might differ across studies; that is, in some studies patients may be more similar to each other than in other studies.</p>
+</div>
+<div id="the-simulation-assumptions" class="section level3">
+<h3>The simulation assumptions</h3>
+<p>Before starting - here are the necessary libraries in case you want to follow along:</p>
+<pre class="r"><code>library(simstudy)
+library(parallel)
+library(nlme)
+library(data.table)</code></pre>
+<p>In these simulations, there are 12 studies, each enrolling a different number of patients. There are a set of smaller studies, moderately sized studies, and larger studies. We are not really interested in the variability of the intercepts (<span class="math inline">\(\alpha_k\)</span>’s), but we generate based on a normal distribution <span class="math inline">\(N(3, 2)\)</span>. The overall treatment effect is set at <span class="math inline">\(3\)</span>, and the study-specific effects are distributed as <span class="math inline">\(N(0, 6)\)</span>. We use a gamma distribution to create the study-specific within study variation <span class="math inline">\(\sigma^2_k\)</span>: the average within-study variance is <span class="math inline">\(16\)</span>, and will range between <span class="math inline">\(1\)</span> and <span class="math inline">\(64\)</span> (the variance of the variances is <span class="math inline">\(mean^2 \times dispersion = 16^2 \times 0.2 = 51.2\)</span>). The study-specific data are generated using these assumptions:</p>
+<pre class="r"><code>defS &lt;- defData(varname = &quot;a.k&quot;, formula = 3, variance = 2, id = &quot;study&quot;)
+defS &lt;- defData(defS, varname = &quot;d.0&quot;, formula = 3, dist = &quot;nonrandom&quot;)
+defS &lt;- defData(defS, varname = &quot;v.k&quot;, formula = 0, variance = 6, dist= &quot;normal&quot;)
+defS &lt;- defData(defS, varname = &quot;s2.k&quot;, formula = 16, variance = .2, dist = &quot;gamma&quot;)
+defS &lt;- defData(defS, varname = &quot;size.study&quot;, formula = &quot;.3;.5;.2&quot;, dist = &quot;categorical&quot;)
+defS &lt;- defData(defS, varname = &quot;n.study&quot;, 
+    formula = &quot;(size.study==1) * 20 + (size.study==2) * 40 + (size.study==3) * 60&quot;,
+    dist = &quot;poisson&quot;)</code></pre>
+<p>The individual outcomes are generated based on the model specified above:</p>
+<pre class="r"><code>defI &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;a.k + x * (d.0 + v.k)&quot;, variance = &quot;s2.k&quot;)</code></pre>
+</div>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>First, we generate the study level data:</p>
+<pre class="r"><code>RNGkind(kind = &quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(12764)
+
+ds &lt;- genData(12, defS)
+ds</code></pre>
+<pre><code>##     study  a.k d.0     v.k  s2.k size.study n.study
+##  1:     1 2.51   3  2.7437  5.25          2      30
+##  2:     2 1.51   3 -4.8894 30.48          2      37
+##  3:     3 1.62   3 -4.1762 15.06          1      22
+##  4:     4 3.34   3  0.2494  3.26          2      44
+##  5:     5 2.34   3 -2.9078  5.59          1      15
+##  6:     6 1.70   3  1.3498  7.42          2      44
+##  7:     7 4.17   3 -0.4135 14.58          2      45
+##  8:     8 2.14   3  0.7826 25.78          2      44
+##  9:     9 2.54   3 -1.1197 15.72          1      28
+## 10:    10 3.10   3 -2.1275 10.00          1      24
+## 11:    11 2.62   3 -0.0812 32.76          2      40
+## 12:    12 1.17   3 -0.5745 30.94          2      49</code></pre>
+<p>And then we generate individuals within each study, assign treatment, and add the outcome:</p>
+<pre class="r"><code>dc &lt;- genCluster(ds, &quot;study&quot;, &quot;n.study&quot;, &quot;id&quot;, )
+dc &lt;- trtAssign(dc, strata = &quot;study&quot;, grpName = &quot;x&quot;)
+dc &lt;- addColumns(defI, dc)</code></pre>
+<p>The observed data set obviously does not include any underlying study data parameters. The figure based on this data set shows the individual-level outcomes by treatment arm for each of the 12 studies. The study-specific treatment effects and differences in within-study variation are readily apparent.</p>
+<pre class="r"><code>d.obs &lt;- dc[, .(study, id, x, y)]</code></pre>
+<p><img src="/post/2020-07-07-simulating-mutliple-studies-to-simulate-a-meta-analysis.en_files/figure-html/unnamed-chunk-8-1.png" width="528" /></p>
+</div>
+<div id="initial-estimates" class="section level3">
+<h3>Initial estimates</h3>
+<p>If each study went ahead and analyzed its own data set separately, the emerging picture would be a bit confusing. We would have 12 different estimates, some concluding that the treatment is effective, and others not able to draw that conclusion. A plot of the 12 model estimates along with the 95% confidence intervals highlights the muddled picture. For additional reference, I’ve added points that represent the true (and unknown) study effects in blue, including a blue line at the value of the overall treatment effect.</p>
+<pre class="r"><code>lm.ind &lt;- function(z, dx) {
+  fit &lt;- lm(y~x, data = dx)
+  data.table(z, coef(fit)[&quot;x&quot;], confint(fit, &quot;x&quot;))
+}
+
+res &lt;- lapply(1:d.obs[, length(unique(study))], function(z) lm.ind(z, d.obs[study == z]))</code></pre>
+<p><img src="/post/2020-07-07-simulating-mutliple-studies-to-simulate-a-meta-analysis.en_files/figure-html/unnamed-chunk-10-1.png" width="576" /></p>
+</div>
+<div id="the-meta-analysis" class="section level3">
+<h3>The meta-analysis</h3>
+<p>The meta-analysis is an attempt to pool the findings from all the studies to try to draw an overall conclusion. Traditionally, meta-analysis has been conducted using only the summary information from each study - effect size estimates, standard errors, and sample sizes. More recently, researchers have started to use individual-level data to estimate an overall effect. There are advantages to this added level of detail, particularly in enhancing the ability to model patient-level and study-level characteristics that might influence the effect size; these adjustments could help reduce the variance of the effect size estimates.</p>
+<p>There are packages in <code>R</code> specifically designed to conduct meta-analysis, but I am doing it “manually” through the use of the <code>nlme</code> package, which estimates mixed-effects model that mimics the underlying data process. (In a subsequent post, I will do the same thing using a Bayesian model implement using <code>rstan</code>.) I opted for <code>nlme</code> over the <code>lme4</code> package, because the former can accommodate the possibility of different within-study variation.</p>
+<p>The model fit here includes a study specific (fixed) intercept, an overall treatment effect, and a study-specific treatment effect. And, as I just mentioned, the within-study variation is accommodated:</p>
+<pre class="r"><code>lmefit &lt;- lme(y ~  factor(study) + x - 1,
+               random  = ~ x - 1 | study, 
+               weights = varIdent(form = ~ 1 | study),
+               data = d.obs, method = &#39;REML&#39;
+              )</code></pre>
+<p>The model estimate for the overall treatment effect is 2.5, just under but close to the true value of 3.0:</p>
+<pre class="r"><code>round(coef(summary(lmefit))[&quot;x&quot;,], 3)</code></pre>
+<pre><code>## Warning in pt(-abs(tVal), fDF): NaNs produced</code></pre>
+<pre><code>##     Value Std.Error        DF   t-value   p-value 
+##     2.481     0.851   410.000     2.915     0.004</code></pre>
+</div>
+<div id="bootstrapping-uncertainty" class="section level3">
+<h3>Bootstrapping uncertainty</h3>
+<p>Every meta-analysis I’ve seen includes a forest plot that shows the individual study estimates along with the global estimate of primary interest. In my version of this plot, I wanted to show the estimated study-level effects from the model (<span class="math inline">\(\delta_0 + v_k\)</span>) along with 95% confidence intervals. The model fit does not provide a variance estimate for each study-level treatment effect, so I have estimated the standard error using bootstrap methods. I repeatedly sample from the observed data (sampling stratified by study and treatment arm) and estimate the same fixed effects model. For each iteration, I keep the estimated study-specific treatment effect as well as the estimated pooled effect:</p>
+<pre class="r"><code>bootest &lt;- function() {
+  
+  bootid &lt;- d.obs[, .(id = sample(id, .N, replace = TRUE)), keyby = .(study, x)][, .(id)]
+  dboot &lt;- merge(bootid, d.obs, by = &quot;id&quot;)
+  
+  bootfit &lt;- tryCatch(
+              { lme(y ~  factor(study) + x - 1,
+                 random  = ~ x - 1 | study, 
+                 weights = varIdent(form = ~ 1 | study),
+                 data = dboot, method = &#39;REML&#39;)
+              }, 
+              error = function(e) {
+                   return(&quot;error&quot;)
+              }, 
+              warn = function(w) {
+                   return(&quot;warning&quot;)
+              }
+  )
+  
+  if (class(bootfit) == &quot;lme&quot;) {
+    return(data.table(t(random.effects(bootfit) + fixed.effects(bootfit)[&quot;x&quot;]),
+                      pooled = fixed.effects(bootfit)[&quot;x&quot;]))
+  }
+  
+}
+
+res &lt;- mclapply(1:3000, function(x) bootest(), mc.cores = 4)
+res &lt;- rbindlist(res)</code></pre>
+<p>The next plot shows the individual study estimates based on the pooled analysis along with the overall estimate in red, allowing us to bring a little clarity to what was an admittedly confusing picture. We might conclude from these findings that the intervention appears to be effective.</p>
+<p><img src="/post/2020-07-07-simulating-mutliple-studies-to-simulate-a-meta-analysis.en_files/figure-html/unnamed-chunk-14-1.png" width="576" /></p>
+<p>As an aside, it is interesting to compare the two forest plot figures in the post, because it is apparent that the point estimates for the individual studies in the second plot are “pulled” closer to the overall average. This is the direct result of the mixed effects model that imposes a structure in the variation of effect sizes across the 12 studies. In contrast, the initial plot shows individual effect sizes that were independently estimated without any such constraint or structure. Pooling across groups or clusters generally has an attenuating effect on estimates.</p>
+</div>
