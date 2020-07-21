@@ -1,0 +1,267 @@
+---
+title: 'A Bayesian model for a simulated meta-analysis'
+author: 
+date: '2020-07-21'
+slug: a-bayesian-model-for-a-simulated-meta-analysis
+categories: []
+tags: 
+  - R
+  - Stan
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+---
+
+This is essentially an addendum to the previous [post]() where I simulated data from multiple RCTs to explore an analytic method to pool data across different studies. In that post, I used the `nlme` package to conduct a meta-analysis based on individual level data of 12 studies. Here, I am presenting an alternative hierarchical modeling approach that uses the Bayesian package `rstan`.
+
+### Create the data set
+
+We'll use the exact same data generating process as [described]() in some detail in the previous post.
+
+```{r, warning=FALSE, message=FALSE}
+library(simstudy)
+library(rstan)
+library(data.table)
+```
+
+```{r}
+defS <- defData(varname = "a.k", formula = 3, variance = 2, id = "study")
+defS <- defData(defS, varname = "d.0", formula = 3, dist = "nonrandom")
+defS <- defData(defS, varname = "v.k", formula = 0, variance = 6, dist= "normal")
+defS <- defData(defS, varname = "s2.k", formula = 16, variance = .2, dist = "gamma")
+defS <- defData(defS, varname = "size.study", formula = ".3;.5;.2", dist = "categorical")
+defS <- defData(defS, varname = "n.study", 
+    formula = "(size.study==1) * 20 + (size.study==2) * 40 + (size.study==3) * 60",
+    dist = "poisson")
+
+defI <- defDataAdd(varname = "y", formula = "a.k + x * (d.0 + v.k)", variance = "s2.k")
+
+RNGkind(kind = "L'Ecuyer-CMRG")
+set.seed(12764)
+
+ds <- genData(12, defS)
+
+dc <- genCluster(ds, "study", "n.study", "id", )
+dc <- trtAssign(dc, strata = "study", grpName = "x")
+dc <- addColumns(defI, dc)
+
+d.obs <- dc[, .(study, id, x, y)]
+```
+
+### Build the Stan model
+
+There are multiple ways to estimate a `Stan` model in `R`, but I choose to build the Stan code directly rather than using the `brms` or `rstanarm` packages. In the Stan code, we need to define the data structure, specify the parameters, specify any transformed parameters (which are just a function of the parameters), and then build the model - which includes laying out the prior distributions as well as the likelihood.
+
+In this case, the model is slightly different from what was presented in the context of a mixed effects model. This is the mixed effects model:
+
+$$ y_{ik} = \alpha_k + \delta_k x_{ik} + e_{ik} \\
+\\  
+\delta_k = \delta_0 + v_k \\ 
+e_{ik} \sim N(0, \sigma_k^2), v_k \sim N(0,\tau^2)
+$$
+In this Bayesian model, things are pretty much the same:
+$$ y_{ik} \sim N(\alpha_k + \delta_k x_{ik}, \sigma_k^2) \\
+\\  
+\delta_k \sim N(\Delta, \tau^2)
+$$
+
+The key difference is that there are prior distributions on $\Delta$ and $\tau$, introducing an additional level of uncertainty into the estimate. I would expect that the estimate of the overall treatment effect $\Delta$ will have a wider 95% CI (credible interval in this context) than the 95% CI (confidence interval) for $\delta_0$ in the mixed effects model. This added measure of uncertainty is a strength of the Bayesian approach. 
+
+```{stan output.var='priors', eval = FALSE}
+data {
+  int<lower=0> N;               // number of observations
+  int<lower=1> K;               // number of studies
+  real y[N];                    // vector of continuous outcomes
+  int<lower=1,upper=K> kk[N];   // study for individual
+  int<lower=0,upper=1> x[N];    // treatment arm for individual
+}
+
+parameters {
+  vector[K] beta;               // study-specific intercept
+  vector[K] delta;              // study effects
+  real<lower=0> sigma[K];       // sd of outcome dist - study specific
+  real Delta;                   // average treatment effect
+  real <lower=0> tau;           // variation of treatment effects
+}
+
+transformed parameters{ 
+  
+  vector[N] yhat;
+  
+  for (i in 1:N)  
+      yhat[i] = beta[kk[i]] + x[i] * delta[kk[i]];
+}
+
+model {
+  
+  // priors
+  
+  sigma ~ normal(0, 2.5);
+  beta ~ normal(0, 10);
+  
+  tau ~ normal(0, 2.5);
+  Delta ~ normal(0, 10);
+  delta ~ normal(Delta, tau);
+
+
+  // outcome model
+  
+  for (i in 1:N)
+    y[i] ~ normal(yhat[i], sigma[kk[i]]);
+}
+```
+
+### Generate the posterior distributions
+
+With the model in place, we transform the data into a `list` so that Stan can make sense of it:
+
+```{r, eval = FALSE}
+N <- nrow(d.obs)                               ## number of observations
+K <- dc[, length(unique(study))]               ## number of studies
+y <- d.obs$y                                   ## vector of continuous outcomes
+kk <- d.obs$study                              ## study for individual
+x <- d.obs$x                                   ## treatment arm for individual
+
+ddata <- list(N = N, K = K, y = y, kk = kk, x = x)
+```
+
+And then we compile the Stan code:
+
+```{r, eval=FALSE}
+rt <- stanc("model.stan")
+sm <- stan_model(stanc_ret = rt, verbose=FALSE)
+```
+
+Finally, we can sample data from the posterior distribution:
+
+```{r, eval=FALSE}
+fit <-  sampling(sm, data=ddata, seed = 3327, iter = 10000, warmup = 2500,
+                 control=list(adapt_delta=0.9))
+```
+
+```{r, echo=FALSE, message=FALSE}
+load("DataBayesMeta/fit.Rdata")
+```
+
+### Check the diagonstic plots
+
+Before looking at any of the output, it is imperative to convince ourselves that the MCMC process was a stable one. The *trace* plot is the most basic way to assess this. Here, I am only showing these plots for $\Delta$ and $\tau$, but the plots for the other parameters looked similar, which is to say everything looks good:
+
+```{r, fig.width = 7, fig.height=2}
+pname <- c("Delta", "tau")
+stan_trace(object = fit, pars = pname)
+```
+
+### Look at the results
+
+It is possible to look inspect the distribution of any or all parameters. In this case, I am particularly interested in the treatment effects at the study level, and overall. That is, the focus here is on $\Delta$, $\delta_k$, and $\tau$.
+
+```{r}
+pname <- c("delta", "Delta","tau")
+print(fit, pars=pname, probs = c(0.05, 0.5, 0.95))
+```
+
+The forest plot is quite similar to the one based on the mixed effects model, though as predicted, the 95% CI is considerably wider:
+
+```{r, echo=FALSE, eval=TRUE, fig.width = 6, fig.height=3.2}
+x <- apply(extract(fit, pars = c("delta"))$delta, 2, mean)
+ci <- t(apply(extract(fit, pars = c("delta"))$delta, 2, quantile, probs = c(.025, .975)))
+
+dstudy <- data.table(study = 1:length(x), x, ci)
+
+x.p <- mean(extract(fit, pars = c("Delta"))$Delta)
+ci.p <- quantile(extract(fit, pars = c("Delta"))$Delta,  probs = c(.025, .975))
+
+dpooled <- data.table(study = length(x) + 1, x = x.p, t(ci.p))
+
+dchk <- rbind(dstudy, dpooled)
+dchk[, study := factor(1:.N, levels = .N:1, labels = c("pooled", (.N-1):1))]
+dchk[, red:=(study == "pooled")]
+
+ggplot(data = dchk, aes(x = study, y = x)) +
+  geom_segment(aes(y = `2.5%`, yend = `97.5%`, x=study, xend = study, color = red)) +
+  geom_point() +
+  geom_hline(yintercept = 0, lty = 3, color = "grey60") +
+  geom_hline(yintercept = 3, lty = 3, color = "blue", alpha = .4) +
+  scale_color_manual(values = c("black", "red")) +
+  theme(legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor.x = element_blank()
+        ) +
+  scale_y_continuous(name = "estimated treatment effect (95% CI)",
+                     limits = c(-7, 11),
+                     breaks = c(-5, 0, 3, 5, 10)) +
+  coord_flip()
+```
+
+As a comparison, here is the plot from the mixed effects model estimated using the `nlme` package in the previous post. The bootstrapped estimates of uncertainty at the study level are quite close to the Bayesian measure of uncertainty; the difference really lies in the uncertainty around the global estimate.
+
+```{r, echo=FALSE, eval=TRUE, fig.width = 6, fig.height=3.2, message=FALSE}
+library(nlme)
+lmefit <- lme(y ~  factor(study) + x - 1,
+               random  = ~ x - 1 | study, 
+               weights = varIdent(form = ~ 1 | study),
+               data = d.obs, method = 'REML'
+              )
+
+bootest <- function() {
+  
+  bootid <- d.obs[, .(id = sample(id, .N, replace = TRUE)), keyby = .(study, x)][, .(id)]
+  dboot <- merge(bootid, d.obs, by = "id")
+  
+  bootfit <- tryCatch(
+              { lme(y ~  factor(study) + x - 1,
+                 random  = ~ x - 1 | study, 
+                 weights = varIdent(form = ~ 1 | study),
+                 data = dboot, method = 'REML')
+              }, 
+              error = function(e) {
+                   return("error")
+              }, 
+              warn = function(w) {
+                   return("warning")
+              }
+  )
+  
+  if (class(bootfit) == "lme") {
+    return(data.table(t(random.effects(bootfit) + fixed.effects(bootfit)["x"]),
+                      pooled = fixed.effects(bootfit)["x"]))
+  }
+  
+}
+
+library(parallel)
+res <- mclapply(1:3000, function(x) bootest(), mc.cores = 4)
+res <- rbindlist(res)
+
+studyest <- rbind(random.effects(lmefit) + fixed.effects(lmefit)["x"],
+              fixed.effects(lmefit)["x"])
+
+ci <- t(sapply(res, function(x) quantile(x, c(.025, .975))))
+
+dchk <- data.table(var = apply(res,2, var), n = c(ds$n.study,NA), 
+                   v = c(ds$s2.k, NA))
+dchk[, study := factor(1:.N, levels = .N:1, labels = c("pooled", (.N-1):1))]
+dchk[, rx := studyest]
+dchk[, sd := sqrt(var) ]
+dchk[, lower := rx - 1.96*sd]
+dchk[, upper := rx + 1.96*sd]
+dchk[, red:=(study == "pooled")]
+
+library(ggplot2)
+ggplot(data = dchk, aes(x = study, y = rx)) +
+  geom_segment(aes(y = lower, yend = upper, x=study, xend = study, color = red)) +
+  geom_point() +
+  geom_hline(yintercept = 0, lty = 3, color = "grey60") +
+  geom_hline(yintercept = 3, lty = 3, color = "blue", alpha = .4) +
+  scale_color_manual(values = c("black", "red")) +
+  theme(legend.position = "none",
+        panel.grid.major = element_blank(),
+        panel.grid.minor.x = element_blank()
+        ) +
+  scale_y_continuous(name = "estimated treatment effect (95% CI)",
+                     limits = c(-7, 11),
+                     breaks = c(-5, 0, 3, 5, 10)) +
+  coord_flip()
+```

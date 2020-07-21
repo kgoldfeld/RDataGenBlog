@@ -1,0 +1,162 @@
+---
+title: 'A Bayesian model for a simulated meta-analysis'
+author: 
+date: '2020-07-21'
+slug: a-bayesian-model-for-a-simulated-meta-analysis
+categories: []
+tags: 
+  - R
+  - Stan
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>This is essentially an addendum to the previous <a href="">post</a> where I simulated data from multiple RCTs to explore an analytic method to pool data across different studies. In that post, I used the <code>nlme</code> package to conduct a meta-analysis based on individual level data of 12 studies. Here, I am presenting an alternative hierarchical modeling approach that uses the Bayesian package <code>rstan</code>.</p>
+<div id="create-the-data-set" class="section level3">
+<h3>Create the data set</h3>
+<p>We’ll use the exact same data generating process as <a href="">described</a> in some detail in the previous post.</p>
+<pre class="r"><code>library(simstudy)
+library(rstan)
+library(data.table)</code></pre>
+<pre class="r"><code>defS &lt;- defData(varname = &quot;a.k&quot;, formula = 3, variance = 2, id = &quot;study&quot;)
+defS &lt;- defData(defS, varname = &quot;d.0&quot;, formula = 3, dist = &quot;nonrandom&quot;)
+defS &lt;- defData(defS, varname = &quot;v.k&quot;, formula = 0, variance = 6, dist= &quot;normal&quot;)
+defS &lt;- defData(defS, varname = &quot;s2.k&quot;, formula = 16, variance = .2, dist = &quot;gamma&quot;)
+defS &lt;- defData(defS, varname = &quot;size.study&quot;, formula = &quot;.3;.5;.2&quot;, dist = &quot;categorical&quot;)
+defS &lt;- defData(defS, varname = &quot;n.study&quot;, 
+    formula = &quot;(size.study==1) * 20 + (size.study==2) * 40 + (size.study==3) * 60&quot;,
+    dist = &quot;poisson&quot;)
+
+defI &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;a.k + x * (d.0 + v.k)&quot;, variance = &quot;s2.k&quot;)
+
+RNGkind(kind = &quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(12764)
+
+ds &lt;- genData(12, defS)
+
+dc &lt;- genCluster(ds, &quot;study&quot;, &quot;n.study&quot;, &quot;id&quot;, )
+dc &lt;- trtAssign(dc, strata = &quot;study&quot;, grpName = &quot;x&quot;)
+dc &lt;- addColumns(defI, dc)
+
+d.obs &lt;- dc[, .(study, id, x, y)]</code></pre>
+</div>
+<div id="build-the-stan-model" class="section level3">
+<h3>Build the Stan model</h3>
+<p>There are multiple ways to estimate a <code>Stan</code> model in <code>R</code>, but I choose to build the Stan code directly rather than using the <code>brms</code> or <code>rstanarm</code> packages. In the Stan code, we need to define the data structure, specify the parameters, specify any transformed parameters (which are just a function of the parameters), and then build the model - which includes laying out the prior distributions as well as the likelihood.</p>
+<p>In this case, the model is slightly different from what was presented in the context of a mixed effects model. This is the mixed effects model:</p>
+<p><span class="math display">\[ y_{ik} = \alpha_k + \delta_k x_{ik} + e_{ik} \\
+\\  
+\delta_k = \delta_0 + v_k \\ 
+e_{ik} \sim N(0, \sigma_k^2), v_k \sim N(0,\tau^2)
+\]</span>
+In this Bayesian model, things are pretty much the same:
+<span class="math display">\[ y_{ik} \sim N(\alpha_k + \delta_k x_{ik}, \sigma_k^2) \\
+\\  
+\delta_k \sim N(\Delta, \tau^2)
+\]</span></p>
+<p>The key difference is that there are prior distributions on <span class="math inline">\(\Delta\)</span> and <span class="math inline">\(\tau\)</span>, introducing an additional level of uncertainty into the estimate. I would expect that the estimate of the overall treatment effect <span class="math inline">\(\Delta\)</span> will have a wider 95% CI (credible interval in this context) than the 95% CI (confidence interval) for <span class="math inline">\(\delta_0\)</span> in the mixed effects model. This added measure of uncertainty is a strength of the Bayesian approach.</p>
+<pre class="stan"><code>data {
+  int&lt;lower=0&gt; N;               // number of observations
+  int&lt;lower=1&gt; K;               // number of studies
+  real y[N];                    // vector of continuous outcomes
+  int&lt;lower=1,upper=K&gt; kk[N];   // study for individual
+  int&lt;lower=0,upper=1&gt; x[N];    // treatment arm for individual
+}
+
+parameters {
+  vector[K] beta;               // study-specific intercept
+  vector[K] delta;              // study effects
+  real&lt;lower=0&gt; sigma[K];       // sd of outcome dist - study specific
+  real Delta;                   // average treatment effect
+  real &lt;lower=0&gt; tau;           // variation of treatment effects
+}
+
+transformed parameters{ 
+  
+  vector[N] yhat;
+  
+  for (i in 1:N)  
+      yhat[i] = beta[kk[i]] + x[i] * delta[kk[i]];
+}
+
+model {
+  
+  // priors
+  
+  sigma ~ normal(0, 2.5);
+  beta ~ normal(0, 10);
+  
+  tau ~ normal(0, 2.5);
+  Delta ~ normal(0, 10);
+  delta ~ normal(Delta, tau);
+
+
+  // outcome model
+  
+  for (i in 1:N)
+    y[i] ~ normal(yhat[i], sigma[kk[i]]);
+}</code></pre>
+</div>
+<div id="generate-the-posterior-distributions" class="section level3">
+<h3>Generate the posterior distributions</h3>
+<p>With the model in place, we transform the data into a <code>list</code> so that Stan can make sense of it:</p>
+<pre class="r"><code>N &lt;- nrow(d.obs)                               ## number of observations
+K &lt;- dc[, length(unique(study))]               ## number of studies
+y &lt;- d.obs$y                                   ## vector of continuous outcomes
+kk &lt;- d.obs$study                              ## study for individual
+x &lt;- d.obs$x                                   ## treatment arm for individual
+
+ddata &lt;- list(N = N, K = K, y = y, kk = kk, x = x)</code></pre>
+<p>And then we compile the Stan code:</p>
+<pre class="r"><code>rt &lt;- stanc(&quot;model.stan&quot;)
+sm &lt;- stan_model(stanc_ret = rt, verbose=FALSE)</code></pre>
+<p>Finally, we can sample data from the posterior distribution:</p>
+<pre class="r"><code>fit &lt;-  sampling(sm, data=ddata, seed = 3327, iter = 10000, warmup = 2500,
+                 control=list(adapt_delta=0.9))</code></pre>
+</div>
+<div id="check-the-diagonstic-plots" class="section level3">
+<h3>Check the diagonstic plots</h3>
+<p>Before looking at any of the output, it is imperative to convince ourselves that the MCMC process was a stable one. The <em>trace</em> plot is the most basic way to assess this. Here, I am only showing these plots for <span class="math inline">\(\Delta\)</span> and <span class="math inline">\(\tau\)</span>, but the plots for the other parameters looked similar, which is to say everything looks good:</p>
+<pre class="r"><code>pname &lt;- c(&quot;Delta&quot;, &quot;tau&quot;)
+stan_trace(object = fit, pars = pname)</code></pre>
+<p><img src="/post/2020-07-21-a-bayesian-model-for-a-simulated-meta-analysis.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
+<div id="look-at-the-results" class="section level3">
+<h3>Look at the results</h3>
+<p>It is possible to look inspect the distribution of any or all parameters. In this case, I am particularly interested in the treatment effects at the study level, and overall. That is, the focus here is on <span class="math inline">\(\Delta\)</span>, <span class="math inline">\(\delta_k\)</span>, and <span class="math inline">\(\tau\)</span>.</p>
+<pre class="r"><code>pname &lt;- c(&quot;delta&quot;, &quot;Delta&quot;,&quot;tau&quot;)
+print(fit, pars=pname, probs = c(0.05, 0.5, 0.95))</code></pre>
+<pre><code>## Inference for Stan model: model.
+## 4 chains, each with iter=10000; warmup=2500; thin=1; 
+## post-warmup draws per chain=7500, total post-warmup draws=30000.
+## 
+##            mean se_mean   sd    5%   50%  95% n_eff Rhat
+## delta[1]   6.39    0.01 1.13  4.51  6.41 8.22 29562    1
+## delta[2]  -0.78    0.01 1.62 -3.45 -0.78 1.85 28188    1
+## delta[3]  -0.14    0.01 1.39 -2.37 -0.16 2.18 28909    1
+## delta[4]   3.08    0.00 0.59  2.09  3.08 4.05 34277    1
+## delta[5]  -0.16    0.01 1.01 -1.77 -0.18 1.52 27491    1
+## delta[6]   3.87    0.00 0.86  2.47  3.87 5.27 35079    1
+## delta[7]   4.04    0.01 1.11  2.21  4.03 5.87 32913    1
+## delta[8]   5.23    0.01 1.29  3.12  5.23 7.36 33503    1
+## delta[9]   1.79    0.01 1.25 -0.27  1.78 3.82 30709    1
+## delta[10]  1.38    0.01 1.12 -0.46  1.38 3.21 30522    1
+## delta[11]  4.47    0.01 1.25  2.43  4.47 6.54 34573    1
+## delta[12]  0.79    0.01 1.45 -1.60  0.80 3.16 33422    1
+## Delta      2.48    0.00 0.89  1.01  2.50 3.89 31970    1
+## tau        2.72    0.00 0.71  1.72  2.64 4.01 24118    1
+## 
+## Samples were drawn using NUTS(diag_e) at Sat Jun 27 15:47:15 2020.
+## For each parameter, n_eff is a crude measure of effective sample size,
+## and Rhat is the potential scale reduction factor on split chains (at 
+## convergence, Rhat=1).</code></pre>
+<p>The forest plot is quite similar to the one based on the mixed effects model, though as predicted, the 95% CI is considerably wider:</p>
+<p><img src="/post/2020-07-21-a-bayesian-model-for-a-simulated-meta-analysis.en_files/figure-html/unnamed-chunk-10-1.png" width="576" /></p>
+<p>As a comparison, here is the plot from the mixed effects model estimated using the <code>nlme</code> package in the previous post. The bootstrapped estimates of uncertainty at the study level are quite close to the Bayesian measure of uncertainty; the difference really lies in the uncertainty around the global estimate.</p>
+<p><img src="/post/2020-07-21-a-bayesian-model-for-a-simulated-meta-analysis.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
+</div>
