@@ -1,0 +1,338 @@
+---
+title: 'A hurdle model for COVID-19 infections in nursing homes'
+author: Keith Goldfeld
+date: '2020-08-04'
+slug: a-hurdle-model-for-covid-19-infections-in-nursing-homes-sample-size-considerations
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+```{r, echo=FALSE}
+options(digits = 3)
+```
+
+Late last [year](https://www.rdatagen.net/post/adding-mixture-distributions-to-simstudy/), I added a *mixture* distribution to the `simstudy` package, largely motivated to accommodate *zero-inflated* Poisson or negative binomial distributions. (I really thought I had added this two years ago - but time is moving so slowly these days.) These distributions are useful when modeling count data, but we anticipate observing more than the expected frequency of zeros that would arise from a non-inflated (i.e. "regular") Poisson or negative binomial distribution.
+
+There is a related, though subtly different model - the *hurdle* model - that I want to talk about here, because it has come up in the context of planning a new study to address COVID-19 infection rates in nursing homes using much more aggressive testing strategies.
+
+A hurdle model is a modified count model that also assumes a relatively high frequency of zeros, but is set up as a two-stage data generation process rather than as a mixture distribution. In the first stage, the development of any (i.e. at least 1) new infections during the observation period is described by binomial probability distribution. If there is at least one infection, the process has transitioned over the "hurdle" into the second stage; here, the number of new infections is described by a non-zero count distribution, such as a truncated Poisson or truncated negative binomial distribution.
+
+### Model specification
+
+If $N_i$ is the number of new infections in nursing home $i$ over the observation period and we have two intervention arms $T_i \in \{0,1\}$, the intervention effect at each stage of the process can be modeled simply as:
+
+$$ 
+\text{logodds}\left[ P(N_i > 0) \right] = \beta_0 + \beta_1 T_i + \boldsymbol{X_i \beta_2}$$
+
+$$\text{log}(N_i | N_i \ge 1) = \alpha_0 + \alpha_1 T_i + \boldsymbol{X_i \alpha_2} + \text{log}(D_i)$$
+
+The intervention effect for the binomial stage is $\beta_1$ (on the logodds scale) and the intervention effect for the hurdle (count) stage is $\alpha_1$ (on the log scale). $\boldsymbol{X_i}$ are any covariates that are used for stratified randomization. 
+
+$D_i$ is the number of resident-days observed during the follow-up period, and $\text{log}(D_i)$ is the "offset"; we are effectively modeling a rate of infections $\text{log}(N_i/D_i)$. This will take into account the fact that residents will be observed for different lengths of time - some moving into the nursing home after the study has started, and others leaving or dying before the study is complete.
+
+### Simulating a hurdle model
+
+Simulating data from this model is relatively straightforward, complicated only by the need to generate varying observation periods. Essentially, we must generate two outcomes - a binary outcome and a non-zero count outcome (in this case it will be from a non-zero Poisson distribution), and the observed outcome is 0 if the binary outcome is actually 0, and the value of the count outcome if the binary outcome is 1.
+
+To get things going, here are the packages I will use. The `pscl` package provides a function `hurdle` to estimate the model parameters from our simulated data, and `stargazer` package outputs the model in a nice, readable format.
+
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(pscl)
+library(stargazer)
+```
+#### Data generation
+
+In this simulation the average observation time is 80 days (out of 90 maximum), and on average, each nursing home will have 100 residents. In the control arm, 95% of the nursing homes will have at least one infection, and 80% of the intervention arm will have at least one. The corresponding odds ratio is $(0.80/0.20)/(.95/0.05) = 0.21$.
+
+The infection rate per 1000 resident-days for the control arm will be $\sim (20/8000)*1000 = 2.5$; for the intervention arm, the rate will be $\sim (20/8000) *0.8 * 1000 = 2.0$.
+
+Here is the data definition table `defHurdle` created by the function `defDataAdd` that encodes these assumptions: 
+
+```{r, echo=FALSE}
+defHurdle <- defDataAdd(varname = "nRes", formula = 100, dist = "poisson")
+defHurdle <- defDataAdd(defHurdle, varname = "aDays", formula = 80, dist = "poisson")
+defHurdle <- defDataAdd(defHurdle, varname = "nDays", formula = "pmin(90, aDays)", 
+                dist = "nonrandom")
+defHurdle <- defDataAdd(defHurdle, varname = "pDays", formula = "nRes * nDays",
+                dist = "nonrandom")
+defHurdle <- defDataAdd(defHurdle, varname = "xBin", 
+                formula = "0.95 - 0.15 * rx",
+                dist = "binary")
+defHurdle <- defDataAdd(defHurdle, varname = "xCnt", 
+                formula = "log(20/8000)+log(0.8)*rx+log(pDays)", 
+                dist = "noZeroPoisson", link = "log")
+defHurdle <- defDataAdd(defHurdle, varname = "y", 
+                formula = "xBin * xCnt", 
+                dist = "nonrandom")
+
+defHurdle
+```
+
+The data generation is only at the nursing home level. In this example, we are assuming 500 nursing homes:
+
+```{r}
+set.seed(29211)
+dx <- genData(500)
+dx <- trtAssign(dx, grpName = "rx")
+dx <- addColumns(defHurdle, dx)
+  
+dx
+```
+#### Data visualization
+
+A plot of the data shows the effect at each stage of the hurdle process:
+
+```{r, echo=TRUE, fig.width = 5, fig.height=4}
+dx[, rate1000 := (y/pDays)*1000]
+dx[ , rx := factor(rx, labels = c("No intervention", "Intervention"))]
+dm <- dx[rate1000 != 0, .(mu = mean(rate1000)), keyby = rx]
+
+ggplot(data = dx, aes(x = rate1000)) +
+  geom_vline(aes(xintercept = mu), data = dm, lty = 3, color = "grey50") +
+  geom_histogram(binwidth = .1,
+                 aes(y = (..count..)/sum(..count..), fill = rx)) +
+  facet_grid(rx ~ .) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  scale_y_continuous(labels = scales::percent, 
+                     name = "proportion",
+                     expand = c(0, 0),
+                     breaks = c(c(.05, .10)),
+                     limits = c(0, .11)) +
+  scale_x_continuous(name = "# infections per 1000 resident-days") +
+  scale_fill_manual(values = c("#EDCB64", "#B62A3D")) 
+```
+
+#### Parameter estimation
+
+I fit two models here. The first includes a possible intervention effect, and the second assumes no intervention effect. The purpose in fitting the second model is to provide a basis of comparison.
+
+```{r}
+hfit1 <- hurdle(y ~ rx | rx, offset = log(pDays), data = dx)
+hfit1.0 <- hurdle(y ~ 1 | 1, offset = log(pDays), data = dx)
+```
+
+The hurdle model returns two sets of estimates. The first component of the model shown here is binomial model. The estimated intervention effect (odds ratio) is $exp(-1.570) = 0.21$, as expected. Note that the log-likelihood reported here is for the composite hurdle model (both stages).
+
+```{r}
+stargazer(hfit1, hfit1.0, type = "text", zero.component = TRUE, 
+          notes =" ", notes.append = FALSE, notes.label="", 
+          dep.var.labels.include = FALSE, dep.var.caption = "",
+          omit.stat = "n", object.names = TRUE, model.numbers = FALSE)
+```
+
+The second component is the count model. The estimated intervention effect is $exp(-0.279) = 0.76$, which is close to the true value of $0.80$. (The reported log-likelihoods are the same as in the binomial model.)
+
+```{r}
+stargazer(hfit1, hfit1.0, type = "text", zero.component = FALSE, 
+          notes =" ", notes.append = FALSE, notes.label="", 
+          dep.var.labels.include = FALSE, dep.var.caption = "",
+          omit.stat = "n", object.names = TRUE, model.numbers = FALSE)
+```
+
+In this particular case, the intervention alters both the binomial probability and the county distribution, but that will not necessarily always be the case. A log-likelihood ratio test (LRT) is a global test that compares the model that explicitly excludes an intervention effect (`hfit1.0`) with the model that includes an intervention effect. If the likelihoods under each are close enough, then the model that excludes the intervention effect is considered sufficient, and there is no reason to conclude that the intervention is effective. We can use the p-value based on the LRT as a measure of whether or not the intervention is generally effective, either because it changes the binomial probability, the count distribution, or both.
+
+In this case, the p-value is quite low:
+
+```{r}
+lrt1 <- -2*(logLik(hfit1.0) - logLik(hfit1))
+1 - pchisq(lrt1, 2)
+```
+
+### Alternative scenarios
+
+Here are three additional scenarios that provide examples of ways the intervention can affect the outcome. In Scenario 2, the intervention no longer has an effect on the probability of having at least one infection, but still has an effect on the count. In Scenario 3, the intervention *only* effects the probability of having at least one infection, and not the count distribution. And in Scenario 4, the intervention has no effect at all at either stage.
+
+```{r}
+defHurdle.V2 <- updateDef(defHurdle, "xBin", "0.95")
+defHurdle.V3 <- updateDef(defHurdle, "xCnt", "log(20/8000) + log(pDays)")
+defHurdle.V4 <- updateDef(defHurdle.V3, "xBin", "0.95")
+```
+The plots bear out the underlying parameters. We can see the probability of a zero is the same across treatment arms in Scenario 2, just as the distributions of the count variable in Scenario 3 appear equivalent. In Scenario 4, it is hard to distinguish between the two distributions across interventions.
+
+```{r, echo=FALSE, fig.width = 5, fig.height=4}
+dx <- genData(500)
+dx <- trtAssign(dx, grpName = "rx")
+dx <- addColumns(defHurdle.V2, dx)
+
+dx[, rate1000 := (y/pDays)*1000]
+dx[ , rx := factor(rx, labels = c("No intervention", "Intervention"))]
+dm <- dx[rate1000 != 0, .(mu = mean(rate1000)), keyby = rx]
+
+p2 <- ggplot(data = dx, aes(x = rate1000)) +
+  geom_vline(aes(xintercept = mu), data = dm, lty = 3, color = "grey50") +
+  geom_histogram(binwidth = .1,
+                 aes(y = (..count..)/sum(..count..), fill = rx)) +
+  facet_grid(rx ~ .) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none",
+        axis.title = element_blank()) +
+  scale_y_continuous(labels = scales::percent, 
+                     expand = c(0, 0),
+                     breaks = c(c(.05, .10)),
+                     limits = c(0, .11)) +
+  scale_fill_manual(values = c("#EDCB64", "#B62A3D")) +
+  ggtitle("Scenario: 2")
+
+hfit2 <- hurdle(y ~ rx | rx, offset = log(pDays), data = dx)
+
+hfit2.0 <- hurdle(y ~ 1 | 1, offset = log(pDays), data = dx)
+lrt2 <- -2*(logLik(hfit2.0) - logLik(hfit2))
+```
+
+
+```{r, echo=FALSE, fig.width = 5, fig.height=4}
+dx <- genData(500)
+dx <- trtAssign(dx, grpName = "rx")
+dx <- addColumns(defHurdle.V3, dx)
+
+dx[, rate1000 := (y/pDays)*1000]
+dx[ , rx := factor(rx, labels = c("No intervention", "Intervention"))]
+dm <- dx[rate1000 != 0, .(mu = mean(rate1000)), keyby = rx]
+
+p3 <- ggplot(data = dx, aes(x = rate1000)) +
+  geom_vline(aes(xintercept = mu), data = dm, lty = 3, color = "grey50") +
+  geom_histogram(binwidth = .1,
+                 aes(y = (..count..)/sum(..count..), fill = rx)) +
+  facet_grid(rx ~ .) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none",
+        axis.title = element_blank()) +
+  scale_y_continuous(labels = scales::percent, 
+                     expand = c(0, 0),
+                     breaks = c(c(.05, .10)),
+                     limits = c(0, .11)) +
+  scale_fill_manual(values = c("#EDCB64", "#B62A3D")) +
+  ggtitle("Scenario: 3")
+
+hfit3 <- hurdle(y ~ rx | rx, offset = log(pDays), data = dx)
+
+hfit3.0 <- hurdle(y ~ 1 | 1, offset = log(pDays), data = dx)
+lrt3 <- -2*(logLik(hfit3.0) - logLik(hfit3))
+```
+
+```{r, echo=FALSE, fig.width = 5, fig.height=4}
+dx <- genData(500)
+dx <- trtAssign(dx, grpName = "rx")
+dx <- addColumns(defHurdle.V4, dx)
+
+dx[, rate1000 := (y/pDays)*1000]
+dx[ , rx := factor(rx, labels = c("No intervention", "Intervention"))]
+dm <- dx[rate1000 != 0, .(mu = mean(rate1000)), keyby = rx]
+
+p4 <- ggplot(data = dx, aes(x = rate1000)) +
+  geom_vline(aes(xintercept = mu), data = dm, lty = 3, color = "grey50") +
+  geom_histogram(binwidth = .1,
+                 aes(y = (..count..)/sum(..count..), fill = rx)) +
+  facet_grid(rx ~ .) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none",
+        axis.title = element_blank()) +
+  scale_y_continuous(labels = scales::percent, 
+                     expand = c(0, 0),
+                     breaks = c(c(.05, .10)),
+                     limits = c(0, .11)) +
+  scale_fill_manual(values = c("#EDCB64", "#B62A3D")) +
+  ggtitle("Scenario: 4")
+
+hfit4 <- hurdle(y ~ rx | rx, offset = log(pDays), data = dx)
+
+hfit4.0 <- hurdle(y ~ 1 | 1, offset = log(pDays), data = dx)
+lrt4 <- -2*(logLik(hfit4.0) - logLik(hfit4))
+```
+
+```{r, echo=FALSE, fig.width = 10, fig.height=4}
+gridExtra::grid.arrange(p2, p3, p4, nrow = 1, 
+                        bottom = "# infections per 1000 resident-days",
+                        left = "proportion")
+```
+
+Here are the model fits  - the results are consistent with the plots:
+
+```{r, echo = FALSE}
+stargazer(hfit2, hfit2.0, hfit3, hfit3.0, hfit4, hfit4.0, 
+          type = "text", zero.component = TRUE, 
+          dep.var.labels.include = FALSE, dep.var.caption = "", 
+          notes =" ", notes.append = FALSE, notes.label="", 
+          omit.stat = "n", object.names = TRUE,
+          model.numbers          = FALSE)
+
+stargazer(hfit2, hfit2.0, hfit3, hfit3.0, hfit4, hfit4.0, 
+          type = "text", zero.component = FALSE,  
+          dep.var.labels.include = FALSE, dep.var.caption = "",
+          notes =" ", notes.append = FALSE, notes.label="",
+          omit.stat = "n", object.names = TRUE,
+          model.numbers          = FALSE)
+```
+
+And finally, the p-values from the LRTs of the models under each of the three scenarios are consistent with the underlying data generating processes. It is only in the last scenario where there is no reason to believe that the intervention has some sort of effect.
+
+```{r}
+round(c(lrt2 = 1 - pchisq(lrt2, 2), 
+        lrt3=1 - pchisq(lrt3, 2), 
+        lrt4=1 - pchisq(lrt4, 2)), 4)
+```
+
+
+### Addendum - estimating power
+
+If you've visited my blog before, you might have [picked up](https://www.rdatagen.net/post/parallel-processing-to-add-a-little-zip-to-power-simulations/) on the fact that I like to use simulation to estimate sample size or power when planning a randomized trial. This allows me to be sure everyone understands the assumptions.
+
+To estimate power, I generate multiple data sets under a specific set of assumptions and estimate intervention effects for each data set. The power of the study under this set of assumptions is the proportion of times we would conclude that the intervention is effective. In the context of a hurdle model, I use the p-value from the LRT as the arbiter of effectiveness; the proportion of p-values less than 0.05 is the power.
+
+```{r}
+gData <- function(n, def) {
+  
+  dx <- genData(n)
+  dx <- trtAssign(dx, grpName = "rx")
+  dx <- addColumns(defHurdle, dx)
+  
+  dx[]
+  
+}
+
+estModel <- function(dx) {
+  
+  hfit <- hurdle(y ~ rx | rx, offset = log(pDays), data = dx, )
+  hfit0 <- hurdle(y ~ 1 | 1, offset = log(pDays), data = dx)
+  lrt <- -2*(logLik(hfit0) - logLik(hfit))
+
+  data.table(p.zero = coef(summary(hfit))$zero["rx", "Pr(>|z|)"],
+             p.count = coef(summary(hfit))$count["rx", "Pr(>|z|)"],
+             X2 = 1 - pchisq(lrt, 2))
+  
+}
+
+iter <- function(n, defHurdle, i) {
+  
+  dx <- gData(n, def)
+  hfit <- estModel(dx)
+  return(data.table(i = i, hfit))
+  
+}
+
+diter <- rbindlist(lapply(1:1000, function(i) iter(50, defHurdle, i)))
+```
+
+Here are the results from the individual replications Scenario 1 effect assumptions and 50 nursing homes:
+
+```{r}
+diter
+```
+
+And here is the estimate of power - in this case there is about 90% power that we will conclude that there is an effect of some type given the assumptions under Scenario 1:
+
+```{r}
+diter[, mean(X2 <= 0.05)]
+```
+
+In conclusion, here is a power plot for a range of effect size assumptions, sample size assumptions, and control arm assumptions. In all of these cases, I assumed that the binomial probability under the control condition would be 70%, (If anyone wants to see the code for generating all of this data and the plot, I can post on github. However, it is really just an extension of what is shown here.)
+
+![](/img/post-hurdle/power.png){#id .class width=95% height=95%}
