@@ -1,0 +1,110 @@
+---
+title: Generating data from a truncated distribution
+author: Keith Goldfeld
+date: '2020-08-18'
+slug: generating-data-from-a-truncated-distribution
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>A researcher reached out to me the other day to see if the <code>simstudy</code> package provides a quick and easy way to generate data from a truncated distribution. Other than the <code>noZeroPoisson</code> distribution option (which is a <em>very</em> specific truncated distribution), there is no way to do this directly. You can always generate data from the full distribution and toss out the observations that fall outside of the truncation range, but this is not exactly efficient, and in practice can get a little messy. I’ve actually had it in the back of my mind to add something like this to <code>simstudy</code>, but have hesitated because it might mean changing (or at least adding to) the <code>defData</code> table structure.</p>
+<p>However, it may be time to go for it. The process and coding are actually relatively straightforward, so there is no real reason not to. I was developing a simple prototype for several probability distributions (though the concept can easily be applied to any distribution where the cumulative distribution function, or CDF, is readily accessible), and am sharing here in case you need to do this before it is available in the package, or if you just want to implement yourself.</p>
+<div id="what-is-a-truncated-distribution" class="section level3">
+<h3>What is a truncated distribution?</h3>
+<p>A truncated probability distribution is one derived from limiting the domain of an existing distribution. A picture is worth a thousand words. On the left, we have a histogram for 10,000 observations drawn from a full (non-truncated) <strong>Gaussian</strong> or <strong>normal</strong> distribution with mean 0 and standard deviation 3. In the middle, the histogram represents data drawn from the positive portion of the same distribution (i.e. is truncated at the left by 0). And on the far right, the truncation is defined by the boundaries <span class="math inline">\((-3, 3.5)\)</span>:</p>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-2-1.png" width="768" /></p>
+</div>
+<div id="leveraging-the-uniform-distribution-and-a-cdf" class="section level3">
+<h3>Leveraging the uniform distribution and a CDF</h3>
+<p>A while back, I <a href="https://www.rdatagen.net/post/correlated-data-copula/" target="blank">described</a> a <em>copula</em> approach to generating correlated data from different distributions (ultimately implemented in functions <code>genCorGen</code> and <code>addCorGen</code>). I wrote about combining a draw from a uniform distribution with the CDF of any target distribution to facilitate random number generation from the target generation. This is an approach that works well for truncated distributions also, where the truncated distribution is the target.</p>
+<p>Again - visuals help to explain how this works. To start, here are several CDFs of normal distributions with different means and variances:</p>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p>The CDF of a distribution (usually written as <span class="math inline">\(F(x)\)</span>) effectively defines that distribution: <span class="math inline">\(F(x) = P(X \le x)\)</span>. Since probabilities by definition range from <span class="math inline">\(0\)</span> to <span class="math inline">\(1\)</span>, we know that <span class="math inline">\(F(x)\)</span> also ranges from <span class="math inline">\(0\)</span> to <span class="math inline">\(1\)</span>. It is also the case, that <span class="math inline">\(F(x)\)</span> is monotonically increasing (or at least non-decreasing) from <span class="math inline">\(0\)</span> to <span class="math inline">\(1\)</span>.</p>
+<p>Let’s say we want to generate a draw from <span class="math inline">\(N(\mu =0, \sigma = 3)\)</span> using the the CDF. We can first generate a draw from <span class="math inline">\(u = Uniform(0,1)\)</span>. We then treat <span class="math inline">\(u\)</span> as a value of the CDF, and map it back <span class="math inline">\(x\)</span> to get our draw from the target distribution. So, <span class="math inline">\(x = F^{-1}(u)\)</span>. In <code>R</code>, the CDF for the normal distribution can be determined using the <code>qnorm</code> function, where the first argument is a probability value between <span class="math inline">\(0\)</span> and <span class="math inline">\(1\)</span>. This would be the <code>R</code> code to generate a single draw from <span class="math inline">\(N(0, 3)\)</span> using a random draw from <span class="math inline">\(Uniform(0, 1)\)</span>:</p>
+<pre class="r"><code>(u &lt;- runif(1))</code></pre>
+<pre><code>## [1] 0.9</code></pre>
+<pre class="r"><code>qnorm(u, mean = 0, sd = 3)</code></pre>
+<pre><code>## [1] 3.9</code></pre>
+<p>This is how <span class="math inline">\(u = 0.9\)</span> relates to the draw of <span class="math inline">\(x=3.9\)</span>:</p>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>To generate a random sample of 10,000 draws from <span class="math inline">\(N(0, 3)\)</span>, this process is replicated 10,000 times:</p>
+<pre class="r"><code>library(ggplot2)
+
+u &lt;- runif(10000)
+x &lt;- qnorm(u, mean = 0, sd = 3)
+
+ggplot(data = data.frame(x), aes(x = x)) +
+  geom_histogram(fill = &quot;#CCC591&quot;, alpha = 1, binwidth = .2, boundary = 0) +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank())</code></pre>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+</div>
+<div id="extending-the-inverse-process-to-generate-truncation" class="section level3">
+<h3>Extending the inverse process to generate truncation</h3>
+<p>Let’s say we are only interested in generating data from the middle portion of the <span class="math inline">\(N(0,3)\)</span> distribution, between <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>. The trick is to use the corresponding CDF values, <span class="math inline">\(F(a)\)</span> and <span class="math inline">\(F(b)\)</span> as the basis of the randomization.</p>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p>To generate data within the constraints <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>, all we would need to do is generate a value from the uniform distribution with minimum equal to <span class="math inline">\(F(a)\)</span> and maximum <span class="math inline">\(F(b)\)</span>. We then conduct the mapping as we did before when drawing from the full distribution. By constraining <span class="math inline">\(u\)</span> to be between <span class="math inline">\(F(a)\)</span> and <span class="math inline">\(F(b)\)</span>, we force the values of the target distribution to lie between <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>.</p>
+<p>Now, we are ready to create a simple function <code>rnormt</code> that implements this: The <code>pnorm</code> function provides the CDF at a particular value:</p>
+<pre class="r"><code>rnormt &lt;- function(n, range, mu, s = 1) {
+  
+  # range is a vector of two values
+  
+  F.a &lt;- pnorm(min(range), mean = mu, sd = s)
+  F.b &lt;- pnorm(max(range), mean = mu, sd = s)
+  
+  u &lt;- runif(n, min = F.a, max = F.b)
+  
+  qnorm(u, mean = mu, sd = s)
+  
+}</code></pre>
+<p>Here, I am generating the data plotted above, showing the code this time around.</p>
+<pre class="r"><code>library(data.table)
+library(simstudy)
+library(paletteer)
+
+defC &lt;- defCondition(condition= &quot;tt == 1&quot;, 
+                     formula = &quot;rnormt(10000, c(-Inf, Inf), mu = 0, s = 3)&quot;)
+defC &lt;- defCondition(defC, &quot;tt == 2&quot;, 
+                     formula = &quot;rnormt(10000, c(0, Inf), mu = 0, s = 3)&quot;)
+defC &lt;- defCondition(defC, &quot;tt == 3&quot;, 
+                     formula = &quot;rnormt(10000, c(-3, 3.5), mu = 0, s = 3)&quot;)
+
+dd &lt;- genData(30000)
+dd &lt;- trtAssign(dd, nTrt = 3, grpName = &quot;tt&quot;)
+dd &lt;- addCondition(defC, dd, &quot;x&quot;)
+
+dd[, tt := factor(tt, 
+     labels = c(&quot;No truncation&quot;, &quot;Left truncation at 0&quot;, &quot;Left and right truncation&quot;))]
+
+ggplot(data = dd, aes(x = x, group = tt)) +
+  geom_histogram(aes(fill = tt), alpha = 1, binwidth = .2, boundary = 0) +
+  facet_grid(~tt) +
+  theme(panel.grid = element_blank(),
+        axis.title = element_blank(),
+        legend.position = &quot;none&quot;) +
+  scale_fill_paletteer_d(&quot;wesanderson::Moonrise2&quot;)</code></pre>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-9-1.png" width="768" /></p>
+</div>
+<div id="going-beyond-the-normal-distribution" class="section level3">
+<h3>Going beyond the normal distribution</h3>
+<p>With this simple approach, it is possible to generate a truncated distribution using any distribution available in <code>R</code>. Here is another example that allows us to generate truncated data from a <strong>gamma</strong> distribution:</p>
+<pre class="r"><code>rgammat &lt;- function(n, range, shape, scale = 1) {
+  
+  F.a &lt;- pgamma(min(range), shape = shape, scale = scale)
+  F.b &lt;- pgamma(max(range), shape = shape, scale = scale)
+  
+  u &lt;- runif(n, min = F.a, max = F.b)
+
+  qgamma(u, shape = shape, scale = scale)
+
+}</code></pre>
+<p>To conclude, here is a plot of gamma-based distributions using <code>rgammat</code>. And I’ve added similar plots for <strong>beta</strong> and <strong>Poisson</strong> distributions - I’ll leave it to you to write the functions. But, if you don’t want to do that, <code>simstudy</code> will be updated at some point soon to help you out.</p>
+<p><img src="/post/2020-08-18-generating-data-from-a-truncated-distribution.en_files/figure-html/unnamed-chunk-11-1.png" width="768" /></p>
+</div>
