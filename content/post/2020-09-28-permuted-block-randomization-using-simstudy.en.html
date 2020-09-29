@@ -1,0 +1,206 @@
+---
+title: Permuted block randomization using simstudy
+author: Keith Goldfeld
+date: '2020-09-28'
+slug: permuted-block-randomization-using-simstudy
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>Along with preparing power analyses and statistical analysis plans (SAPs), generating study randomization lists is something a practicing biostatistician is occasionally asked to do. While not a particularly interesting activity, it offers the opportunity to tackle a small programming challenge. The title is a little misleading because you should probably skip all this and just use the <code>blockrand</code> package if you want to generate randomization schemes; don’t try to reinvent the wheel. But, I can’t resist. Since I was recently asked to generate such a list, I’ve been wondering how hard it would be to accomplish this using <code>simstudy</code>. There are already built-in functions for simulating stratified randomization schemes, so maybe it could be a good solution. The key element that is missing from simstudy, of course, is the permuted block setup.</p>
+<div id="why-permuted-block-randomization" class="section level3">
+<h3>Why permuted block randomization?</h3>
+<p>What is <em>permuted block</em> randomization and why even bother? The <em>block</em> part indicates that patients will be randomized in sub-groups. If we have blocks of size two, patients will be paired sequentially, with each patient randomized to different arms. This helps with balance over time and when recruitment is less than anticipated. If we were to randomize 100 patients to treatment and control (50 in each arm), it is possible that treatment assignments will cluster close to the start of the trial, just by chance. If the time period is related to the outcome in some way, this would be undesirable. Furthermore, if trial recruitment lagged and had to stop early, there would be an actual lack of balance across the arms.</p>
+<p>The argument for block randomization seems strong enough. But if coordinators in the field know that we are using this approach, there is a risk of influencing patient recruitment. If it is known that patients are randomized in blocks of size four, and the first two patients are randomized to drug therapy, the coordinator will know that the next two patients will be randomized to control. This could influence who the coordinator recruits into the study, particularly if they believe drug therapy is superior. They may actively or unconsciously recruit healthier patients when it is known that they are going to get the control. (This, of course, is much less of an issue when recruiters/coordinators are completely blinded to group assignment.) By changing the block sizes in an unpredictable manner, by <em>permuting</em> the sizes, this problem is solved. Hence, <em>permuted block randomization</em>.</p>
+</div>
+<div id="simstudy-code" class="section level3">
+<h3>simstudy code</h3>
+<p>I want to walk through the code that will generate permuted block randomization. In this scenario we are conducting a trial to compare a <em>drug</em> therapy with <em>placebo</em> in at least 120 patients. We would like to randomize within blocks of size two or four, and the order of the blocks will themselves be randomized. We assume that each block size will have equal probability of being selected, though balance across different block sizes is not guaranteed. The preliminary code shown here implements these specifications:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+
+set.seed(1234)
+
+n &lt;- 120
+levels &lt;- c(&quot;D&quot;, &quot;P&quot;)    # Drug/Placebo
+blk_sizes &lt;- c(2, 4)
+
+n_arms &lt;- length(levels)
+p_blk &lt;- 1/length(blk_sizes)</code></pre>
+<p>The first step is to generate a sequence of blocks with varying block sizes. We take advantage of the <code>mixture</code> distribution option in <code>simstudy</code> to generate blocks. This distribution is specified using a string with the format “<span class="math inline">\(x_1|p_1 + \dots + x_k|p_k\)</span>”. In this case, there are <span class="math inline">\(k=2\)</span> block sizes; <span class="math inline">\(x_1 = 2\)</span>, <span class="math inline">\(p_1 = 0.5\)</span>, <span class="math inline">\(x_2 = 4\)</span>, and <span class="math inline">\(p_2 = 0.5\)</span>. We construct the mixture formula using the predefined block sizes, and use that formula to define the data that we need to generate:</p>
+<pre class="r"><code>v &lt;- sapply(blk_sizes, function(x) paste(x, p_blk, sep = &quot;|&quot;))
+mixformula &lt;- paste(v, collapse = &quot;+&quot;)
+
+def &lt;- defData(varname = &quot;blk_size&quot;, formula = mixformula, 
+  dist = &quot;mixture&quot;, id = &quot;blk_id&quot;)
+
+def</code></pre>
+<pre><code>##     varname     formula variance    dist     link
+## 1: blk_size 2|0.5+4|0.5        0 mixture identity</code></pre>
+<p>Now, we need generate enough blocks to support the target number of patients to be randomized; that is, the sum of the block sizes should at least as large as the target. If all block sizes were the minimum block size (in this case <span class="math inline">\(2\)</span>), then we would need at least <span class="math inline">\(n/2\)</span> blocks. Clearly, we will need fewer, but we will start with <span class="math inline">\(n/2\)</span> here and remove the excess:</p>
+<pre class="r"><code>maxblocks &lt;- ceiling(n / min(blk_sizes))
+dd &lt;- genData(maxblocks, def)
+
+#--- removing the excess
+
+nblocks &lt;- dd[, threshold := (cumsum(blk_size) &gt;= n) * .I][threshold &gt; 0]
+dd &lt;- dd[1:nblocks[1, threshold]]
+
+tail(dd)</code></pre>
+<pre><code>##    blk_id blk_size threshold
+## 1:     36        4         0
+## 2:     37        2         0
+## 3:     38        2         0
+## 4:     39        4         0
+## 5:     40        4         0
+## 6:     41        4        41</code></pre>
+<p>In the final step, we use cluster data generation to create the individual patients, defining each block as a cluster. Treatment assignment is stratified by each block:</p>
+<pre class="r"><code>di &lt;- genCluster(dd, cLevelVar = &quot;blk_id&quot;, numIndsVar = &quot;blk_size&quot;, level1ID = &quot;id&quot;)
+dtrt &lt;- trtAssign(di, nTrt = n_arms, strata = &quot;blk_id&quot;, grpName = &quot;arm&quot;)
+  
+dtrt &lt;- dtrt[, .(id, blk_id, blk_size, arm = factor(arm, labels = levels))]</code></pre>
+<p>Here are examples of the block randomization results for four blocks:</p>
+<pre class="r"><code>dtrt[blk_id == 5]</code></pre>
+<pre><code>##    id blk_id blk_size arm
+## 1: 15      5        4   P
+## 2: 16      5        4   D
+## 3: 17      5        4   P
+## 4: 18      5        4   D</code></pre>
+<pre class="r"><code>dtrt[blk_id == 8]</code></pre>
+<pre><code>##    id blk_id blk_size arm
+## 1: 25      8        2   D
+## 2: 26      8        2   P</code></pre>
+<pre class="r"><code>dtrt[blk_id == 19]</code></pre>
+<pre><code>##    id blk_id blk_size arm
+## 1: 59     19        2   P
+## 2: 60     19        2   D</code></pre>
+<pre class="r"><code>dtrt[blk_id == 26]</code></pre>
+<pre><code>##    id blk_id blk_size arm
+## 1: 73     26        4   D
+## 2: 74     26        4   P
+## 3: 75     26        4   P
+## 4: 76     26        4   D</code></pre>
+</div>
+<div id="a-real-world-application" class="section level3">
+<h3>A real-world application</h3>
+<p>I’ve created a function <code>blkRandom</code> based on this code so that I can illustrate this functionality in a more realistic setting. In a current multi-site study that I’m working on (already did the power analysis, finalizing the SAP), we need to provide a randomization list so that subject recruitment can begin. Randomization will be stratified by each of the sites (1 through 7), by sex (M and F), and by location of recruitment (A or B); in total, there will be <span class="math inline">\(7\times 2 \times 2 = 28\)</span> strata. For each of the 28 strata we want to randomize 50 potential subjects using permuted block randomization; for particular strata, this is certainly too large a number, but it doesn’t hurt to overestimate as long as the clinical trial software system can handle it.</p>
+<p>Here is how the function would work for a single strata (just showing the first and last blocks):</p>
+<pre class="r"><code>blkRandom(n = 50, levels = c(&quot;A&quot;, &quot;B&quot;), blk_sizes = c(2, 4))[c(1:4, 47:50)]</code></pre>
+<pre><code>##    blk_id blk_size threshold id arm
+## 1:      1        4         0  1   A
+## 2:      1        4         0  2   B
+## 3:      1        4         0  3   A
+## 4:      1        4         0  4   B
+## 5:     13        4        13 47   B
+## 6:     13        4        13 48   A
+## 7:     13        4        13 49   A
+## 8:     13        4        13 50   B</code></pre>
+<p>Here is a wrapper function for <code>blkRandom</code> that incorporates a specific strata <span class="math inline">\(s\)</span>. This will enable us to do permuted block randomization within different subgroups of the population, such as males and females, or sites:</p>
+<pre class="r"><code>sBlkRandom &lt;- function(s, n, levels, blk_sizes) {
+  
+  dB &lt;- blkRandom(n, levels, blk_sizes)
+  dB[, .(id = paste0(id, s), stratum = s, arm)]
+  
+}
+
+sBlkRandom(s = &quot;M1A&quot;, n = 30, levels = c(&quot;A&quot;, &quot;B&quot;), blk_sizes = c(2, 4))[1:5]</code></pre>
+<pre><code>##      id stratum arm
+## 1: 1M1A     M1A   B
+## 2: 2M1A     M1A   A
+## 3: 3M1A     M1A   A
+## 4: 4M1A     M1A   B
+## 5: 5M1A     M1A   B</code></pre>
+<p>All the pieces are now in place.</p>
+<p>We need to create a list of strata, each of which requires its own permuted block randomization list:</p>
+<pre class="r"><code>library(tidyr)
+
+#--- specify all strata variables
+
+site &lt;- c(1 : 7)
+sex &lt;- c(&quot;M&quot;, &quot;F&quot;)
+location &lt;- c(&quot;A&quot;, &quot;B&quot;)
+
+#--- create strata
+
+strata &lt;- expand.grid(sex = sex,site = site, location = location)
+strata &lt;- unite(strata, &quot;stratum&quot;, sep = &quot;&quot;)$stratum 
+
+head(strata)</code></pre>
+<pre><code>## [1] &quot;M1A&quot; &quot;F1A&quot; &quot;M2A&quot; &quot;F2A&quot; &quot;M3A&quot; &quot;F3A&quot;</code></pre>
+<p>With the list of strata in hand - we create the randomization lists using <code>lapply</code> to repeatedly call <code>sBlkRandom</code>:</p>
+<pre class="r"><code>rbindlist(lapply(
+    strata, 
+    function(s) sBlkRandom(s, n = 50, levels = c(&quot;A&quot;, &quot;B&quot;), blk_sizes = c(2, 4))
+  )
+)</code></pre>
+<pre><code>##          id stratum arm
+##    1:  1M1A     M1A   B
+##    2:  2M1A     M1A   A
+##    3:  3M1A     M1A   A
+##    4:  4M1A     M1A   B
+##    5:  5M1A     M1A   B
+##   ---                  
+## 1420: 46F7B     F7B   B
+## 1421: 47F7B     F7B   B
+## 1422: 48F7B     F7B   A
+## 1423: 49F7B     F7B   B
+## 1424: 50F7B     F7B   A</code></pre>
+</div>
+<div id="going-with-the-tried-and-true" class="section level3">
+<h3>Going with the tried and true</h3>
+<p>This has been fun and I think successful, but as I mentioned, you might want to stick with the established <a href="https://cran.r-project.org/web/packages/blockrand/index.html" target="_blank">blockrand</a> package that is designed around this very specific goal. I have written a simple wrapper function that rectifies one slightly minor shortcoming (block sizes are specified as blk_size<span class="math inline">\(/ 2\)</span>) and allows us to use <code>lapply</code> to make repeated calls across the strata:</p>
+<pre class="r"><code>library(blockrand)
+
+rand_stratum &lt;- function(stratum, n, levels, blk_sizes) {
+  
+  blk_sizes &lt;- blk_sizes / 2
+  
+  dB &lt;- data.table(blockrand(
+    n = n, 
+    num.levels = length(levels), 
+    levels = levels,
+    id.prefix = stratum, 
+    block.prefix  = stratum,
+    stratum = stratum,
+    block.sizes = blk_sizes)
+  )
+  
+  dB[, .(id, stratum, treatment)]
+  
+}
+
+rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c(&quot;A&quot;, &quot;B&quot;), c(2, 4))))</code></pre>
+<pre><code>##          id stratum treatment
+##    1: M1A01     M1A         B
+##    2: M1A02     M1A         A
+##    3: M1A03     M1A         B
+##    4: M1A04     M1A         A
+##    5: M1A05     M1A         B
+##   ---                        
+## 1420: F7B46     F7B         A
+## 1421: F7B47     F7B         A
+## 1422: F7B48     F7B         B
+## 1423: F7B49     F7B         A
+## 1424: F7B50     F7B         B</code></pre>
+<p>In case the elegance and simplicity (not to mention all the other features that it provides, but I didn’t show you) are not compelling enough, the speed comparison isn’t even close: <code>blockrand</code> is 7 times faster than my <code>simstudy</code> solution (albeit on the millisecond scale - so you might not actually notice it).</p>
+<pre class="r"><code>library(microbenchmark)
+
+microbenchmark(
+ rbindlist(lapply(strata, function(s) sBlkRandom(s, 50, c(&quot;A&quot;, &quot;B&quot;), c(2, 4)))),
+ rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c(&quot;A&quot;, &quot;B&quot;), c(2, 4))))
+)</code></pre>
+<pre><code>## Unit: milliseconds
+##                                                                                   expr
+##    rbindlist(lapply(strata, function(s) sBlkRandom(s, 50, c(&quot;A&quot;,      &quot;B&quot;), c(2, 4))))
+##  rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c(&quot;A&quot;,      &quot;B&quot;), c(2, 4))))
+##  min  lq mean median  uq max neval cld
+##  284 315  367    350 396 666   100   b
+##   38  43   52     48  53 140   100  a</code></pre>
+</div>
