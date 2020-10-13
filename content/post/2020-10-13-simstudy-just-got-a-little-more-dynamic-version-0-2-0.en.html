@@ -1,0 +1,181 @@
+---
+title: 'simstudy just got a little more dynamic: version 0.2.1'
+author: Keith Goldfeld
+date: '2020-10-13'
+slug: simstudy-just-got-a-little-more-dynamic-version-0-2-0
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p><code>simstudy</code> version 0.2.1 has just been submitted to <a href="https://cran.rstudio.com/web/packages/simstudy/" target="_blank">CRAN</a>. Along with this release, the big news is that I’ve been joined by Jacob Wujciak-Jens as a co-author of the package. He initially reached out to me from Germany with some suggestions for improvements, we had a little back and forth, and now here we are. He has substantially reworked the underbelly of <code>simstudy</code>, making the package much easier to maintain, and positioning it for much easier extension. And he implemented an entire system of formalized tests using <a href="https://testthat.r-lib.org/" target="_blank">testthat</a> and <a href="https://cran.r-project.org/web/packages/hedgehog/vignettes/hedgehog.html" target="_blank">hedgehog</a> has been implemented; that was always my intention, but I never had the wherewithal to pull it off, and Jacob has done that. But, most importantly, it is much more fun to collaborate on this project than to toil away on my own.</p>
+<p>You readers, though, are probably more interested in the changes that, as a user, you will notice. There are a number of bug fixes (hopefully you never encountered those, but I know some of you have, because you have pointed them out to me) and improved documentation, including some new vignettes. There is even a nice new <a href="https://kgoldfeld.github.io/simstudy/index.html" target="_blank">website</a> that is created with the help of <a href="https://pkgdown.r-lib.org/" target="_blank">pkgdown</a>.</p>
+<p>The most exciting extension of this new version is the ability to modify data definitions on the fly using externally defined variables. Often, we’d like to explore data generation and modeling under different scenarios. For example, we might want to understand the operating characteristics of a model given different variance or other parametric assumptions. There was already some functionality built into <code>simstudy</code> to facilitate this type of dynamic exploration, with <code>updateDef</code> and <code>updateDefAdd</code>, that allows users to edit lines of existing data definition tables. Now, there is an additional and, I think, more powerful mechanism - called <em>double-dot</em> reference - to access variables that do not already exist in a defined data set or data definition.</p>
+<div id="double-dot-external-variable-reference" class="section level3">
+<h3>Double-dot external variable reference</h3>
+<p>It may be useful to think of an external reference variable as a type of hyperparameter of the data generation process. The reference is made directly in the formula itself, using a double-dot (“..”) notation before the variable name.</p>
+<p>Here is a simple example:</p>
+<pre class="r"><code>library(simstudy)
+
+def &lt;- defData(varname = &quot;x&quot;, formula = 0, 
+  variance = 5, dist = &quot;normal&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, formula = &quot;..B0 + ..B1 * x&quot;, 
+  variance = &quot;..sigma2&quot;, dist = &quot;normal&quot;)
+
+def</code></pre>
+<pre><code>##    varname         formula variance   dist     link
+## 1:       x               0        5 normal identity
+## 2:       y ..B0 + ..B1 * x ..sigma2 normal identity</code></pre>
+<p><code>B0</code>, <code>B1</code>, and <code>sigma2</code> are not part of the simstudy data definition, but will be set external to that process, either in the global environment or within the context of a function.</p>
+<pre class="r"><code>B0 &lt;- 4;
+B1 &lt;- 2;
+sigma2 &lt;- 9
+
+set.seed(716251)
+dd &lt;- genData(100, def)
+
+fit &lt;- summary(lm(y ~ x, data = dd))
+
+coef(fit)</code></pre>
+<pre><code>##             Estimate Std. Error t value Pr(&gt;|t|)
+## (Intercept)        4       0.28      14  2.6e-25
+## x                  2       0.13      15  5.9e-28</code></pre>
+<pre class="r"><code>fit$sigma</code></pre>
+<pre><code>## [1] 2.8</code></pre>
+<p>It is easy to create a new data set on the fly with different slope and variance assumptions without having to go to the trouble of updating the data definitions.</p>
+<pre class="r"><code>B1 &lt;- 3
+sigma2 &lt;- 16
+
+dd &lt;- genData(100, def)
+fit &lt;- summary(lm(y ~ x, data = dd))
+
+coef(fit)</code></pre>
+<pre><code>##             Estimate Std. Error t value Pr(&gt;|t|)
+## (Intercept)      4.4       0.43      10  4.6e-17
+## x                3.1       0.22      14  8.6e-26</code></pre>
+<pre class="r"><code>fit$sigma</code></pre>
+<pre><code>## [1] 4.2</code></pre>
+</div>
+<div id="using-with-apply-functions" class="section level3">
+<h3>Using with <em>apply</em> functions</h3>
+<p>Double-dot references can be flexibly applied using <code>lapply</code> (or the parallel version <code>mclapply</code>) to create a range of data sets under different assumptions:</p>
+<pre class="r"><code>gen_data &lt;- function(sigma2, d) {
+  dd &lt;- genData(400, d)
+  dd[, sigma2 := sigma2]
+  dd
+}
+
+sigma2s &lt;- c(1:9)^2
+
+dd_m &lt;- lapply(sigma2s, function(s) gen_data(s, def))
+dd_m &lt;- rbindlist(dd_m)
+
+ggplot(data = dd_m, aes(x = x, y = y)) +
+  geom_point(size = .5, color = &quot;#DDAA33&quot;) +
+  facet_wrap(sigma2 ~ .) +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="/post/2020-10-13-simstudy-just-got-a-little-more-dynamic-version-0-2-0.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
+</div>
+<div id="using-with-vectors" class="section level3">
+<h3>Using with vectors</h3>
+<p>Double-dot referencing is also vector friendly. For example, if we want to create a mixture distribution from a vector of values (which we can also do using a <em>categorical</em> distribution), we can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4:</p>
+<pre class="r"><code>defblk &lt;- defData(varname = &quot;blksize&quot;, 
+   formula = &quot;..sizes[1] | .5 + ..sizes[2] | .5&quot;, dist = &quot;mixture&quot;)
+
+defblk</code></pre>
+<pre><code>##    varname                           formula variance    dist     link
+## 1: blksize ..sizes[1] | .5 + ..sizes[2] | .5        0 mixture identity</code></pre>
+<pre class="r"><code>sizes &lt;- c(2, 4)
+genData(1000, defblk)</code></pre>
+<pre><code>##         id blksize
+##    1:    1       2
+##    2:    2       4
+##    3:    3       2
+##    4:    4       4
+##    5:    5       4
+##   ---             
+##  996:  996       4
+##  997:  997       2
+##  998:  998       4
+##  999:  999       4
+## 1000: 1000       4</code></pre>
+<p>There are a few other changes to the package that are described <a href="https://kgoldfeld.github.io/simstudy/news/index.html" target="_blank">here</a> (but look for version <code>0.2.0</code> - we found a pretty major bug right away and fixed it, hence <code>0.2.1</code>). Moving forward, we have some more things in the works, of course. And if you have suggestions of your own, you know where to find us.</p>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>Here’s a more detailed example to show how double-dot references simplify things considerably in a case where I originally used the <code>updateDef</code> function. In a post where I described <a href="https://www.rdatagen.net/post/regression-to-the-mean" target="_blank">regression to the mean</a>, there is an <a href="https://www.rdatagen.net/post/regression-to-the-mean/#addendum" target="_blank">addendum</a> that I adapt here using double-dot references. I’m not going into the motivation for the code here - check out the <a href="https://www.rdatagen.net/post/regression-to-the-mean" target="_blank">post</a> if you’d like to see more.)</p>
+<p>Here’s the data original code (both examples require the <code>parallel</code> package):</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;U&quot;, formula = &quot;-1;1&quot;, dist = &quot;uniform&quot;)
+d &lt;- defData(d, varname = &quot;x1&quot;, formula = &quot;0 + 2*U&quot;, variance = 1)
+d &lt;- defData(d, varname = &quot;x2&quot;, formula = &quot;0 + 2*U&quot;, variance = 1)
+d &lt;- defData(d, varname = &quot;h1&quot;, formula = &quot;x1 &gt; quantile(x1, .80) &quot;, 
+             dist = &quot;nonrandom&quot;)
+
+rtomean &lt;- function(n, d) {
+  dd &lt;- genData(n, d)
+  data.table(x1 = dd[x1 &gt;= h1, mean(x1)] , x2 = dd[x1 &gt;= h1, mean(x2)])
+}
+
+repl &lt;- function(xvar, nrep, ucoef, d) {
+  
+  d &lt;- updateDef(d, &quot;x1&quot;, newvariance = xvar)
+  d &lt;- updateDef(d, &quot;x2&quot;, newvariance = xvar)
+  
+  dif &lt;- rbindlist(mclapply(1:nrep, function(x) rtomean(200, d)))
+  mudif &lt;- unlist(lapply(dif, mean))
+  data.table(ucoef, xvar, x1 = mudif[1], x2 = mudif[2])
+  
+}
+
+dres &lt;- list()
+i &lt;- 0
+
+for (ucoef in c(0, 1, 2, 3)) {
+  
+  i &lt;- i + 1
+  
+  uform &lt;- genFormula( c(0, ucoef), &quot;U&quot;)
+  
+  d &lt;- updateDef(d, &quot;x1&quot;, newformula = uform)
+  d &lt;- updateDef(d, &quot;x2&quot;, newformula = uform)
+  
+  dr &lt;- mclapply(seq(1, 4, by = 1), function(x) repl(x, 1000, ucoef, d))
+  dres[[i]] &lt;- rbindlist(dr)
+}
+
+dres &lt;- rbindlist(dres)</code></pre>
+<p>And here is the updated code:</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;U&quot;, formula = &quot;-1;1&quot;, dist = &quot;uniform&quot;)
+d &lt;- defData(d, varname = &quot;x1&quot;, formula = &quot;0 + ..ucoef*U&quot;, variance = &quot;..xvar&quot;)
+d &lt;- defData(d, varname = &quot;x2&quot;, formula = &quot;0 + ..ucoef*U&quot;, variance = &quot;..xvar&quot;)
+d &lt;- defData(d, varname = &quot;h1&quot;, formula = &quot;x1 &gt; quantile(x1, .80) &quot;, 
+             dist = &quot;nonrandom&quot;)
+
+rtomean &lt;- function(n, d, ucoef, xvar) {
+  
+  dd &lt;- genData(n, d)
+  data.table(x1 = dd[x1 &gt;= h1, mean(x1)] , x2 = dd[x1 &gt;= h1, mean(x2)])
+  
+}
+
+repl &lt;- function(nrep, d, ucoef, xvar) {
+  
+  dif &lt;- rbindlist(mclapply(1:nrep, function(x) rtomean(200, d, ucoef, xvar)))
+  mudif &lt;- unlist(lapply(dif, mean))
+  data.table(ucoef, xvar, x1 = mudif[1], x2 = mudif[2])
+  
+}
+
+ucoef &lt;- c(0:3)
+xvar &lt;- c(1:4)
+params &lt;- asplit(expand.grid(ucoef = ucoef, xvar = xvar), 1)
+
+dres &lt;- rbindlist(mclapply(params, function(x) repl(1000, d, x[&quot;ucoef&quot;], x[&quot;xvar&quot;])))</code></pre>
+<p>The code is much cleaner and the data generating process doesn’t really lose any clarity. Importantly, this change has allowed me to take advantage of the <code>apply</code> approach (rather than using a loop). I’d conclude that double-dot references have the potential to simplify things quite a bit.</p>
+</div>
