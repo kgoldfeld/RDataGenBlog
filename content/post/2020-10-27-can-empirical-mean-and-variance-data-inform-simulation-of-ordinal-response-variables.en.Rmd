@@ -1,0 +1,365 @@
+---
+title: A refined brute force method to inform simulation of ordinal response data
+author: Keith Goldfeld
+date: '2020-10-27'
+slug: can-empirical-mean-and-variance-data-inform-simulation-of-ordinal-response-variables
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+Francisco, a researcher from Spain, reached out to me with a challenge. He is interested in exploring various models that estimate correlation across multiple responses to survey questions. This is the context:
+
+* He doesn't have access to actual data, so to explore analytic methods he needs to simulate responses.
+* It would be ideal if the simulated data reflect the properties of real-world responses, some of which can be gleaned from the literature.
+* The studies he's found report only means and standard deviations of the ordinal data, along with the correlation matrices, *but not probability distributions of the responses*.
+* He's considering `simstudy` for his simulations, but the function `genOrdCat` requires a set of probabilities for each response measure; it doesn't seem like simstudy will be helpful here.
+
+Ultimately, we needed to figure out if we can we use the empirical means and standard deviations to derive probabilities that will yield those same means and standard deviations when the data are simulated. I thought about this for a bit, and came up with a bit of a work-around; the approach seems to work decently and doesn't require any outrageous assumptions. 
+
+I might have kept this between the two of us, but in the process of looking more closely at my solution, I generated a plot that was so beautiful and interesting that I needed to post it. And since I am posting the image, I thought I might as well go ahead and describe the solution in case any one else might find it useful. But first, the plot:
+
+```{r, echo = FALSE, message = FALSE, fig.height = 4}
+library(simstudy) # development version - not yet on CRAN
+library(radiant.data) # for weighted.sd
+
+options(digits = 2)
+
+get_abp <- function(a, b, size) {
+  
+  x <- 1:size
+  
+  z <- pbeta((1:size)/size, a, b)
+  p <- z - c(0, z[-size])
+  
+  sigma <- weighted.sd(x, p)
+  mu <- weighted.mean(x, p)
+  
+  data.table(a, b, mu, sigma, t(p))
+}
+
+get_p <- function(a, b, n) {
+  ab <- asplit(expand.grid(a = a, b = b), 1)
+  rbindlist(lapply(ab, function(x) get_abp(x[1], x[2],  n)))
+}
+
+a <- seq(.1, 25, .1)
+b <- seq(.1, 25, .1)
+
+ab_res <- get_p(a, b, 7)
+
+ab_plot <- ggplot(data = ab_res, aes(x = mu, y = sigma)) +
+  geom_point(size = .1, color = "#663333") +
+  theme(panel.grid = element_blank()) +
+  scale_x_continuous(breaks = c(1:7), name = expression(mu)) +
+  ylab(expression(sigma))
+
+ab_plot
+```
+
+### A little more detail
+
+In the simplest scenario, we want to simulate responses from a single survey question with responses ranging from 1 to 7, where 1 might signify *totally disagree* and 7 would mean *totally agree*, with gradations in between. Responses collected from a population will be distributed across the seven categories, and the proportion of responses that fall within each category represents the probability of a response.
+
+To inform the simulation, we have a journal article that reports only a mean and standard deviation from responses to that same question collected in an earlier study. The idea is to find the probabilities for the possible responses that correspond to those observed means and standard deviations. That is, how do we go from the mean and standard deviation to a set of probabilities?
+
+The reverse - going from known probabilities to a mean response and standard deviation - is much easier: we just calculate the weighted mean and weighted standard deviations, where the weights are the probabilities. 
+
+For example, say the probability distribution of the seven categorical responses is 21%, 20%, 18%, 15%, 13%, 9%, and 4% responding 1, 2, ... , and 7, respectively, and represented by this histogram:
+
+```{r, echo = FALSE, fig.height = 3}
+ggplot() +
+  geom_bar(aes(x = c(1:7), y = c(.21, .20, .18, .15, .13, .09, .04)), 
+           stat="identity", width = 0.5, fill = "#DDAA33") +
+  theme(panel.grid = element_blank()) +
+  scale_x_continuous(name = "response", breaks = c(1:7)) +
+  ylab("proportion")
+```
+
+Under this distribution the weighted mean and standard deviation are 3.2 and 1.8, respectively:
+
+```{r}
+weighted.mean(x = 1:7, w = c(.21, .20, .18, .15, .13, .09, .04))
+weighted.sd(x = 1:7, w = c(.21, .20, .18, .15, .13, .09, .04))
+```
+
+### The brute force approach 
+
+My first thought about how use $\mu$ and $\sigma$ was simple, if a bit crude. Generate a slew of probabilities (like a million or so) and calculate the weighted mean and standard deviation for each distribution. I would look for the probabilities that yielded values that were close to my target (i.e. those that had been reported in the literature). 
+
+There are a couple of drawbacks to this approach. First, it is not particularly systematic, since we generating the probabilities randomly, and even though we have large numbers, we are not guaranteed to generate combinations that reflect our targets. Second, there is no reason to think that the generated randomly generated distributions will look like the true distribution. And third, there is no reason to think that, even if we do find a match, the distribution is unique. 
+
+I actually went ahead and implemented this approach and found two distributions that also yield $\mu$ = 3.2 and and $\sigma$ = 1.8 (truth be told, I did this part first and then found the distribution above using the method I will describe in a second):
+
+```{r, echo=FALSE, fig.height = 3}
+library(parallel)
+
+genall <- function() {
+  x <- runif(7)
+  p <- round(x/sum(x), 4)
+  p[7] <- 1 - sum(p[-7])
+  
+  mu <- weighted.mean(1:7, w = p)
+  s <- radiant.data::weighted.sd(1:7, w = p)
+  
+  data.table(mu, s, t(p))
+}
+
+RNGkind("L'Ecuyer-CMRG")
+set.seed(58372)
+
+dd <- rbindlist(mclapply(1:5000, function(x) genall(), mc.cores = 4))
+
+setorder(dd, mu)
+dd[, rank := .I]
+
+dd[, diff_mu := mu - shift(mu, 1, 0)]
+dd[, diff_s := abs(s - shift(s, 1, 0))]
+
+dc2 <- dd[diff_mu < 0.0001 & diff_s < .0001]
+dc1 <- dd[rank %in% dc2[, rank -1]]
+
+dc <- rbind(dc1, dc2)
+setorder(dc, rank)
+
+
+p1 <- dc[1, as.vector(cbind(V1, V2, V3, V4, V5, V6, V7))]
+p2 <- dc[2, as.vector(cbind(V1, V2, V3, V4, V5, V6, V7))]
+
+dprobs <- data.table(q = rep(c("dist 1", "dist 2"), each = 7),
+                    variable = rep(1:7, times = 2),
+                    value = c(p1, p2)
+)
+
+ggplot(data = dprobs, aes(x = variable, y = value)) +
+  geom_bar(stat="identity", width = 0.5, fill = "#DDAA33") +
+  theme(panel.grid = element_blank()) +
+  scale_x_continuous(name = "response", breaks = c(1:7)) +
+  ylab("proportion") +
+  facet_wrap(q ~ .)
+```
+
+Here are the target $\mu$'s and $\sigma$'s for the distributions on the right and left:
+
+```{r}
+p_left <- c(0.218, 0.174, 0.170, 0.206, 0.134, 0.022, 0.077)
+c(weighted.mean(1:7, p_left), weighted.sd(1:7, p_left))
+```
+
+```{r}
+p_right <- c(0.185, 0.185, 0.247, 0.217, 0.011, 0.062, 0.092)
+c(weighted.mean(1:7, p_right), weighted.sd(1:7, p_right))
+```
+
+### Drawing on the *beta* distribution
+
+Thinking about probabilities always draws me to the *beta* family distribution, a continuous distribution from 0 to 1. Theses distributions are parameterized with two shape values, often referred to as $a$ and $b$. Here are a few probability density functions (pdf's) for $(a,b)$ pairs of (1, 1.6) in yellow, (2, 4) in red, and (2, 2) in blue:
+
+```{r, echo = FALSE, fig.height=3}
+library(ggfortify)
+p <- ggdistribution(dbeta, seq(0, 1, length = 250), shape1 = 1, shape2 = 1.6, colour = '#DDAA33')
+p <- ggdistribution(dbeta, seq(0, 1, length = 250), shape1 = 2, shape2 = 4, colour = '#BB5566', p = p)
+p <- ggdistribution(dbeta, seq(0, 1, length = 250), shape1 = 2, shape2 = 2, colour = '#004488', p = p)
+p + theme(panel.grid = element_blank())
+```
+
+I had an idea that generating different pdf's based on different values of $a$ and $b$ might provide a more systematic way of generating probabilities. If we carve the pdf into $K$ sections (where $K$ is the number of responses, in our case 7), then the area under the pdf in the $k$th slice could provide the probability for the $k$th response. Since each pdf is unique (determined by specific values of $a$ and $b$), this would ensure different (i.e. unique) sets of probabilities to search through.
+
+Using the example from above where $a$ = 1 and $b$ = 1.6, here is how the slices look based on the seven categories:
+
+```{r, echo = FALSE, fig.height=3}
+a <- 2
+b <- 4
+
+dlines <- data.table(x = (1:7)/7, xend = (1:7)/7, y = rep(0,7), yend = dbeta((1:7)/7, a, b))
+
+xx <- seq(0, 1, length = 250)
+yy <- dbeta(b, shape1 = a, shape2 = b)
+bd <- data.table(xx, yy)
+ 
+ggplot(data = bd, aes(x = xx, y=yy)) +
+  stat_function(fun=dbeta, args= list(shape1 = a, shape2 = b), 
+                fill = '#dda9b2', geom="area") +
+  stat_function(fun=dbeta, args= list(shape1 = a, shape2 = b), 
+                colour = '#BB5566', size = 1.2) +
+  geom_segment(data = dlines, aes(x = x, xend = xend, y = y, yend = yend), 
+               colour = "#983d4c") +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank()) +
+  scale_y_continuous(expand = c(0,0), limits = c(0, 2.3), name = "density")
+  
+```
+
+The cumulative probability at each slice $x \in \{1, ..., 7\}$ is ($P(X < x/7)$), and can be calculated in `R` with the function `pbeta`:
+
+```{r}
+z <- pbeta((1:7)/7, 2, 4)
+z
+```
+
+The probability of for each category is $P(X = x) = P(X < x) - P(X < (x-1))$, and is calculated easily:
+
+```{r}
+p <- z - c(0, z[-7])
+p
+``` 
+
+This is the transformed probability distribution from the continuous *beta* scale to the discrete categorical scale:
+
+```{r, echo=FALSE, fig.height = 3}
+ggplot() +
+  geom_bar(aes(x = c(1:7), y = p), 
+           stat="identity", width = 0.5, fill = "#DDAA33") +
+  theme(panel.grid = element_blank()) +
+  scale_x_continuous(name = "response", breaks = c(1:7)) +
+  ylab("proportion") 
+``` 
+
+And finally here are $\mu$ and $\sigma$ associated with these values of $a$ and $b$:
+
+```{r}
+c(weighted.mean(1:7, p), weighted.sd(1:7, p))
+```
+
+### Brute force, refined
+
+If we create a grid of $(a, b)$ values, there will be an associated, and unique, set of probabilities for each pair derived from slicing the pdf into $K$ sections And for each of these sets of probabilities, we can calculate the means and standard deviations. We then find the $(\mu, \sigma)$ pair that is closest to our target. While this idea is not that much better than the brute force approach suggested above, at least it is now systematic. If we do it in two steps, first by searching for the general region and then zooming in to find a specific set of probabilities, we can really speed things up and use less memory.
+
+Is limiting the search to *beta*-based distributions justifiable? It might depend on the nature of responses in a particular case, but it does seem reasonable; most importantly, it assures fairly well-behaved distributions that could plausibly reflect a wide range of response patterns. Barring any additional information about the distributions, then, I would have no qualms using this approach. (If it turns out that this is a common enough problem, I would even consider implementing the algorithm as a `simstudy` function.)
+
+Now, it is time to reveal the secret of the plot (if you haven't figured it out already). Each point is just the $(\mu, \sigma)$ pair generated by a specific $(a, b)$ pair. Here is the code, implementing the described algorithm:
+
+```{r, eval = FALSE}
+get_abp <- function(a, b, size) {
+  
+  x <- 1:size
+  
+  z <- pbeta((1:size)/size, a, b)
+  p <- z - c(0, z[-size])
+  
+  sigma <- weighted.sd(x, p)
+  mu <- weighted.mean(x, p)
+  
+  data.table(a, b, mu, sigma, t(p))
+}
+
+get_p <- function(a, b, n) {
+  ab <- asplit(expand.grid(a = a, b = b), 1)
+  rbindlist(lapply(ab, function(x) get_abp(x[1], x[2],  n)))
+}
+
+a <- seq(.1, 25, .1)
+b <- seq(.1, 25, .1)
+
+ab_res <- get_p(a, b, 7)
+```
+
+We can fill in the plot with more points by increasing the range of $a$ and $b$ that we search, but creating such a huge table of look-up values is time consuming and starts to eat up memory. In any case, there is no need, because we will refine the search by zooming in on the area closest to our target.
+
+Here is the plot again, based on $a$'s and $b$'s ranging from 0.1 to 25, with the superimposed target pair $(\mu =3.2, \sigma = 1.8)$
+
+```{r, echo=FALSE, fig.height=3}
+ab_plot + 
+  geom_point(x = 3.2, y = 1.8, color = "#222255", size = 3, shape = 16)
+```
+
+To zoom in, we first find the point in the grid that is closest to our target (based on Euclidean distance). We then define a finer grid around this point in the grid, and re-search for the closest point. We do have to be careful that we do not search for invalid values of $a$ and $b$ (i.e. $a \le 0$ and $b \le 0$). Once we find our point, we have the associated probabilities.:
+
+```{r}
+t_mu = 3.2
+t_s = 1.8
+
+ab_res[, distance := sqrt((mu - t_mu)^2 + (sigma - t_s)^2)]
+close_point <- ab_res[distance == min(distance), .(a, b, distance)]
+  
+a_zoom<- with(close_point, seq(a - .25, a + .25, length = 75))
+b_zoom<- with(close_point, seq(b - .25, b + .25, length = 75))
+  
+a_zoom <- a_zoom[a_zoom > 0]
+b_zoom <- b_zoom[b_zoom > 0]
+  
+res_zoom <- get_p(a_zoom, b_zoom, 7)
+```
+
+Here is the new search region:
+
+```{r, echo=FALSE, fig.height=3}
+ggplot(data = res_zoom, aes(x = mu, y = sigma)) +
+  geom_point(size = .1, color = "#663333") +
+  geom_point(x = t_mu, y = t_s, color = "#222255", size = 3, shape = 16) +
+  theme(panel.grid = element_blank())
+```
+
+And the selection of the point:  
+  
+```{r}  
+res_zoom[, distance := sqrt((mu - t_mu)^2 + (sigma - t_s)^2)]
+res_zoom[distance == min(distance)]
+```
+
+### Applying the *beta*-search to a bigger problem
+
+To conclude, I'll finish with Francisco's more ambitious goal of simulating correlated responses to multiple questions. In this case, we will assume four questions, all with responses ranging from 1 to 7. The target ($\mu, \sigma$) pairs taken from the (hypothetical) journal article are: 
+
+```{r}
+targets <- list(c(2.4, 0.8), c(4.1, 1.2), c(3.4, 1.5), c(5.8, 0.8))
+```
+
+The correlation matrix taken from this same article is:
+
+```{r}
+corMat <- matrix(c(
+  1.00, 0.09, 0.11, 0.05,
+  0.09, 1.00, 0.35, 0.16,
+  0.11, 0.35, 1.00, 0.13,
+  0.05, 0.16, 0.13, 1.00), nrow=4,ncol=4)
+```
+
+The `get_target_prob` function implements the search algorithm described above:
+
+```{r}
+get_target_prob <- function(t_mu, t_s, ab_res) {
+  
+  ab_res[, distance := sqrt((mu - t_mu)^2 + (sigma - t_s)^2)]
+  close_point <- ab_res[distance == min(distance), .(a, b, distance)]
+  
+  a_zoom<- with(close_point, seq(a - .25, a + .25, length = 75))
+  b_zoom<- with(close_point, seq(b - .25, b + .25, length = 75))
+  
+  a_zoom <- a_zoom[a_zoom > 0]
+  b_zoom <- b_zoom[b_zoom > 0]
+  
+  res_zoom <- get_p(a_zoom, b_zoom, 7)
+  
+  res_zoom[, distance := sqrt((mu - t_mu)^2 + (sigma - t_s)^2)]
+  baseprobs <- as.vector(res_zoom[distance == min(distance), paste0("V", 1:7)], "double")
+  
+  baseprobs
+}
+```
+
+Calling the function conducts the search and provides probabilities for each question:
+
+```{r}
+probs <- lapply(targets, function(x) get_target_prob(x[1], x[2], ab_res))
+(probs <- do.call(rbind, probs))
+```
+
+At least in theory, Francisco can now conduct his simulation study. In this case, I am generating a huge sample size to minimize sampling variation with the hope that we can recover the means, standard deviations and correlations, which, of course, we do:
+
+```{r}
+d_ind <- genData(100000) 
+dx <- genOrdCat(d_ind, adjVar = NULL, baseprobs = probs, catVar = "y", 
+                corMatrix = corMat, asFactor = FALSE)
+```
+
+```{r}
+apply(as.matrix(dx[, -1]), 2, mean)
+apply(as.matrix(dx[, -1]), 2, sd)
+cor(as.matrix(dx[, -1]))
+```
+
+In the end, Francisco seemed to be satisfied with the solution - at least satisfied enough to go to the trouble to have a bottle of wine sent to me in New York City, which was definitely above and beyond. While my wife and I will certainly enjoy the wine - and look forward to being able to travel again so maybe we can enjoy a glass in person - seeing that image emerge from a *beta*-distribution was really all I needed. Salud.
