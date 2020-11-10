@@ -1,0 +1,370 @@
+---
+title: 'Exploring the properties of a Bayesian model using high performance computing'
+author: Keith Goldfeld
+date: '2020-11-10'
+slug: a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - Stan
+  - slurm
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>An obvious downside to estimating Bayesian models is that it can take a considerable amount of time merely to fit a model. And if you need to estimate the same model repeatedly, that considerable amount becomes a prohibitive amount. In this post, which is part of a series (last one <a href="https://bit.ly/31kCCDV" target="_blank">here</a>) where I’ve been describing various aspects of the Bayesian analyses we plan to conduct for the <a href="https://bit.ly/31hDwB0" target="_blank">COMPILE</a> meta-analysis of convalescent plasma RCTs, I’ll present a somewhat elaborate model to illustrate how we have addressed these computing challenges to explore the properties of these models.</p>
+<p>While concept of statistical power may not be part of the Bayesian analytic framework, there are many statisticians who would like to assess this property regardless of the modeling approach. These assessments require us to generate multiple data sets and estimate a model for each. In this case, we’ve found that each run through the MCMC-algorithm required to sample from the posterior probability of the Bayesian model can take anywhere from 7 to 15 minutes on our laptops or desktops. If we want to analyze 1,000 data sets using these methods, my laptop would need to run continuously for at least a week. And if we want to explore models under different assumptions about the data generating process or prior distributions - well, that would be impossible.</p>
+<p>Fortunately, we have access to the <a href="https://bit.ly/37wJdPs" target="_blank">High Performance Computing Core at NYU Langone Health</a> (HPC), which enables us to analyze 1,000 data sets in about 90 minutes. Still pretty intensive, but clearly a huge improvement. This post describes how we adapted our simulation and modeling process to take advantage of the power and speed of the the HPC.</p>
+<div id="compile-study-design" class="section level3">
+<h3>COMPILE Study design</h3>
+<p>There are numerous randomized control trials being conducted around the world to evaluate the efficacy of antibodies in convalescent blood plasma in improving outcomes for patients who have been hospitalized with COVID. Because each trial lacks adequate sample size to allow us to draw any definitive conclusions, we have undertaken a project to pool individual level data from these various studies into a single analysis. (I described the general approach and some conceptual issues <a href="https://bit.ly/3o8o8Rr" target="_blank">here</a> and <a href="https://bit.ly/2HcXCpr" target="_blank">here</a>). The outcome is an 11-point categorical score developed by the <a href="https://bit.ly/3m7h4CI" target="_blank">WHO</a>, with 0 indicating no COVID infection and 10 indicating death. As the intensity of support increases, the scores increase. For the primary outcome, the score will be based on patient status 14 days after randomization.</p>
+<p>This study is complicated by the fact that each RCT is using one of three different control conditions: (1) usual care (unblinded), (2) non-convalescent plasma, and (3) saline solution. The model conceptualizes the three control conditions as three treatments to be compared against the reference condition of convalescent plasma. The overall treatment effect will represent a quantity centered around the three control effects.</p>
+<p>Because we have access to individual-level data, we will be able to adjust for important baseline characteristics that might be associated with the prognosis at day 14; these are baseline WHO-score, age, sex, and symptom duration prior to randomization. The primary analysis will adjust for these factors, and secondary analyses will go further to investigate if any of these factors modify the treatment effect. In the example in this post, I will present the model based on a secondary analysis that considers only a single baseline factor symptom duration; we are allowing for the possibility that the treatment may be more or less effective depending on the symptom duration. (For example, patients who have been sicker longer may not respond to the treatment, while those who are treated earlier may.)</p>
+</div>
+<div id="model" class="section level3">
+<h3>Model</h3>
+<p>Here is the model that I am using (as I mentioned, the planned COMPILE analysis will be adjusting for additional baseline characteristics):</p>
+<p><span class="math display">\[
+\text{logit} \left(P\left(Y_{kis} \ge y\right)\right) = \tau_{yk} + \beta_s  + I_{ki} \left( \gamma_{kcs} + \delta_{kc} \right), \; \; y \in \{1, \dots L-1\} \text{ with } L \text{ response levels}
+\]</span>
+And here are the assumptions for the <strong>prior distributions</strong>:</p>
+<p><span class="math display">\[
+\begin{aligned}
+   \tau_{yk} &amp;\sim t_{\text{student}} \left( \text{df=} 3, \mu=0, \sigma = 5 \right), \; \; \text{monotone within } \text{site } k \\
+\beta_s &amp;\sim \text{Normal} \left( \mu=0, \sigma = 5 \right), \qquad \; \;s \in \{1,\dots, S \}     \text{ for symptom duration strata}, \beta_1 = 0  \\
+\gamma_{kcs} &amp;\sim \text{Normal}\left( \gamma_{cs}, 1 \right), \qquad \qquad \;\;\;\;\;\;c \in \{0, 1, 2\} \text{ for control conditions }, \gamma_{kc1} = 0 \text{ for all } k \\
+\gamma_{cs} &amp;\sim \text{Normal}\left( \Gamma_s, 0.25 \right), \qquad \qquad \; \; \gamma_{c1} = 0 \text{ for all } c \\
+\Gamma_s &amp;\sim t_{\text{student}} \left( 3, 0,  1 \right), \qquad \qquad \qquad \Gamma_{1} = 0 \\
+\delta_{kc} &amp;\sim \text{Normal}\left( \delta_c, \eta \right)\\
+\delta_c &amp;\sim \text{Normal}\left( -\Delta, 0.5 \right) \\
+\eta &amp;\sim t_{\text{student}}\left(3, 0, 0.25 \right) \\
+-\Delta &amp;\sim t_{\text{student}} \left( 3, 0,  2.5 \right) 
+\end{aligned}
+\]</span>
+There are <span class="math inline">\(K\)</span> RCTs. The outcome for the <span class="math inline">\(i\)</span>th patient from the <span class="math inline">\(k\)</span>th trial on the <span class="math inline">\(L\)</span>-point scale at day 14 is <span class="math inline">\(Y_{ki}=y\)</span>, <span class="math inline">\(y=0,\dots,L-1\)</span> (although the COMPILE study will have <span class="math inline">\(L = 11\)</span> levels, I will be using <span class="math inline">\(L=5\)</span> to speed up estimation times a bit). <span class="math inline">\(I_{ki}\)</span> indicates the treatment assignment for subject <span class="math inline">\(i\)</span> in the <span class="math inline">\(k\)</span>th RCT, <span class="math inline">\(I_{ki} = 0\)</span> if patient <span class="math inline">\(i\)</span> received CP and <span class="math inline">\(I_{ki} = 1\)</span> if the patient was in <em>any</em> control arm. There are three control conditions <span class="math inline">\(C\)</span>: standard of care, <span class="math inline">\(C=0\)</span>; non-convalescent plasma, <span class="math inline">\(C=1\)</span>; saline/LR with coloring, <span class="math inline">\(C=2\)</span>; each RCT <span class="math inline">\(k\)</span> is attached to a specific control condition. There are also <span class="math inline">\(S=3\)</span> symptom duration strata: short duration, <span class="math inline">\(s=0\)</span>; moderate duration, <span class="math inline">\(s=1\)</span>; and long duration, <span class="math inline">\(s=2\)</span>. (COMPILE will use five symptom duration strata - again I am simplifying.)</p>
+<p><span class="math inline">\(\tau_{yk}\)</span> corresponds to the <span class="math inline">\(k\)</span>th RCT’s intercept associated with level <span class="math inline">\(y\)</span>; the <span class="math inline">\(\tau\)</span>’s represent the cumulative log odds for patients with in symptom duration group <span class="math inline">\(s=0\)</span> and receiving CP treatment. Within a particular RCT, all <span class="math inline">\(\tau_{yk}\)</span>’s, satisfy the monotonicity requirements for the intercepts of the proportional odds model. <span class="math inline">\(\beta_s\)</span>, <span class="math inline">\(s \in {2, 3}\)</span>, is the main effect of symptom duration (<span class="math inline">\(\beta_1 = 0\)</span>, where <span class="math inline">\(s=1\)</span> is the reference category). <span class="math inline">\(\gamma_{kcs}\)</span> is the moderating effect of strata <span class="math inline">\(s\)</span> in RCT <span class="math inline">\(k\)</span>; <span class="math inline">\(\gamma_{kc1} = 0\)</span>, since <span class="math inline">\(s=1\)</span> is the reference category. <span class="math inline">\(\delta_{kc}\)</span> is the RCT-specific control effect, where RCT <span class="math inline">\(k\)</span> is using control condition <span class="math inline">\(c\)</span>.</p>
+<p>Each <span class="math inline">\(\gamma_{kcs}\)</span> is normally distributed around a control type/symptom duration mean <span class="math inline">\(\gamma_{cs}\)</span>. And each <span class="math inline">\(\gamma_{cs}\)</span> is centered around a pooled mean <span class="math inline">\(\Gamma_s\)</span>. The <span class="math inline">\(\delta_{kc}\)</span>’s are assumed to be normally distributed around a control-type specific effect <span class="math inline">\(\delta_c\)</span>, with variance <span class="math inline">\(\eta\)</span> that will be estimated; the <span class="math inline">\(\delta_c\)</span>’s are normally distributed around <span class="math inline">\(-\Delta\)</span> (we take <span class="math inline">\(-\Delta\)</span> as the mean of the distribution to which <span class="math inline">\(\delta_c\)</span> belongs so that <span class="math inline">\(\exp(\Delta)\)</span> will correspond to the cumulative log-odds ratio for CP relative to control, rather than for control relative to CP.). (For an earlier take on these types of models, see <a href="https://bit.ly/34ila4Q" target="_blank">here</a>.)</p>
+</div>
+<div id="go-or-no-go" class="section level3">
+<h3>Go or No-go</h3>
+<p>The focus of a Bayesian analysis is the estimated posterior probability distribution of a parameter or parameters of interest, for example the log-odds ratio from a cumulative proportional odds model. At the end of an analysis, we have credibility intervals, means, medians, quantiles - all concepts associated a probability distribution.</p>
+<p>A “Go/No-go” decision process like a hypothesis test is not necessarily baked into the Bayesian method. At some point, however, even if we are using a Bayesian model to inform our thinking, we might want to or have to make a decision. In this case, we might want recommend (or not) the use of CP for patients hospitalized with COVID-19. Rather than use a hypothesis test to reject or fail to reject a null hypothesis of no effect, we can use the posterior probability to create a decision rule. In fact, this is what we have done.</p>
+<p>In the proposed design of COMPILE, the CP therapy will be deemed a success if both of these criteria are met:</p>
+<p><span class="math display">\[ P \left( \exp\left(-\Delta\right) &lt; 1 \right) = P \left( OR &lt; 1 \right) &gt; 95\%\]</span></p>
+<p><span class="math display">\[P \left( OR &lt; 0.80 \right) &gt; 50\%\]</span>
+The first statement ensures that the posterior probability of a good outcome is very high. If we want to be conservative, we can obviously increase the percentage threshold above <span class="math inline">\(95\%\)</span>. The second statement says that the there is decent probability that the treatment effect is clinically meaningful. Again, we can modify the target OR and/or the percentage threshold based on our desired outcome.</p>
+</div>
+<div id="goals-of-the-simulation" class="section level3">
+<h3>Goals of the simulation</h3>
+<p>Since there are no Type I or Type II errors in the Bayesian framework, the concept of power (which is the probability of rejecting the null hypothesis when it is indeed not true) does not logically flow from a Bayesian analysis. However, if we substitute our decision rules for a hypothesis test, we can estimate the probability (call it Bayesian power, though I imagine some Bayesians would object) that we will make a “Go” decision given a specified treatment effect. (To be truly Bayesian, we should impose some uncertainty on what that specific treatment effect is, and calculate a probability distribution of Bayesian power. But I am keeping things simpler here.)</p>
+<p>Hopefully, I have provided sufficient motivation for the need to simulate data and fit multiple Bayesian models. So, let’s do that now.</p>
+</div>
+<div id="the-simulation" class="section level3">
+<h3>The simulation</h3>
+<p>I am creating four functions that will form the backbone of this simulation process: <code>s_define</code>, <code>s_generate</code>, <code>s_estimate</code>, and <code>s_extract</code>. Repeated calls to each of these functions will provide us with the data that we need to get an estimate of Bayesian power under our (static) data generating assumptions.</p>
+<div id="data-definitions" class="section level4">
+<h4>Data definitions</h4>
+<p>The first definition table, <code>defC1</code>, sets up the RCTs. Each RCT has specific symptom duration interaction effect <span class="math inline">\(a\)</span> and control treatment effect <span class="math inline">\(b\)</span>. To introduce a little variability in sample size, 1/3 of the studies will be larger (150 patients), and 2/3 will be smaller (75 patients).</p>
+<p>The remaining tables, <code>defC2</code>, <code>defS</code>, and <code>defC3</code>, define patient-level data. <code>defC2</code> adds the control group indicator (0 = CP, 1 = standard care, 2 = non-convalescent plasma, 3 = saline) and the symptom duration stratum. <code>defS</code> defines the interaction effect conditional on the stratum. <code>defC3</code> defines the ordinal categorical outcome.</p>
+<pre class="r"><code>s_define &lt;- function() {
+  
+  defC1 &lt;- defDataAdd(varname = &quot;a&quot;,formula = 0, variance = .005, dist = &quot;normal&quot;)    
+  defC1 &lt;- defDataAdd(defC1,varname = &quot;b&quot;,formula = 0, variance= .01, dist = &quot;normal&quot;)
+  defC1 &lt;- defDataAdd(defC1,varname = &quot;size&quot;,formula = &quot;75+75*large&quot;, dist = &quot;nonrandom&quot;) 
+  
+  defC2 &lt;- defDataAdd(varname=&quot;C_rv&quot;, formula=&quot;C * control&quot;, dist = &quot;nonrandom&quot;) 
+  defC2 &lt;- defDataAdd(defC2, varname = &quot;ss&quot;, formula = &quot;1/3;1/3;1/3&quot;, 
+                      dist = &quot;categorical&quot;)
+  
+  defS &lt;- defCondition(
+    condition = &quot;ss==1&quot;,  
+    formula = 0, 
+    dist = &quot;nonrandom&quot;)
+  defS &lt;- defCondition(defS,
+    condition = &quot;ss==2&quot;,  
+    formula = &quot;(0.09 + a) * (C_rv==1) + (0.10 + a) * (C_rv==2) + (0.11 + a) * (C_rv==3)&quot;, 
+    dist = &quot;nonrandom&quot;)
+  defS &lt;- defCondition(defS,
+    condition = &quot;ss==3&quot;,  
+    formula = &quot;(0.19 + a) * (C_rv==1) + (0.20 + a) * (C_rv==2) + (0.21 + a) * (C_rv==3)&quot;, 
+    dist = &quot;nonrandom&quot;)
+  
+  defC3 &lt;- defDataAdd(
+    varname = &quot;z&quot;, 
+    formula = &quot;0.1*(ss-1)+z_ss+(0.6+b)*(C_rv==1)+(0.7+b)*(C_rv==2)+(0.8+b)*(C_rv==3)&quot;, 
+    dist = &quot;nonrandom&quot;)
+  
+  list(defC1 = defC1, defC2 = defC2, defS = defS, defC3 = defC3)
+  
+}</code></pre>
+</div>
+<div id="data-generation" class="section level4">
+<h4>Data generation</h4>
+<p>The data generation process draws on the definition tables to create an instance of an RCT data base. This process includes a function <code>genBaseProbs</code> that I described <a href="https://www.rdatagen.net/post/generating-probabilities-for-ordinal-categorical-data/" target="_blank">previously</a>.</p>
+<pre class="r"><code>s_generate &lt;- function(deflist, nsites) {
+  
+  genBaseProbs &lt;- function(n, base, similarity, digits = 2) {
+    
+    n_levels &lt;- length(base)
+    
+    x &lt;- gtools::rdirichlet(n, similarity * base) 
+    
+    x &lt;- round(floor(x*1e8)/1e8, digits)
+    xpart &lt;- x[, 1:(n_levels-1)]    
+    partsum &lt;- apply(xpart, 1, sum)
+    x[, n_levels] &lt;- 1 - partsum
+    
+    return(x)
+  }
+  
+  basestudy &lt;- genBaseProbs(n = nsites,
+                            base =  c(.10, .35, .25, .20, .10),
+                            similarity = 100)
+  
+  dstudy &lt;- genData(nsites, id = &quot;study&quot;)   
+  dstudy &lt;- trtAssign(dstudy, nTrt = 3, grpName = &quot;C&quot;)
+  dstudy &lt;- trtAssign(dstudy, nTrt = 2, strata = &quot;C&quot;, grpName = &quot;large&quot;, ratio = c(2,1))
+  dstudy &lt;- addColumns(deflist[[&#39;defC1&#39;]], dstudy)
+  
+  dind &lt;- genCluster(dstudy, &quot;study&quot;, numIndsVar = &quot;size&quot;, &quot;id&quot;)
+  dind &lt;- trtAssign(dind, strata=&quot;study&quot;, grpName = &quot;control&quot;) 
+  dind &lt;- addColumns(deflist[[&#39;defC2&#39;]], dind)
+  dind &lt;- addCondition(deflist[[&quot;defS&quot;]], dind, newvar = &quot;z_ss&quot;)
+  dind &lt;- addColumns(deflist[[&#39;defC3&#39;]], dind)
+  
+  dl &lt;- lapply(1:nsites, function(i) {
+    b &lt;- basestudy[i,]
+    dx &lt;- dind[study == i]
+    genOrdCat(dx, adjVar = &quot;z&quot;, b, catVar = &quot;ordY&quot;)
+  })
+  
+  rbindlist(dl)[]
+}</code></pre>
+</div>
+<div id="model-estimation" class="section level4">
+<h4>Model estimation</h4>
+<p>The estimation involves creating a data set for <code>Stan</code> and sampling from the Bayesian model. The <code>Stan</code> model is included in the addendum.</p>
+<pre class="r"><code>s_estimate &lt;- function(dd, s_model) {
+  
+  N &lt;- nrow(dd)                               ## number of observations 
+  L &lt;- dd[, length(unique(ordY))]             ## number of levels of outcome 
+  K &lt;- dd[, length(unique(study))]            ## number of studies 
+  y &lt;- as.numeric(dd$ordY)                    ## individual outcome 
+  kk &lt;- dd$study                              ## study for individual 
+  ctrl &lt;- dd$control                          ## treatment arm for individual 
+  cc &lt;- dd[, .N, keyby = .(study, C)]$C       ## specific control arm for study 
+  ss &lt;- dd$ss
+  x &lt;- model.matrix(ordY ~ factor(ss), data = dd)[, -1] 
+  
+  studydata &lt;- list(N=N, L= L, K=K, y=y, kk=kk, ctrl=ctrl, cc=cc, ss=ss, x=x)
+  
+  fit &lt;-  sampling(s_model, data=studydata, iter = 4000, warmup = 500,
+                   cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
+  fit
+}</code></pre>
+</div>
+<div id="estimate-extraction" class="section level4">
+<h4>Estimate extraction</h4>
+<p>The last step is the extraction of summary data from the posterior probability distributions. I am collecting quantiles of the key parameters, including <span class="math inline">\(\Delta\)</span> and <span class="math inline">\(OR = \exp(-\Delta)\)</span>. For the Bayesian power analysis, I am estimating the probability of falling below the two thresholds for each data set. And finally, I want to get a sense of the quality of each estimation process by recovering the number of divergent chains that resulted from the MCMC algorithm (more on that <a href="https://www.rdatagen.net/post/diagnosing-and-dealing-with-estimation-issues-in-the-bayesian-meta-analysis/" target="_blank">here</a>).</p>
+<pre class="r"><code>s_extract &lt;- function(iternum, mcmc_res) {
+  
+  posterior &lt;- as.array(mcmc_res)
+  
+  x &lt;- summary(
+    mcmc_res, 
+    pars = c(&quot;Delta&quot;, &quot;delta&quot;, &quot;Gamma&quot;, &quot;beta&quot;, &quot;alpha&quot;, &quot;OR&quot;),
+    probs = c(0.025, 0.5, 0.975)
+  )
+  
+  dpars &lt;- data.table(iternum = iternum, par = rownames(x$summary), x$summary)
+  
+  p.eff &lt;- mean(rstan::extract(mcmc_res, pars = &quot;OR&quot;)[[1]] &lt; 1)
+  p.clinic &lt;- mean(rstan::extract(mcmc_res, pars = &quot;OR&quot;)[[1]] &lt; 0.8)
+  dp &lt;- data.table(iternum = iternum, p.eff = p.eff, p.clinic = p.clinic)
+  
+  sparams &lt;- get_sampler_params(mcmc_res, inc_warmup=FALSE)
+  n_divergent &lt;- sum(sapply(sparams, function(x) sum(x[, &#39;divergent__&#39;])))
+  ddiv &lt;- data.table(iternum, n_divergent)
+  
+  list(ddiv = ddiv, dpars = dpars, dp = dp)
+}</code></pre>
+</div>
+<div id="replication" class="section level4">
+<h4>Replication</h4>
+<p>Now we want to put all these pieces together and repeatedly execute those four functions and save the results from each. I’ve <a href="https://www.rdatagen.net/post/parallel-processing-to-add-a-little-zip-to-power-simulations/" target="_blank">described</a> using <code>lapply</code> to calculate power in a much more traditional setting. We’re going to take the same approach here, except on steroids, replacing <code>lapply</code> not with <code>mclapply</code>, the parallel version, but with <code>Slurm_lapply</code>, which is a function in the <code>slurmR</code> package.</p>
+<p><a href="https://slurm.schedmd.com/documentation.html" target="_blank">Slurm</a> (Simple Linux Utility for Resource Management) is a HPC cluster job scheduler. <a href="https://uscbiostats.github.io/slurmR/" target="_blank">slurmR</a> is a wrapper that mimics many of the R <code>parallel</code> package functions, but in a Slurm environment. The strategy here is to define a meta-function (<code>iteration</code>) that itself calls the four functions already described, and then call that function repeatedly. <code>Slurm_lapply</code> does that, and rather than allocating the iterations to different <em>cores</em> on a computer like <code>mclapply</code> does, it allocates the iterations to different <em>nodes</em> on the HPC, using what is technically called a <em>job array</em>. Each node is essentially its own computer. In addition to that, each node has multiple cores, so we can run the different MCMC chains in parallel within a node; we have parallel processes within a parallel process. I have access to 100 nodes at any one time, though I find I don’t get much performance improvement if I go over 90, so that is what I do here. Within each node, I am using 4 cores. I am running 1,980 iterations, so that is 22 iterations per node. As I mentioned earlier, all of this runs in about an hour and a half.</p>
+<p>The following code includes the “meta-function” <code>iteration</code>, the compilation of the <code>Stan</code> model (which only needs to be done once, thankfully), the <code>Slurm_lapply</code> call, and the <strong>Slurm</strong> batch code that I need to execute to get the whole process started on the HPC, which is called Big Purple here at NYU. (All of the R code goes into a single <code>.R</code> file, the batch code is in a <code>.slurm</code> file, and the Stan code is in its own <code>.stan</code> file.)</p>
+<pre class="r"><code>iteration &lt;- function(iternum, s_model, nsites) {
+
+    s_defs &lt;- s_define()
+    s_dd &lt;- s_generate(s_defs, nsites = nsites)
+    s_est &lt;- s_estimate(s_dd, s_model)
+    s_res &lt;- s_extract(iternum, s_est)
+
+    return(s_res)
+    
+}</code></pre>
+<pre class="r"><code>library(simstudy)
+library(rstan)
+library(data.table)
+library(slurmR)
+
+rt &lt;- stanc(&quot;/.../r/freq_bayes.stan&quot;)
+sm &lt;- stan_model(stanc_ret = rt, verbose=FALSE)
+
+job &lt;- Slurm_lapply(
+  X = 1:1980, 
+  iteration, 
+  s_model = sm,
+  nsites = 9,
+  njobs = 90, 
+  mc.cores = 4,
+  tmp_path = &quot;/.../scratch&quot;,
+  overwrite = TRUE,
+  job_name = &quot;i_fb&quot;,
+  sbatch_opt = list(time = &quot;03:00:00&quot;, partition = &quot;cpu_short&quot;),
+  export = c(&quot;s_define&quot;, &quot;s_generate&quot;, &quot;s_estimate&quot;, &quot;s_extract&quot;),
+  plan = &quot;wait&quot;)
+
+job
+res &lt;- Slurm_collect(job)
+
+diverge &lt;- rbindlist(lapply(res, function(l) l[[&quot;ddiv&quot;]]))
+ests &lt;- rbindlist(lapply(res, function(l) l[[&quot;dpars&quot;]]))
+probs &lt;- rbindlist(lapply(res, function(l) l[[&quot;dp&quot;]]))
+
+save(diverge, ests, probs, file = &quot;/.../data/freq_bayes.rda&quot;)</code></pre>
+<pre><code>#!/bin/bash
+#SBATCH --job-name=fb_parent
+#SBATCH --mail-type=END,FAIL                      # send email if the job end or fail
+#SBATCH --mail-user=keith.goldfeld@nyulangone.org
+#SBATCH --partition=cpu_short
+#SBATCH --time=3:00:00                            # Time limit hrs:min:sec
+#SBATCH --output=fb.out                           # Standard output and error log
+
+module load r/3.6.3
+cd /.../r
+
+Rscript --vanilla fb.R</code></pre>
+</div>
+<div id="results" class="section level4">
+<h4>Results</h4>
+<p>Each of the three extracted data tables are combined across simulations and the results are saved to an <code>.rda</code> file, which can be loaded locally in R and summarized. In this case, we are particularly interested in the Bayesian power estimate, which is the proportion of data sets that would results in a “go” decision (a recommendation to strongly consider using the intervention).</p>
+<p>However, before we consider that, we should first get a rough idea about how many replications had <a href="https://www.rdatagen.net/post/diagnosing-and-dealing-with-estimation-issues-in-the-bayesian-meta-analysis/" target="_blank">divergence issues</a>, which we extracted into the <code>diverge</code> data table. For each replication, we used four chains of length 3,500 each (after the 500 warm-up samples), accounting for a total of 14,000 chains. Here are the proportion of replications with at least one divergent chain:</p>
+<pre class="r"><code>load(&quot;DataBayesCOMPILE/freq_bayes.rda&quot;)
+diverge[, mean(n_divergent &gt; 0)]</code></pre>
+<pre><code>## [1] 0.102</code></pre>
+<p>While 10% of replications with at least 1 divergent chain might seem a little high, we can get a little more comfort from the fact that it appears that almost all replications had fewer than 35 (0.25%) divergent chains:</p>
+<pre class="r"><code>diverge[, mean(n_divergent &lt; 35)]</code></pre>
+<pre><code>## [1] 0.985</code></pre>
+<p>To get a general sense of how well our model is working, we can plot the distribution of posterior medians. In particular, this will allow us to assess how well the model is recovering the values used in the data generating process. In this case, I am excluding the 29 replications with 35 or more divergent chains:</p>
+<p><img src="/post/2020-11-10-a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models.en_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p>Finally, we are ready to report the estimated Bayesian power (again, using the replications with limited number of divergent chains) and show the distribution of probabilities.</p>
+<pre class="r"><code>probs_d &lt;- merge(probs, diverge, by = &quot;iternum&quot;)[n_divergent &lt; 35]
+probs_d[, mean(p.eff &gt; 0.95 &amp; p.clinic &gt; 0.50)]</code></pre>
+<pre><code>## [1] 0.726</code></pre>
+<p><img src="/post/2020-11-10-a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>So, given an actual effect <span class="math inline">\(OR=\exp(-0.70) = 0.50\)</span>, we would conclude with a decision to go ahead with the therapy with 73% probability. However, a single estimate of power based on one effect size is a bit incomplete; it would be preferable to assess power under numerous scenarios of effect sizes and perhaps prior distribution assumptions to get a more complete picture. And if you have access to a HPC, this may actually be something you can do in a realistic period of time.</p>
+</div>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>The <code>stan</code> model that implements the model described at the outset actually looks a little different than that model in two key ways. First, there is a parameter <span class="math inline">\(\alpha\)</span> that appears in the outcome model, which represents an overall intercept across all studies. Ideally, we wouldn’t need to include this parameter since we want to fix it at zero, but the model behaves very poorly without it. We do include it, but with a highly restrictive prior that will constrain it to be very close to zero. The second difference is that standard normal priors appear in the model - this is to alleviate issues related to divergent chains, which I described in a <a href="https://www.rdatagen.net/post/diagnosing-and-dealing-with-estimation-issues-in-the-bayesian-meta-analysis/" target="_blank">previous post</a>.</p>
+<pre class="stan"><code>data {
+    int&lt;lower=0&gt; N;                // number of observations
+    int&lt;lower=2&gt; L;                // number of WHO categories
+    int&lt;lower=1&gt; K;                // number of studies
+    int&lt;lower=1,upper=L&gt; y[N];     // vector of categorical outcomes
+    int&lt;lower=1,upper=K&gt; kk[N];    // site for individual
+    int&lt;lower=0,upper=1&gt; ctrl[N];  // treatment or control
+    int&lt;lower=1,upper=3&gt; cc[K];    // specific control for site
+    int&lt;lower=1,upper=3&gt; ss[N];    // strata
+    row_vector[2] x[N];            // strata indicators  N x 2 matrix
+  }
+
+parameters {
+  
+  real Delta;               // overall control effect
+  vector[2] Gamma;          // overall strata effect
+  real alpha;               // overall intercept for treatment
+  ordered[L-1] tau[K];      // cut-points for cumulative odds model (K X [L-1] matrix)
+  
+  real&lt;lower=0&gt;  eta_0;     // sd of delta_k (around delta)
+
+  // non-central parameterization
+  
+  vector[K] z_ran_rx;      // site-specific effect 
+  vector[2] z_phi[K];      // K X 2 matrix 
+  vector[3] z_delta;
+  vector[2] z_beta;
+  vector[2] z_gamma[3];    // 3 X 2 matrix
+}
+
+transformed parameters{ 
+  
+  vector[3] delta;          // control-specific effect
+  vector[K] delta_k;        // site specific treatment effect
+  vector[2] gamma[3];       // control-specific duration strata effect (3 X 2 matrix)
+  vector[2] beta;           // covariate estimates of ss
+  vector[2] gamma_k[K];     // site-specific duration strata effect (K X 2 matrix)
+  vector[N] yhat;
+
+  
+  delta = 0.5 * z_delta + Delta; // was 0.1
+  beta = 5 * z_beta;
+  
+  for (c in 1:3) 
+    gamma[c] = 0.25 * z_gamma[c] + Gamma;
+  
+  for (k in 1:K){
+    delta_k[k] = eta_0 * z_ran_rx[k] + delta[cc[k]]; 
+  }
+  
+  for (k in 1:K)
+    gamma_k[k] = 1 * z_phi[k] + gamma[cc[k]];
+
+  for (i in 1:N)  
+    yhat[i] = alpha + x[i] * beta + ctrl[i] * (delta_k[kk[i]] + x[i]*gamma_k[kk[i]]);
+}
+
+model {
+  
+  // priors
+  
+  z_ran_rx ~ std_normal(); 
+  z_delta ~ std_normal();
+  z_beta ~ std_normal();
+
+  alpha ~ normal(0, 0.25);
+  eta_0 ~ student_t(3, 0, 0.25);
+  
+  Delta ~ student_t(3, 0, 2.5);
+  Gamma ~ student_t(3, 0, 1);
+  
+  for (c in 1:3)
+      z_gamma[c] ~ std_normal();
+  
+  for (k in 1:K)
+      z_phi[k] ~ std_normal();
+      
+  for (k in 1:K)
+      tau[k] ~ student_t(3, 0, 5);
+  
+  // outcome model
+  
+  for (i in 1:N)
+    y[i] ~ ordered_logistic(yhat[i], tau[kk[i]]);
+}
+
+generated quantities {
+  
+  real OR;
+  OR = exp(-Delta); 
+  
+}</code></pre>
+</div>
