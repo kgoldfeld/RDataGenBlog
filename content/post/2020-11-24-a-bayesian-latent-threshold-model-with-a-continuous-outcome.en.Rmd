@@ -1,0 +1,194 @@
+---
+title: A latent threshold model with a continuous outcome
+author: Keith Goldfeld
+date: '2020-11-24'
+slug: a-bayesian-latent-threshold-model-with-a-continuous-outcome
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: FALSE
+draft: TRUE
+---
+
+This is the context. In the convalescent plasma pooled individual patient level meta-analysis we are conducting as part of the [COMPILE](https://bit.ly/3nBxPXd){target="_blank"} study, there is great interest in understanding the impact of antibody levels on outcomes. (I've described various aspects of the analysis in previous posts, most recently [here](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"}). In other words, not all convalescent plasma is equal.
+
+If we had a clear measure of antibodies, we could model the relationship of these levels with the outcome of interest, such as health status as captured by the WHO 11-point scale or mortality, and call it a day. Unfortunately, there is no single measure across the RCTs included in the meta-analysis. The RCTs used a range of measurement "platforms" (or technologies), which may measure different components of the convalescent plasma using different scales. Given these inconsistencies, it is challenging to build a straightforward model that simply estimates the relationship between antibody levels and clinical outcomes.
+
+The study team is coalescing around the idea of comparing the outcomes of patients who received *low* levels of antibodies with patients who received *not low* levels (as well as with patients who received no antibodies). One thought is to use a model that can jointly estimate the latent threshold and, given that threshold, estimate a treatment effect. Importantly, this model would  need to accommodate multiple antibody measures and their respective thresholds. 
+
+To tackle this problem, I have turned to a class of models called change point or threshold models. My ultimate goal is to generate data and fit a Bayesian model that can estimate threshold and effect-size parameters for any number of RCTs using any number of antibody measures. At this point, we are a few steps removed from that, so in this post I'll start with a simple case of a single RCT and a single antibody measure, and use a maximum likelihood estimation method implemented in the `R` package [chngpt](https://cran.r-project.org/web/packages/chngpt/index.html){target="_blank"} to estimate parameters from a simulated data set. In a subsequent post, I'll implement a Bayesian version of this simple model, and in a third post, I'll get to the larger model that incorporates more complexity.
+
+### Visualizing simple scenarios
+
+Change point models appear to be most commonly used in the context of time series data where the focus is on understanding if a trend or average has shifted at a certain point in a sequence of measurements over time. In the case of COMPILE, the target would be a threshold for a continuous antibody measure across multiple patients; we are interested in measuring the average outcome for patients on either side of the threshold.
+
+The following plots show three scenarios. On the left, there is no threshold; the distribution of continuous outcomes is the same across all values of the the antibody measure. In the middle, there is a threshold at $-0.7$; patients with antibody levels below $-0.7$ have a lower average outcome than patients with antibodies above $-0.7$. On the right, the threshold is shifted to $0.5$.
+
+The key here is that the outcome is solely a function of the latent categorical status - not the actual value of the antibody level. This may be a little simplistic, because we might expect the antibody level itself to be related to the outcome based on some sort of linear or non-linear relationship rather than the dichotomous relationship we are positing here. However, if we set our sights on detecting a difference in average clinical outcomes for patients categorized as having been exposed to *low* and *not low* antibody levels rather than on understanding the full nature of their relationship, this simplification may be reasonable.
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, fig.height = 4, fig.width=9}
+library(simstudy)
+library(gridExtra)
+library(bayesplot)
+library(rstan)
+library(glue)
+library(Rmpfr)
+
+options(digits = 3)
+
+set.seed(222)
+
+# Generate simulated data
+
+d1 <- defData(varname = "biomarker", formula = 0, variance = 1, dist = "normal")
+d1 <- defData(d1, varname = "latent_status", formula = "-3.5 + 7 * (biomarker > ..cpt)",
+              dist = "binary", link = "logit")
+d1 <- defData(d1, varname = "y", formula = "0 + ..effect_size*latent_status", 
+              variance = 1, dist = "normal")
+
+cpt =-0.7
+effect_size <- 0
+dd <- genData(500, d1)
+
+p1 <- ggplot(data = dd, aes(x = biomarker, y = y)) +
+  geom_point(size = 1, color = "#77aa44") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  ggtitle("No threshold") +
+  scale_x_continuous(name = "antibody level", limits = c(-4, 4)) +
+  scale_y_continuous(limits = c(-4, 6))
+
+effect_size <- 2
+dd <- genData(500, d1)
+
+p2 <- ggplot(data = dd, aes(x = biomarker, y = y)) +
+  geom_point(size = 1, color = "#77aa44") +
+  geom_vline(xintercept = -0.7, size=0.5, lty = 2, color = "grey60") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  ggtitle("Threshold = -0.7") +
+  scale_x_continuous(name = "antibody level", limits = c(-4, 4)) +
+  scale_y_continuous(limits = c(-4, 6))
+
+cpt <- 0.5
+dd <- genData(500, d1)
+
+p3 <- ggplot(data = dd, aes(x = biomarker, y = y)) +
+  geom_point(size = 1, color = "#77aa44") +
+  geom_vline(xintercept = 0.5, size=0.5, lty = 2, color = "grey60") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  ggtitle("Threshold = 0.5") +
+  scale_x_continuous(name = "antibody level", limits = c(-4, 4)) +
+  scale_y_continuous(limits = c(-4, 6))
+
+grid.arrange(p1, p2, p3, nrow = 1)
+```
+
+### Data generation
+
+I think if you see the data generation process, the model and assumptions will be easier to see. We start with an antibody level that, for simplicity's sake, has a standard normal distribution. In this simulation, the latent group status (i.e. *low* vs. *not low*) is not determined completely by the threshold (though it certainly could); here, the probability that latent status is *not low* is about $5\%$ for patients with antibody levels that fall below $-0.7$, but is $95\%$ for patients that exceed threshold. 
+
+```{r}
+library(simstudy)
+set.seed(98765)
+
+d1 <- defData(varname = "antibody", formula = 0, variance = 1, dist = "normal")
+d1 <- defData(d1, varname = "latent_status", formula = "-3 + 6 * (antibody > -0.7)",
+              dist = "binary", link = "logit")
+d1 <- defData(d1, varname = "y", formula = "0 + 3 * latent_status", 
+              variance = 1, dist = "normal")
+
+dd <- genData(500, d1)
+dd
+```
+
+### Simple model estimation
+
+The `chngptm` function in the `chngpt` package provides an estimate of the threshold as well as the treatment effect of antibody lying above this latent threshold. The parameters in this simple case are recovered quite well. The fairly narrow $95\%$ confidence interval (2.5, 3.0) includes the true value. Likewise the very narrow $95\%$ CI for the threshold is (-0.72, -0.71) just misses the true value.
+
+```{r, message=FALSE}
+library(chngpt)
+
+fit <- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+  data = dd, type="step", family="gaussian")
+
+summary(fit)
+```
+
+### Alternative scenarios
+
+When there is more ambiguity in the relationship between the antibody threshold and the classification into the two latent classes of *low* and *not low*, there is more uncertainty in both the effect and threshold estimates. Furthermore, the effect size estimate is attenuated, since the prediction of the latent class is less successful. 
+
+In this case, the true threshold remains at $-0.7$, but the probability that a patient below the threshold actually does not have *low* levels of antibodies increases to about $21\%$, while the probability of a patient above the threshold does not have *low* levels of antibodies decreases to $79\%$. There is more uncertainty regarding the the threshold, as the $95\%$ CI is (-1.09, -0.62). And the estimated effect is $1.5 \; (1.3, 2.0)$ is attenuated with more uncertainty. Given the added uncertainty in the data generation process, these estimates are what we would expect.
+
+```{r}
+d1 <- updateDef(d1, changevar = "latent_status", 
+  newformula = "-1.3 + 2.6 * (antibody > -0.7)")
+
+dd <- genData(500, d1)
+fit <- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+  data = dd, type="step", family="gaussian")
+
+summary(fit)
+
+```
+
+The effect size has an impact on the estimation of a threshold. At the extreme case where there is no effect, the concept of a threshold is not meaningful; we would expect there to be great uncertainty with the estimate for the threshold. As the true effect size grows, we would expect the precision of the threshold estimate to increase as well (subject to the latent class membership probabilities just described). The subsequent plot shows the point estimates and $95\%$ CIs for thresholds at different effect sizes. The true threshold is $0.5$ and effect sizes range from 0 to 2:
+
+```{r, echo=FALSE, fig.height = 4}
+d1 <- defData(varname = "biomarker", formula = 0, variance = 1, dist = "normal")
+d1 <- defData(d1, varname = "latent_status", formula = "-3.5 + 7 * (biomarker > 0.5)",
+              dist = "binary", link = "logit")
+d1 <- defData(d1, varname = "y", formula = "0 + ..effect_size*latent_status", 
+              variance = 1, dist = "normal")
+
+iter <- function(effect_size, d1) {
+  dd <- genData(1000, d1)
+  fit <- chngptm(formula.1 = y ~ 1, formula.2 = ~ biomarker, 
+                 data = dd, type="step", family="gaussian")
+  dd1 <- data.table(effect_size, t(summary(fit)$chngpt))
+  dd2 <- data.table(effect_size, t(summary(fit)$coefficients[2,]))
+  
+  list(cp = dd1, effect = dd2)
+}
+
+set.seed(28232)
+res <- lapply(seq(0, 1, by = 0.05), function(x) iter(x, d1))
+
+cp <- rbindlist(lapply(res, function(x) x$cp))
+effect <- rbindlist(lapply(res, function(x) x$effect))
+
+ggplot(data = cp, aes(y = est, x = effect_size)) +
+  geom_hline(yintercept = 0.5, color = "#004488", lty = 3) +
+  geom_segment(aes(y = `(lower`, x = effect_size, yend = `upper)`, xend = effect_size),
+               color = "#4477AA") +
+  geom_point(size = 1.2, color = "#004488") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  xlab("actual effect size") +
+  ylab("estimated threshold and 95% CI") +
+  ggtitle("Estimated threshold values")
+```
+
+This last figure shows that the uncertainty around the effect size estimate is higher at lower levels of true effectiveness. This higher level of uncertainty in the estimated effect is driven by the higher level of uncertainty in the estimate of the threshold at lower effect sizes (as just pointed out above).
+
+```{r, echo=FALSE, fig.height=4}
+ggplot(data = effect, aes(y = est, x = effect_size)) +
+  geom_hline(yintercept = 0.0, color = "grey80", lty = 1) +
+  geom_segment(aes(y = `(lower`, x = effect_size, yend = `upper)`, xend = effect_size),
+               color = "#AA4477") +
+  geom_point(size = 1.2, color = "#880044") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  xlab("actual effect size") +
+  ylab("estimated effect size and 95% CI") +
+  ggtitle("Estimated effect sizes")
+```
+
+As I mentioned earlier, in my next post I will implement these relatively simple models as Bayesian models using `Stan` so that we can implement a fully hierarchical model with multiple antibody measures, each with its own threshold.
