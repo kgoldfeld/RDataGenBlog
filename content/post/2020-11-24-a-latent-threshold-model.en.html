@@ -99,5 +99,45 @@ summary(fit)</code></pre>
 <p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
 <p>This last figure shows that the uncertainty around the effect size estimate is higher at lower levels of true effectiveness. This higher level of uncertainty in the estimated effect is driven by the higher level of uncertainty in the estimate of the threshold at lower effect sizes (as just pointed out above).</p>
 <p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
-<p>As I mentioned earlier, in my next post I will implement these relatively simple models as Bayesian models using <code>Stan</code> so that we can implement a fully hierarchical model with multiple antibody measures, each with its own threshold.</p>
+</div>
+<div id="with-a-fundamentally-different-data-generating-process" class="section level3">
+<h3>With a fundamentally different data generating process</h3>
+<p>What happens when the underlying data process is quite different from the one we have been imagining? Is the threshold model useful? I would say “maybe not” in the case of a single antibody measurement. I alluded to this a bit earlier in the post, justifying the idea by arguing it might make more sense with multiple types of antibody measurements. We will hopefully find that out if I get to that point. But here, I thought I would conclude by briefly investigating what kind of estimates we get from a threshold model when the outcome is linearly related to the antibody measurement, and there is in fact no threshold, as in this data set:</p>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;antibody&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)  
+d1 &lt;- defData(d1, varname = &quot;y&quot;, formula = &quot;antibody&quot;, variance = 1, dist = &quot;normal&quot;)
+
+dd &lt;- genData(500, d1)</code></pre>
+<p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>The estimated threshold is near the center of the antibody data (which in this case is close to <span class="math inline">\(0\)</span>), with a fairly narrow <span class="math inline">\(95\%\)</span> confidence interval. The effect size is essentially a comparison of the means for patients with measurements below <span class="math inline">\(0\)</span> compared to patients above <span class="math inline">\(0\)</span>.</p>
+<p>If this was the actual data generation process, it might be preferable to model the relationship directly using simple linear regression without esimating a threshold.</p>
+<pre class="r"><code>fit &lt;- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+               data = dd, type=&quot;step&quot;, family=&quot;gaussian&quot;)
+summary(fit)</code></pre>
+<pre><code>## Change point model threshold.type:  step 
+## 
+## Coefficients:
+##                    est Std. Error* (lower upper) p.value*
+## (Intercept)     -0.972       0.162  -1.24 -0.607 2.19e-09
+## antibody&gt;chngpt  1.739       0.109   1.58  2.006 1.15e-57
+## 
+## Threshold:
+##        est Std. Error     (lower     upper) 
+##    -0.0713     0.2296    -0.3832     0.5170</code></pre>
+<p>And to actually conclude, I will include some code that generates 1000 replications of the simulated data to see how the model estimates of uncertainty compare with true sampling variability:</p>
+<pre class="r"><code>iter &lt;- function(d1) {
+  fit &lt;- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+     data =  genData(500, d1), type=&quot;step&quot;, family=&quot;gaussian&quot;)
+  
+  data.table(cp = summary(fit)$chngpt[1], effect = summary(fit)$coefficients[2,1])
+}
+
+RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(2871)
+
+res &lt;- rbindlist(mclapply(1:1000, function(x) iter(d1), mc.cores = 4))</code></pre>
+<p>From the model estimate above, the standard error for the threshold estimate is 0.230 and for the effect size estimate is 0.109.</p>
+<pre class="r"><code>c( threshold = sd(res$cp), effect = sd(res$effect) )</code></pre>
+<pre><code>## threshold    effect 
+##     0.269     0.106</code></pre>
+<p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 </div>

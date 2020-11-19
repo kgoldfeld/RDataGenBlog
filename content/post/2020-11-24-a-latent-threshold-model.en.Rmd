@@ -188,4 +188,80 @@ ggplot(data = effect, aes(y = est, x = effect_size)) +
   ggtitle("Estimated effect sizes")
 ```
 
-As I mentioned earlier, in my next post I will implement these relatively simple models as Bayesian models using `Stan` so that we can implement a fully hierarchical model with multiple antibody measures, each with its own threshold.
+### With a fundamentally different data generating process
+
+What happens when the underlying data process is quite different from the one we have been imagining? Is the threshold model useful? I would say "maybe not" in the case of a single antibody measurement. I alluded to this a bit earlier in the post, justifying the idea by arguing it might make more sense with multiple types of antibody measurements. We will hopefully find that out if I get to that point. But here, I thought I would conclude by briefly investigating what kind of estimates we get from a threshold model when the outcome is linearly related to the antibody measurement, and there is in fact no threshold, as in this data set:
+
+```{r}
+d1 <- defData(varname = "antibody", formula = 0, variance = 1, dist = "normal")  
+d1 <- defData(d1, varname = "y", formula = "antibody", variance = 1, dist = "normal")
+
+dd <- genData(500, d1)
+```
+
+```{r, echo = FALSE, fig.height = 4}
+ggplot(data = dd, aes(x = antibody, y = y)) +
+  geom_point(size = 1, color = "#77aa44") +
+#  geom_vline(xintercept = 0.0, size=0.5, lty = 2, color = "grey60") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  scale_x_continuous(name = "antibody level")
+```
+
+The estimated threshold is near the center of the antibody data (which in this case is close to $0$), with a fairly narrow $95\%$ confidence interval. The effect size is essentially a comparison of the means for patients with measurements below $0$ compared to patients above $0$. 
+
+If this was the actual data generation process, it might be preferable to model the relationship directly using simple linear regression without esimating a threshold.
+
+```{r}
+fit <- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+               data = dd, type="step", family="gaussian")
+summary(fit)
+```
+
+And to actually conclude, I will include some code that generates 1000 replications of the simulated data to see how the model estimates of uncertainty compare with true sampling variability:
+
+```{r, eval = FALSE}
+iter <- function(d1) {
+  fit <- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
+     data =  genData(500, d1), type="step", family="gaussian")
+  
+  data.table(cp = summary(fit)$chngpt[1], effect = summary(fit)$coefficients[2,1])
+}
+
+RNGkind("L'Ecuyer-CMRG")
+set.seed(2871)
+
+res <- rbindlist(mclapply(1:1000, function(x) iter(d1), mc.cores = 4))
+```
+
+```{r, echo=FALSE,eval=FALSE}
+save(res, file = "content/post/DataLatentThreshold/res.rdata")
+```
+
+```{r, echo = FALSE, fig.height = 4}
+load("DataLatentThreshold/res.rdata")
+```
+
+From the model estimate above, the standard error for the threshold estimate is 0.230   and for the effect size estimate is 0.109.
+
+```{r}
+c( threshold = sd(res$cp), effect = sd(res$effect) )
+```
+
+```{r, echo = FALSE, fig.height = 4}
+p1 <- ggplot(data = res, aes(x = cp)) +
+  geom_density(fill = "#4477AA", alpha = .4) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  xlab("threshold estimates") +
+  ggtitle("Threshold")
+
+p2 <- ggplot(data = res, aes(x = effect)) +
+  geom_density(fill = "#AA4477", alpha = .4) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold")) +
+  xlab("effect size estimates") +
+  ggtitle("Effect size")
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
