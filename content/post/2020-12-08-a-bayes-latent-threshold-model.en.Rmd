@@ -1,0 +1,287 @@
+---
+title: A Bayesian adaptation of a latent threshold model
+author: Keith Goldfeld
+date: '2020-12-08'
+slug: a-latent-threshold-model-to-estimate-treatment-effects
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: yes
+---
+
+```{r, echo = FALSE}
+options(digits = 3)
+load("DataBayesThreshold/model_fit.rdata")
+```
+
+```{r, warning = FALSE, message=FALSE}
+library(simstudy)
+library(rstan)
+library(bayesplot)
+library(Rmpfr)
+
+# Generate simulated data
+
+s_define <- function() {
+  
+  d0 <- defData(varname = "a", formula = 0, variance = 2.2^2, id = "study")
+  d0 <- defData(d0, varname = "bio", formula = ".3;.4;.3", dist = "categorical")
+  
+  dg <- defDataAdd(varname = "V1", formula = 5, variance = 1, dist = "gamma")
+  dg <- defDataAdd(dg, varname = "V2", formula = 6, variance = 2, dist = "gamma")
+  dg <- defDataAdd(dg, varname = "V3", formula = 4, variance = 2, dist = "gamma")
+  
+  dc1 <- defCondition(condition = "bio == 1", formula = "rx * (V1 + 5)", 
+    dist = "nonrandom")
+  dc1 <- defCondition(dc1, condition = "bio == 2", formula = "rx * (V2 + 5)", 
+    dist = "nonrandom")
+  dc1 <- defCondition(dc1, condition = "bio == 3", formula = "rx * (V3 + 5)", 
+    dist = "nonrandom")
+  
+  dc2 <- defCondition(condition = "bio == 1", 
+    formula = "rx*( -3 + 6 * (obs_V > 10)) + (1-rx)*(-9999)", 
+    dist = "binary", link = "logit")
+  dc2 <- defCondition(dc2, condition = "bio == 2", 
+    formula = "rx*( -2.5 + 5 * (obs_V > 15)) + (1-rx)*(-9999)", 
+    dist = "binary", link = "logit")
+  dc2 <- defCondition(dc2, condition = "bio == 3", 
+    formula = "rx*( -4 + 8 * (obs_V > 12)) + (1-rx)*(-9999)", 
+    dist = "binary", link = "logit")
+  
+  d2 <- defDataAdd(varname = "g", formula = 0, variance = 1)
+  d2 <- defDataAdd(d2, varname = "y", formula = "a + 1.0*g + 3 + rx*(2 + 4*L1)", 
+    variance = 2.5^2, dist = "normal")
+  
+  list(d0 = d0, dg = dg, dc1 = dc1, dc2 = dc2, d2 = d2)
+  
+}
+
+s_generate <- function(deflist, nsites, npatients) {
+  
+  list2env(x = deflist, envir = environment())
+  
+  ds <- genData(nsites, d0)
+  dd <- genCluster(ds, "study", npatients, "id")
+  dd <- trtAssign(dd, strata = "study", grpName = "rx")
+  dd <- addCorFlex(dd, dg, rho = .6, corstr = "cs")
+  dd <- addCondition(dc1, dd, newvar = "obs_V")
+  dd <- addCondition(dc2, dd, newvar = "L1")
+  dd <- addColumns(d2, dd)
+  
+  dd[]
+}
+
+s_estimate <- function(dd, s_model) {
+  
+  N <- nrow(dd)
+  rx <- dd[, rx]
+  x <- dd[, obs_V] 
+  g <- dd[, g]
+  y <- dd[, y]
+  
+  S <- length(dd[, unique(study)])
+  study <- dd[, study]
+  
+  B <- length(dd[, unique(bio)])
+  bio <- dd[, bio]
+  
+  drange <- dd[rx==1, .(min = round(min(obs_V),1) + 1, 
+                        max = round(max(obs_V),1)), keyby = bio]
+  drange <- drange[, seq(min, max, length.out = 50), keyby = bio]
+  drange[, id := 1:.N, keyby = bio]
+  drange <- dcast(drange, id ~ bio, value.var = "V1")
+  
+  M <- nrow(drange)
+  cuts <- as.matrix(drange[, -1])
+  
+  studydata <- list(N=N, rx = rx, x=x, g=g, y=y, S=S, 
+    study=study,  B=B, bio=bio, M=M, cuts=cuts)
+  
+  fit <-  sampling(s_model, data = studydata, iter = 3000, warmup = 500, 
+    cores = 4L, chains = 4, refresh = 0)
+  
+  fit
+}
+```
+
+```{r, eval=FALSE}
+rt <- stanc("/.../latent_threshold.stan")
+sm <- stan_model(stanc_ret = rt, verbose=FALSE)
+
+s_defs <- s_define()
+s_dd <- s_generate(s_defs, 9, 80)
+s_est <- s_estimate(s_dd, sm)
+```
+
+
+```{stan output.var='priors', eval=FALSE}
+data {
+  
+    int<lower=1> N;                // number of observations
+    int<lower=0,upper=1> rx[N];
+    real x[N];
+    real g[N];
+    real y[N];   
+    
+    int<lower=1> S;                // number of studies/sites
+    int<lower=0,upper=S> study[N];
+    
+    int<lower=1> B;                // number of biomarkers
+    int<lower=1,upper=B> bio[N];
+    
+    int<lower=1> M;                // # of eligible thresholds
+    real cuts[M, B];
+    
+}
+
+transformed data {
+  real log_unif;
+  log_unif = -log(M);
+}
+
+parameters {
+  real none;
+  real low;
+  real not_low;
+  real geffect;
+  real a[S];
+  
+  real<lower=0> sigma_a;
+  real<lower=0> sigma_y;
+
+}
+
+transformed parameters {
+  
+  vector[N] r;
+  vector[N] l;
+  vector[N] q;
+  
+  real lp[M, B];
+  
+  for (n in 1:N) {
+      q[n] = a[study[n]] + none + geffect * g[n];
+      r[n] = a[study[n]] + low + geffect * g[n];
+      l[n] = a[study[n]] + not_low + geffect * g[n];
+  }
+  
+  lp = rep_array(log_unif, M, B);
+    
+  for (n in 1:N)
+   for (m in 1:M)
+    if (rx[n] == 0) 
+     lp[m, bio[n]] = lp[m, bio[n]] + 
+        normal_lpdf(y[n] | q[n], sigma_y);
+    else
+     lp[m, bio[n]] = lp[m, bio[n]] + 
+        normal_lpdf(y[n] | x[n] < cuts[m, bio[n]] ? r[n] : l[n], sigma_y);
+      
+}
+
+model {
+  
+  none ~ student_t(3, 0, 2.5);
+  low ~ student_t(3, 0, 2.5);
+  not_low ~ student_t(3, 0, 2.5);
+  geffect ~ student_t(3, 0, 2.5);
+  
+  a ~ normal(0, sigma_a);
+  
+  sigma_a ~ cauchy(0, 5);
+  sigma_y ~ cauchy(0, 5);
+  
+  for (b in 1:B)
+    target += log_sum_exp(lp[,b]);
+
+}
+
+generated quantities {
+  
+  real eff_low;
+  real eff_not_low;
+  real eff_low_notlow;
+  
+  eff_low = low - none;
+  eff_not_low = not_low - none;
+  eff_low_notlow = not_low - low;
+
+}
+```
+
+```{r, fig.height = 4}
+x <- summary(
+  s_est, 
+  pars = c("none", "low", "not_low",
+           "eff_low", "eff_not_low", "eff_low_notlow"),
+  probs = c(0.025, 0.5, 0.975)
+)
+
+x$summary
+
+posterior <- as.array(s_est) 
+lp <- log_posterior(s_est)
+np <- nuts_params(s_est)
+
+pars = c("none","low","not_low",
+         "geffect", "sigma_a", "sigma_y")
+
+color_scheme_set("mix-brightblue-gray")
+
+mcmc_trace(posterior, pars = pars, 
+  facet_args = list(nrow = 2), np = np) + xlab("Post-warmup iteration")
+
+mcmc_intervals(posterior, pars = pars, prob_outer = 0.95)
+
+color_scheme_set("blue")
+mcmc_hist(posterior, pars = pars)
+```
+
+```{r, echo=FALSE, fig.height = 4}
+library(glue)
+
+drange <- s_dd[rx==1, .(min = round(min(obs_V),1) + 1, 
+                        max = round(max(obs_V),1)), keyby = bio]
+drange <- drange[, seq(min, max, length.out = 50), keyby = bio]
+drange[, id := 1:.N, keyby = bio]
+drange <- dcast(drange, id ~ bio, value.var = "V1")
+M <- nrow(drange)
+cuts <- as.matrix(drange[, -1])
+
+a <- mpfr(exp(-100), precBits=64)
+dps <- list()
+
+for (b in 1:3) {
+  qs <- NULL
+  for(m in 1:50) {
+    lp.i <- glue("lp[{m}, {b}]")
+    le <- rstan::extract(s_est, pars = lp.i)[[1]]
+    q <- a^(-le/100)
+    qs[m] <- sum(q)
+  }
+  qss <- mpfr2array(qs, dim = 50)
+  ps <- log(qss/sum(qss))
+  dps[[b]] <- data.table(cuts[, b], y=as.numeric(ps))
+}
+
+truvals <- c(10, 15, 12)
+p <- list()
+for (b in 1:3) {
+  p[[b]] <- ggplot(data = dps[[b]], aes(V1, y = y)) +
+    geom_vline(xintercept = truvals[b], color = "red", lty = 3) +
+    geom_line(color = "grey60") +
+    geom_point(size = 1) +
+    theme(panel.grid = element_blank()) +
+    ylab("log(probability)") +
+    xlab("threshold from low to not low")  
+}
+
+gridExtra::grid.arrange(grobs = p, ncol = 3)
+```
