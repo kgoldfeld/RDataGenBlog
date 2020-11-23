@@ -16,9 +16,9 @@ draft: yes
 
 
 <p>This is the context. In the convalescent plasma pooled individual patient level meta-analysis we are conducting as part of the <a href="https://bit.ly/3nBxPXd" target="_blank">COMPILE</a> study, there is great interest in understanding the impact of antibody levels on outcomes. (I’ve described various aspects of the analysis in previous posts, most recently <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">here</a>). In other words, not all convalescent plasma is equal.</p>
-<p>If we had a clear measure of antibodies, we could model the relationship of these levels with the outcome of interest, such as health status as captured by the WHO 11-point scale or mortality, and call it a day. Unfortunately, there is no single measure across the RCTs included in the meta-analysis. The RCTs used a range of measurement “platforms” (or technologies), which may measure different components of the convalescent plasma using different scales. Given these inconsistencies, it is challenging to build a straightforward model that simply estimates the relationship between antibody levels and clinical outcomes.</p>
-<p>The study team is coalescing around the idea of comparing the outcomes of patients who received <em>low</em> levels of antibodies with patients who received <em>not low</em> levels (as well as with patients who received no antibodies). One thought is to use a model that can jointly estimate the latent threshold and, given that threshold, estimate a treatment effect. Importantly, this model would need to accommodate multiple antibody measures and their respective thresholds.</p>
-<p>To tackle this problem, I have turned to a class of models called change point or threshold models. My ultimate goal is to generate data and fit a Bayesian model that can estimate threshold and effect-size parameters for any number of RCTs using any number of antibody measures. At this point, we are a few steps removed from that, so in this post I’ll start with a simple case of a single RCT and a single antibody measure, and use a maximum likelihood estimation method implemented in the <code>R</code> package <a href="https://cran.r-project.org/web/packages/chngpt/index.html" target="_blank">chngpt</a> to estimate parameters from a simulated data set. In a subsequent post, I’ll implement a Bayesian version of this simple model, and in a third post, I’ll get to the larger model that incorporates more complexity.</p>
+<p>If we had a clear measure of antibodies, we could model the relationship of these levels with the outcome of interest, such as health status as captured by the WHO 11-point scale or mortality, and call it a day. Unfortunately, at the moment, there is no single measure across the RCTs included in the meta-analysis (though that may change). Until now, the RCTs have used a range of measurement “platforms” (or technologies), which may measure different components of the convalescent plasma using different scales. Given these inconsistencies, it is challenging to build a straightforward model that simply estimates the relationship between antibody levels and clinical outcomes.</p>
+<p>The study team is coalescing around the idea of comparing the outcomes of patients who received <em>low</em> levels of antibodies with patients who received <em>not low</em> levels (as well as with patients who received no antibodies). One thought (well, really my thought) is to use a model that can jointly estimate the latent threshold and, given that threshold, estimate a treatment effect. Importantly, this model would need to accommodate multiple antibody measures and their respective thresholds.</p>
+<p>To tackle this problem, I have turned to a class of models called change point or threshold models. My ultimate goal is to fit a Bayesian model that can estimate threshold and effect-size parameters for any number of RCTs using any number of antibody measures. At this point we are a few steps removed from that, so in this post I’ll start with a simple case of a single RCT and a single antibody measure, and use a maximum likelihood estimation method implemented in the <code>R</code> package <a href="https://cran.r-project.org/web/packages/chngpt/index.html" target="_blank">chngpt</a> to estimate parameters from a simulated data set. In a subsequent post, I’ll implement a Bayesian version of this simple model, and perhaps in a third post, I’ll get to the larger model that incorporates more complexity.</p>
 <div id="visualizing-simple-scenarios" class="section level3">
 <h3>Visualizing simple scenarios</h3>
 <p>Change point models appear to be most commonly used in the context of time series data where the focus is on understanding if a trend or average has shifted at a certain point in a sequence of measurements over time. In the case of COMPILE, the target would be a threshold for a continuous antibody measure across multiple patients; we are interested in measuring the average outcome for patients on either side of the threshold.</p>
@@ -28,9 +28,9 @@ draft: yes
 </div>
 <div id="data-generation" class="section level3">
 <h3>Data generation</h3>
-<p>I think if you see the data generation process, the model and assumptions will be easier to see. We start with an antibody level that, for simplicity’s sake, has a standard normal distribution. In this simulation, the latent group status (i.e. <em>low</em> vs. <em>not low</em>) is not determined completely by the threshold (though it certainly could); here, the probability that latent status is <em>not low</em> is about <span class="math inline">\(5\%\)</span> for patients with antibody levels that fall below <span class="math inline">\(-0.7\)</span>, but is <span class="math inline">\(95\%\)</span> for patients that exceed threshold.</p>
+<p>I think if you see the data generation process, the model and assumptions might make more sense. We start with an antibody level that, for simplicity’s sake, has a standard normal distribution. In this simulation, the latent group status (i.e. <em>low</em> vs. <em>not low</em>) is not determined completely by the threshold (though it certainly could); here, the probability that latent status is <em>not low</em> is about <span class="math inline">\(5\%\)</span> for patients with antibody levels that fall below <span class="math inline">\(-0.7\)</span>, but is <span class="math inline">\(95\%\)</span> for patients that exceed threshold.</p>
 <pre class="r"><code>library(simstudy)
-set.seed(98765)
+set.seed(87654)
 
 d1 &lt;- defData(varname = &quot;antibody&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
 d1 &lt;- defData(d1, varname = &quot;latent_status&quot;, formula = &quot;-3 + 6 * (antibody &gt; -0.7)&quot;,
@@ -40,22 +40,22 @@ d1 &lt;- defData(d1, varname = &quot;y&quot;, formula = &quot;0 + 3 * latent_sta
 
 dd &lt;- genData(500, d1)
 dd</code></pre>
-<pre><code>##       id antibody latent_status    y
-##   1:   1  0.88570             1 4.14
-##   2:   2 -0.53082             1 2.89
-##   3:   3 -0.06721             1 1.35
-##   4:   4 -0.67202             1 2.36
-##   5:   5  1.54735             1 4.14
-##  ---                                
-## 496: 496 -0.49810             1 3.55
-## 497: 497 -0.16296             1 3.15
-## 498: 498  0.00616             1 2.84
-## 499: 499 -0.24596             1 3.35
-## 500: 500 -0.45439             1 3.15</code></pre>
+<pre><code>##       id antibody latent_status       y
+##   1:   1  -1.7790             0  0.5184
+##   2:   2   0.2423             1  3.2174
+##   3:   3  -0.4412             1  1.8948
+##   4:   4  -1.2505             0  0.9816
+##   5:   5  -0.0552             1  2.9251
+##  ---                                   
+## 496: 496  -0.4634             1  2.7298
+## 497: 497   0.6862             0 -0.0507
+## 498: 498  -1.0899             0  0.9680
+## 499: 499   2.3395             1  1.9540
+## 500: 500  -0.4874             1  3.5238</code></pre>
 </div>
 <div id="simple-model-estimation" class="section level3">
 <h3>Simple model estimation</h3>
-<p>The <code>chngptm</code> function in the <code>chngpt</code> package provides an estimate of the threshold as well as the treatment effect of antibody lying above this latent threshold. The parameters in this simple case are recovered quite well. The fairly narrow <span class="math inline">\(95\%\)</span> confidence interval (2.5, 3.0) includes the true value. Likewise the very narrow <span class="math inline">\(95\%\)</span> CI for the threshold is (-0.72, -0.71) just misses the true value.</p>
+<p>The <code>chngptm</code> function in the <code>chngpt</code> package provides an estimate of the threshold as well as the treatment effect of antibody lying above this latent threshold. The parameters in this simple case are recovered quite well. The fairly narrow <span class="math inline">\(95\%\)</span> confidence interval (2.2, 2.8) just misses the true value. The very narrow <span class="math inline">\(95\%\)</span> CI for the threshold is (-0.73, -0.69) just does include the true value.</p>
 <pre class="r"><code>library(chngpt)
 
 fit &lt;- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
@@ -65,18 +65,18 @@ summary(fit)</code></pre>
 <pre><code>## Change point model threshold.type:  step 
 ## 
 ## Coefficients:
-##                   est Std. Error* (lower upper)  p.value*
-## (Intercept)     0.236      0.0976 0.0508  0.433  1.57e-02
-## antibody&gt;chngpt 2.719      0.1158 2.4977  2.951 5.04e-122
+##                   est Std. Error* (lower upper) p.value*
+## (Intercept)     0.296       0.130 0.0547  0.563 2.26e-02
+## antibody&gt;chngpt 2.520       0.139 2.2416  2.787 1.99e-73
 ## 
 ## Threshold:
 ##        est Std. Error     (lower     upper) 
-##   -0.70642    0.00358   -0.72045   -0.70642</code></pre>
+##   -0.70261    0.00924   -0.72712   -0.69092</code></pre>
 </div>
 <div id="alternative-scenarios" class="section level3">
 <h3>Alternative scenarios</h3>
 <p>When there is more ambiguity in the relationship between the antibody threshold and the classification into the two latent classes of <em>low</em> and <em>not low</em>, there is more uncertainty in both the effect and threshold estimates. Furthermore, the effect size estimate is attenuated, since the prediction of the latent class is less successful.</p>
-<p>In this case, the true threshold remains at <span class="math inline">\(-0.7\)</span>, but the probability that a patient below the threshold actually does not have <em>low</em> levels of antibodies increases to about <span class="math inline">\(21\%\)</span>, while the probability of a patient above the threshold does not have <em>low</em> levels of antibodies decreases to <span class="math inline">\(79\%\)</span>. There is more uncertainty regarding the the threshold, as the <span class="math inline">\(95\%\)</span> CI is (-1.09, -0.62). And the estimated effect is <span class="math inline">\(1.5 \; (1.3, 2.0)\)</span> is attenuated with more uncertainty. Given the added uncertainty in the data generation process, these estimates are what we would expect.</p>
+<p>In the next simulation, the true threshold remains at <span class="math inline">\(-0.7\)</span>, but the probability that a patient below the threshold actually does not have <em>low</em> levels of antibodies increases to about <span class="math inline">\(21\%\)</span>, while the probability of a patient above the threshold does not have <em>low</em> levels of antibodies decreases to <span class="math inline">\(79\%\)</span>. There is more uncertainty regarding the the threshold, as the <span class="math inline">\(95\%\)</span> CI is (-1.09, -0.62). And the estimated effect is <span class="math inline">\(1.5 \; (1.3, 2.0)\)</span> is attenuated with more uncertainty. Given the added uncertainty in the data generation process, these estimates are what we would expect.</p>
 <pre class="r"><code>d1 &lt;- updateDef(d1, changevar = &quot;latent_status&quot;, 
   newformula = &quot;-1.3 + 2.6 * (antibody &gt; -0.7)&quot;)
 
@@ -88,13 +88,13 @@ summary(fit)</code></pre>
 <pre><code>## Change point model threshold.type:  step 
 ## 
 ## Coefficients:
-##                  est Std. Error* (lower upper) p.value*
-## (Intercept)     0.81       0.192  0.296   1.05 2.48e-05
-## antibody&gt;chngpt 1.54       0.183  1.290   2.01 2.92e-17
+##                   est Std. Error* (lower upper) p.value*
+## (Intercept)     0.881       0.159   0.50   1.12 3.05e-08
+## antibody&gt;chngpt 1.439       0.173   1.17   1.85 1.09e-16
 ## 
 ## Threshold:
 ##        est Std. Error     (lower     upper) 
-##     -0.701      0.119     -1.087     -0.620</code></pre>
+##    -0.6298     0.0579    -0.8083    -0.5814</code></pre>
 <p>The effect size has an impact on the estimation of a threshold. At the extreme case where there is no effect, the concept of a threshold is not meaningful; we would expect there to be great uncertainty with the estimate for the threshold. As the true effect size grows, we would expect the precision of the threshold estimate to increase as well (subject to the latent class membership probabilities just described). The subsequent plot shows the point estimates and <span class="math inline">\(95\%\)</span> CIs for thresholds at different effect sizes. The true threshold is <span class="math inline">\(0.5\)</span> and effect sizes range from 0 to 2:</p>
 <p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
 <p>This last figure shows that the uncertainty around the effect size estimate is higher at lower levels of true effectiveness. This higher level of uncertainty in the estimated effect is driven by the higher level of uncertainty in the estimate of the threshold at lower effect sizes (as just pointed out above).</p>
@@ -102,14 +102,13 @@ summary(fit)</code></pre>
 </div>
 <div id="with-a-fundamentally-different-data-generating-process" class="section level3">
 <h3>With a fundamentally different data generating process</h3>
-<p>What happens when the underlying data process is quite different from the one we have been imagining? Is the threshold model useful? I would say “maybe not” in the case of a single antibody measurement. I alluded to this a bit earlier in the post, justifying the idea by arguing it might make more sense with multiple types of antibody measurements. We will hopefully find that out if I get to that point. But here, I thought I would conclude by briefly investigating what kind of estimates we get from a threshold model when the outcome is linearly related to the antibody measurement, and there is in fact no threshold, as in this data set:</p>
+<p>What happens when the underlying data process is quite different from the one we have been imagining? Is the threshold model useful? I would say “maybe not” in the case of a single antibody measurement. I alluded to this a bit earlier in the post, justifying the idea by arguing it might make more sense with multiple types of antibody measurements. We will hopefully find that out if I get to that point. Here, I briefly investigate the estimates we get from a threshold model when the outcome is linearly related to the antibody measurement, and there is in fact no threshold, as in this data set:</p>
 <pre class="r"><code>d1 &lt;- defData(varname = &quot;antibody&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)  
 d1 &lt;- defData(d1, varname = &quot;y&quot;, formula = &quot;antibody&quot;, variance = 1, dist = &quot;normal&quot;)
 
 dd &lt;- genData(500, d1)</code></pre>
 <p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
-<p>The estimated threshold is near the center of the antibody data (which in this case is close to <span class="math inline">\(0\)</span>), with a fairly narrow <span class="math inline">\(95\%\)</span> confidence interval. The effect size is essentially a comparison of the means for patients with measurements below <span class="math inline">\(0\)</span> compared to patients above <span class="math inline">\(0\)</span>.</p>
-<p>If this was the actual data generation process, it might be preferable to model the relationship directly using simple linear regression without esimating a threshold.</p>
+<p>The estimated threshold is near the center of the antibody data (which in this case is close to <span class="math inline">\(0\)</span>), with a fairly narrow <span class="math inline">\(95\%\)</span> confidence interval. The effect size is essentially a comparison of the means for patients with measurements below <span class="math inline">\(0\)</span> compared to patients above <span class="math inline">\(0\)</span>. If this were the actual data generation process, it might be preferable to model the relationship directly using simple linear regression without estimating a threshold.</p>
 <pre class="r"><code>fit &lt;- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
                data = dd, type=&quot;step&quot;, family=&quot;gaussian&quot;)
 summary(fit)</code></pre>
@@ -123,21 +122,4 @@ summary(fit)</code></pre>
 ## Threshold:
 ##        est Std. Error     (lower     upper) 
 ##    -0.0713     0.2296    -0.3832     0.5170</code></pre>
-<p>And to actually conclude, I will include some code that generates 1000 replications of the simulated data to see how the model estimates of uncertainty compare with true sampling variability:</p>
-<pre class="r"><code>iter &lt;- function(d1) {
-  fit &lt;- chngptm(formula.1 = y ~ 1, formula.2 = ~ antibody, 
-     data =  genData(500, d1), type=&quot;step&quot;, family=&quot;gaussian&quot;)
-  
-  data.table(cp = summary(fit)$chngpt[1], effect = summary(fit)$coefficients[2,1])
-}
-
-RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
-set.seed(2871)
-
-res &lt;- rbindlist(mclapply(1:1000, function(x) iter(d1), mc.cores = 4))</code></pre>
-<p>From the model estimate above, the standard error for the threshold estimate is 0.230 and for the effect size estimate is 0.109.</p>
-<pre class="r"><code>c( threshold = sd(res$cp), effect = sd(res$effect) )</code></pre>
-<pre><code>## threshold    effect 
-##     0.269     0.106</code></pre>
-<p><img src="/post/2020-11-24-a-latent-threshold-model.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 </div>
