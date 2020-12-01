@@ -101,7 +101,7 @@ ggsave(p, file = "static/img/post-bayesthreshold/trace3.png",
 p <- mcmc_intervals(posterior, pars = c("alpha","beta", "sigma"), prob_outer = 0.95)
 p + scale_x_continuous(limits = c(0, 3))
 
-ggsave(p, file = "static/img/post-bayesthreshold/estimates3.png", 
+ggsave(p + scale_x_continuous(limits=c(-1, 3)), file = "static/img/post-bayesthreshold/estimates3.png", 
        height = 2, width = 4, scale = 1.75)
 
 a <- mpfr(exp(-100), precBits=64)
@@ -200,7 +200,7 @@ ggsave(p, file = "static/img/post-bayesthreshold/trace0.png",
 p <- mcmc_intervals(posterior, pars = c("alpha","beta", "sigma"))
 p
 
-ggsave(p, file = "static/img/post-bayesthreshold/estimates0.png", 
+ggsave(p + scale_x_continuous(limits = c(-1,3)), file = "static/img/post-bayesthreshold/estimates0.png", 
        height = 2, width = 4, scale = 1.75)
 
 a <- mpfr(exp(-100), precBits=64)
