@@ -13,10 +13,8 @@ d1 <- defData(d1, varname = "latent_status", formula = "-3 + 6 * (antibody > -0.
 d1 <- defData(d1, varname = "y", formula = "0 + ..effect_size * latent_status", 
               variance = 1, dist = "normal")
 
-d1 <- defData(varname = "antibody", formula = 0, variance = 1, dist = "normal")  
-d1 <- defData(d1, varname = "y", formula = "antibody", variance = 1, dist = "normal")
-
-dd <- genData(500, d1)
+# d1 <- defData(varname = "antibody", formula = 0, variance = 1, dist = "normal")  
+# d1 <- defData(d1, varname = "y", formula = ".5* antibody", variance = 1, dist = "normal")
 
 set.seed(387263)
 
@@ -72,8 +70,8 @@ ggsave(p0, file = "static/img/post-bayesthreshold/p0.png",
 
 # Fit with stan
 
-rt <- stanc("static/img/post-bayesthreshold/threshold.stan");
-sm <- stan_model(stanc_ret = rt, verbose=FALSE)
+rt3 <- stanc("static/img/post-bayesthreshold/threshold.stan");
+sm3 <- stan_model(stanc_ret = rt3, verbose=FALSE)
 
 N <- nrow(dd3)
 y <- dd3[, y]
@@ -83,7 +81,7 @@ c <- seq(round(min(x), 1), round(max(x), 1), by = .1)
 M <- length(c)
 
 studydata3 <- list(N=N, x=x, y=y, M=M, c=c)
-fit3 <-  sampling(sm, data = studydata3, iter = 3000, warmup = 500, 
+fit3 <-  sampling(sm3, data = studydata3, iter = 3000, warmup = 500, 
                   cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
 
 posterior <- as.array(fit3) 
@@ -135,33 +133,41 @@ ggsave(p, file = "static/img/post-bayesthreshold/threshold3.png",
 
 ###
 
-rt <- stanc("static/img/post-bayesthreshold/no_threshold.stan");
-sm_no <- stan_model(stanc_ret = rt, verbose=FALSE)
+# rt_no <- stanc("static/img/post-bayesthreshold/no_threshold.stan");
+# sm_no <- stan_model(stanc_ret = rt_no, verbose=FALSE)
+# 
+# N <- nrow(dd3)
+# t <- dd3[, as.integer(antibody >= -0.7)]
+# y <- dd3[, y]
+# 
+# studydata3no <- list(N=N, t=t, y=y)
+# fit3no <-  sampling(sm_no, data = studydata3no, iter = 3000, warmup = 500, 
+#                   cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
+# 
+# posterior_no <- as.array(fit3no) 
+# lp <- log_posterior(fit3no)
+# np <- nuts_params(fit3no)
+# 
+# color_scheme_set("mix-brightblue-gray")
+# 
+# p <- mcmc_trace(posterior, pars = c("alpha","beta", "sigma"), 
+#                 facet_args = list(nrow = 3), np = np) + 
+#   xlab("Post-warmup iteration")
+# p
+# 
+# ggsave(p, file = "static/img/post-bayesthreshold/trace3.png", 
+#        height = 3, width = 4, scale = 1.75)
+# 
+# p <- mcmc_intervals(posterior_no, pars = c("alpha","beta", "sigma"), prob_outer = 0.95)
+# p + scale_x_continuous(limits = c(-1, 3))
+# 
+# ggsave(p, file = "static/img/post-bayesthreshold/estimates0.png", 
+#        height = 2, width = 4, scale = 1.75)
+# 
+# color_scheme_set("red")
+# mcmc_dens(x = posterior_no, pars = c("beta")) + scale_x_continuous(limits = c(0, 1))
+# mcmc_dens(x = posterior, pars = c("beta")) + scale_x_continuous(limits = c(0, 1))
 
-N <- nrow(dd3)
-t <- dd3[, as.integer(antibody >= -0.7)]
-y <- dd3[, y]
-
-studydata3no <- list(N=N, t=t, y=y)
-fit3no <-  sampling(sm_no, data = studydata3no, iter = 3000, warmup = 500, 
-                  cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
-
-posterior <- as.array(fit3no) 
-lp <- log_posterior(fit3no)
-np <- nuts_params(fit3no)
-
-color_scheme_set("mix-brightblue-gray")
-
-p <- mcmc_trace(posterior, pars = c("alpha","beta", "sigma"), 
-                facet_args = list(nrow = 3), np = np) + 
-  xlab("Post-warmup iteration")
-p
-
-ggsave(p, file = "static/img/post-bayesthreshold/trace3.png", 
-       height = 3, width = 4, scale = 1.75)
-
-p <- mcmc_intervals(posterior, pars = c("alpha","beta", "sigma"), prob_outer = 0.95)
-p + scale_x_continuous(limits = c(0, 3))
 
 ###
 
@@ -173,7 +179,7 @@ c <- seq(round(min(x), 1), round(max(x), 1), by = .1)
 M <- length(c)
 
 studydata0 <- list(N=N, x=x, y=y, M=M, c=c)
-fit0 <-  sampling(sm, data = studydata0, iter = 3000, warmup = 500, 
+fit0 <-  sampling(sm3, data = studydata0, iter = 3000, warmup = 500, 
                   cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
 
 
@@ -224,6 +230,8 @@ p
 ggsave(p, file = "static/img/post-bayesthreshold/threshold0.png", 
        height = 2, width = 4, scale = 2.00)
 ###
+
+
 
 
 
