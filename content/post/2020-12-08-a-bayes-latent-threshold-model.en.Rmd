@@ -1,0 +1,159 @@
+---
+title: A Bayesian implementation of a latent threshold model
+author: Keith Goldfeld
+date: '2020-12-08'
+slug: a-latent-threshold-model-to-estimate-treatment-effects
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: yes
+---
+
+```{r, echo = FALSE}
+options(digits = 3)
+```
+
+In the [previous post](https://www.rdatagen.net/post/a-latent-threshold-model/){target="_blank"}, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don't know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of ongoing RCTs.
+
+Barring any specific scientific rationale, we could pick an arbitrary threshold and continue with our analysis. Unfortunately, our estimates would not reflect the uncertainty around the selection of that threshold point; an approach that incorporates this uncertainty would be more appropriate. Last time, I described a relatively simple scenario with a single continuous predictor, a latent threshold, and a continuous outcome; the estimates were generated using the `R` package `chngppt`. Because I want to be able to build more flexible models in the future that could accommodate multiple continuous predictors (and latent thresholds), I decided to implement this model using a Bayesian approach and `Stan`.
+
+### The model
+
+[changepoint](https://bit.ly/3fYbd0M){target="_blank"}
+
+The observed data include the continuous outcome $\textbf{y}$ and a continuous antibody measures $\textbf{x}$. There are $M$ possible thresholds provided by the researcher as a vector $\mathbf{c}$.The threshold $c[m], \; m \in 1,\dots,M$ determines the relationship of $x$ to $y$. In the model, each threshold is treated as a discrete quantity, and we estimate the marginal likelihood of $y$ across all values of $c[m]$, but we also "learn" the value $c[m]$ that maximizes the likelihood. The posterior distribution of the parameters is marginal across all possible thresholds, which is a good thing, because the true threshold is not known.
+
+$$p(\textbf{y}|\alpha, \beta, \sigma) = \sum_{m=1}^M \lambda_m \left(\prod_{i: \; x_i < c[m]} \text{normal}(y_i | \alpha, \sigma)  \prod_{i: \; x_i \ge c[m]} \text{normal}(y_i | \beta, \sigma)\right)$$
+```{stan output.var='priors', eval = FALSE}
+data {
+
+    int<lower=1> N;                // number of observations
+    real x[N];                     // antibody measures
+    real y[N];                     // outcomes
+    
+    int<lower=1> M;                // number of candidate thresholds
+    real c[M];                     // candidate thresholds
+  
+}
+
+transformed data {
+
+  real lambda;
+  lambda = -log(M);
+  
+}
+
+parameters {
+
+  real alpha;
+  real beta;
+  real<lower=0> sigma;
+
+}
+
+transformed parameters {
+  
+  vector[M] lp;
+  lp = rep_vector(lambda, M);
+  
+  for (m in 1:M)
+    for (n in 1:N)
+      lp[m] = lp[m] + normal_lpdf(y[n] | x[n] < c[m] ? alpha : beta, sigma);
+
+}
+
+model {
+  
+  alpha ~ student_t(3, 0, 2.5);
+  beta ~ student_t(3, 0, 2.5);
+  sigma ~ exponential(1);
+  
+  target += log_sum_exp(lp);
+
+}
+```
+
+```{r}
+library(simstudy)
+set.seed(87654)
+
+d1 <- defData(varname = "antibody", formula = 0, variance = 1, dist = "normal")
+d1 <- defData(d1, varname = "latent_status", formula = "-3 + 6 * (antibody > -0.7)",
+              dist = "binary", link = "logit")
+d1 <- defData(d1, varname = "y", formula = "0 + 3 * latent_status", 
+              variance = 1, dist = "normal")
+
+dd <- genData(500, d1)
+```
+
+![](/img/post-bayesthreshold/p3.png){width=80%}
+
+```{r, eval = FALSE}
+rt <- stanc("/.../threshold.stan");
+sm <- stan_model(stanc_ret = rt, verbose=FALSE)
+
+N <- nrow(dd3)
+y <- dd3[, y]
+x <- dd3[, antibody] 
+c <- seq(round(min(x), 1), round(max(x), 1), by = .1)
+M <- length(c)
+
+studydata3 <- list(N=N, x=x, y=y, M=M, c=c)
+fit3 <-  sampling(sm, data = studydata3, iter = 3000, warmup = 500, 
+                  cores = 4L, chains = 4, control = list(adapt_delta = 0.8))
+```
+
+```{r, eval = FALSE}
+posterior <- as.array(fit3) 
+lp <- log_posterior(fit3)
+np <- nuts_params(fit3)
+
+color_scheme_set("mix-brightblue-gray")
+
+mcmc_trace(posterior, pars = c("alpha","beta", "sigma"), 
+                facet_args = list(nrow = 3), np = np) + 
+  xlab("Post-warmup iteration")
+```
+
+![](/img/post-bayesthreshold/trace3.png){width=80%}
+```{r, eval=FALSE}
+mcmc_intervals(posterior, pars = c("alpha","beta", "sigma"))
+```
+
+![](/img/post-bayesthreshold/estimates3.png){width=80%}
+
+```{r, eval=FALSE}
+a <- mpfr(exp(-100), precBits=64)
+
+qs <- NULL
+for(m in 1:M) {
+  lp.i <- glue("lp[{m}]")
+  le <- rstan::extract(fit3, pars = lp.i)[[1]]
+  q <- a^(-le/100)
+  qs[m] <- sum(q)
+}
+
+qss <- mpfr2array(qs, dim = M)
+ps <- log(qss/sum(qss))
+dps <- data.table(c, y=as.numeric(ps))
+
+ggplot(data = dps, aes(x = c, y = y)) +
+  geom_vline(xintercept = -0.7, color = "red", lty = 3) +
+  geom_line(color = "grey60") +
+  geom_point(size = 1) +
+  theme(panel.grid = element_blank()) +
+  ylab("log(probability)") +
+  xlab("threshold from low to not low") +
+  scale_y_continuous(limits = c(-800, 0))
+```
+
+![](/img/post-bayesthreshold/threshold3.png){width=80%}
+

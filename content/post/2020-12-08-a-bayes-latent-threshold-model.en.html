@@ -1,0 +1,134 @@
+---
+title: A Bayesian implementation of a latent threshold model
+author: Keith Goldfeld
+date: '2020-12-08'
+slug: a-latent-threshold-model-to-estimate-treatment-effects
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: yes
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>In the <a href="https://www.rdatagen.net/post/a-latent-threshold-model/" target="_blank">previous post</a>, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don’t know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of ongoing RCTs.</p>
+<p>Barring any specific scientific rationale, we could pick an arbitrary threshold and continue with our analysis. Unfortunately, our estimates would not reflect the uncertainty around the selection of that threshold point; an approach that incorporates this uncertainty would be more appropriate. Last time, I described a relatively simple scenario with a single continuous predictor, a latent threshold, and a continuous outcome; the estimates were generated using the <code>R</code> package <code>chngppt</code>. Because I want to be able to build more flexible models in the future that could accommodate multiple continuous predictors (and latent thresholds), I decided to implement this model using a Bayesian approach and <code>Stan</code>.</p>
+<div id="the-model" class="section level3">
+<h3>The model</h3>
+<p><a href="https://bit.ly/3fYbd0M" target="_blank">changepoint</a></p>
+<p>The observed data include the continuous outcome <span class="math inline">\(\textbf{y}\)</span> and a continuous antibody measures <span class="math inline">\(\textbf{x}\)</span>. There are <span class="math inline">\(M\)</span> possible thresholds provided by the researcher as a vector <span class="math inline">\(\mathbf{c}\)</span>.The threshold <span class="math inline">\(c[m], \; m \in 1,\dots,M\)</span> determines the relationship of <span class="math inline">\(x\)</span> to <span class="math inline">\(y\)</span>. In the model, each threshold is treated as a discrete quantity, and we estimate the marginal likelihood of <span class="math inline">\(y\)</span> across all values of <span class="math inline">\(c[m]\)</span>, but we also “learn” the value <span class="math inline">\(c[m]\)</span> that maximizes the likelihood. The posterior distribution of the parameters is marginal across all possible thresholds, which is a good thing, because the true threshold is not known.</p>
+<p><span class="math display">\[p(\textbf{y}|\alpha, \beta, \sigma) = \sum_{m=1}^M \lambda_m \left(\prod_{i: \; x_i &lt; c[m]} \text{normal}(y_i | \alpha, \sigma)  \prod_{i: \; x_i \ge c[m]} \text{normal}(y_i | \beta, \sigma)\right)\]</span></p>
+<pre class="stan"><code>data {
+
+    int&lt;lower=1&gt; N;                // number of observations
+    real x[N];                     // antibody measures
+    real y[N];                     // outcomes
+    
+    int&lt;lower=1&gt; M;                // number of candidate thresholds
+    real c[M];                     // candidate thresholds
+  
+}
+
+transformed data {
+
+  real lambda;
+  lambda = -log(M);
+  
+}
+
+parameters {
+
+  real alpha;
+  real beta;
+  real&lt;lower=0&gt; sigma;
+
+}
+
+transformed parameters {
+  
+  vector[M] lp;
+  lp = rep_vector(lambda, M);
+  
+  for (m in 1:M)
+    for (n in 1:N)
+      lp[m] = lp[m] + normal_lpdf(y[n] | x[n] &lt; c[m] ? alpha : beta, sigma);
+
+}
+
+model {
+  
+  alpha ~ student_t(3, 0, 2.5);
+  beta ~ student_t(3, 0, 2.5);
+  sigma ~ exponential(1);
+  
+  target += log_sum_exp(lp);
+
+}</code></pre>
+<pre class="r"><code>library(simstudy)
+set.seed(87654)
+
+d1 &lt;- defData(varname = &quot;antibody&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+d1 &lt;- defData(d1, varname = &quot;latent_status&quot;, formula = &quot;-3 + 6 * (antibody &gt; -0.7)&quot;,
+              dist = &quot;binary&quot;, link = &quot;logit&quot;)
+d1 &lt;- defData(d1, varname = &quot;y&quot;, formula = &quot;0 + 3 * latent_status&quot;, 
+              variance = 1, dist = &quot;normal&quot;)
+
+dd &lt;- genData(500, d1)</code></pre>
+<p><img src="/img/post-bayesthreshold/p3.png" style="width:80.0%" /></p>
+<pre class="r"><code>rt &lt;- stanc(&quot;/.../threshold.stan&quot;);
+sm &lt;- stan_model(stanc_ret = rt, verbose=FALSE)
+
+N &lt;- nrow(dd3)
+y &lt;- dd3[, y]
+x &lt;- dd3[, antibody] 
+c &lt;- seq(round(min(x), 1), round(max(x), 1), by = .1)
+M &lt;- length(c)
+
+studydata3 &lt;- list(N=N, x=x, y=y, M=M, c=c)
+fit3 &lt;-  sampling(sm, data = studydata3, iter = 3000, warmup = 500, 
+                  cores = 4L, chains = 4, control = list(adapt_delta = 0.8))</code></pre>
+<pre class="r"><code>posterior &lt;- as.array(fit3) 
+lp &lt;- log_posterior(fit3)
+np &lt;- nuts_params(fit3)
+
+color_scheme_set(&quot;mix-brightblue-gray&quot;)
+
+mcmc_trace(posterior, pars = c(&quot;alpha&quot;,&quot;beta&quot;, &quot;sigma&quot;), 
+                facet_args = list(nrow = 3), np = np) + 
+  xlab(&quot;Post-warmup iteration&quot;)</code></pre>
+<p><img src="/img/post-bayesthreshold/trace3.png" style="width:80.0%" /></p>
+<pre class="r"><code>mcmc_intervals(posterior, pars = c(&quot;alpha&quot;,&quot;beta&quot;, &quot;sigma&quot;))</code></pre>
+<p><img src="/img/post-bayesthreshold/estimates3.png" style="width:80.0%" /></p>
+<pre class="r"><code>a &lt;- mpfr(exp(-100), precBits=64)
+
+qs &lt;- NULL
+for(m in 1:M) {
+  lp.i &lt;- glue(&quot;lp[{m}]&quot;)
+  le &lt;- rstan::extract(fit3, pars = lp.i)[[1]]
+  q &lt;- a^(-le/100)
+  qs[m] &lt;- sum(q)
+}
+
+qss &lt;- mpfr2array(qs, dim = M)
+ps &lt;- log(qss/sum(qss))
+dps &lt;- data.table(c, y=as.numeric(ps))
+
+ggplot(data = dps, aes(x = c, y = y)) +
+  geom_vline(xintercept = -0.7, color = &quot;red&quot;, lty = 3) +
+  geom_line(color = &quot;grey60&quot;) +
+  geom_point(size = 1) +
+  theme(panel.grid = element_blank()) +
+  ylab(&quot;log(probability)&quot;) +
+  xlab(&quot;threshold from low to not low&quot;) +
+  scale_y_continuous(limits = c(-800, 0))</code></pre>
+<p><img src="/img/post-bayesthreshold/threshold3.png" style="width:80.0%" /></p>
+</div>
