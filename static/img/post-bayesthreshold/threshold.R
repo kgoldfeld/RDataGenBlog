@@ -44,7 +44,7 @@ p3 <- arrangeGrob(pobs, platent, nrow = 1)
 grid.arrange(p3)
 
 ggsave(p3, file = "static/img/post-bayesthreshold/p3.png", 
-       height = 3, width = 6, scale = 1.75)
+       height = 3, width = 7, scale = 1.5)
 
 pobs <- ggplot(data = dd0, aes(x = antibody, y = y)) +
   geom_point() +
@@ -65,8 +65,8 @@ platent <- ggplot(data = dd0, aes(x = antibody, y = y)) +
 p0 <- arrangeGrob(pobs, platent, nrow = 1)
 grid.arrange(p0)
 
-ggsave(p0, file = "static/img/post-bayesthreshold/p0.png", 
-       height = 3, width = 6, scale = 1.75)
+ggsave(p0, file = "static/img/post-bayesthreshold/p0.jpg", 
+       height = 3, width = 7, scale = 1.5)
 
 # Fit with stan
 
