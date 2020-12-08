@@ -14,14 +14,13 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: yes
 ---
 
 ```{r, echo = FALSE}
 options(digits = 3)
 ```
 
-In the [previous post](https://www.rdatagen.net/post/a-latent-threshold-model/){target="_blank"}, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don't know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of ongoing RCTs.
+In the [previous post](https://www.rdatagen.net/post/a-latent-threshold-model/){target="_blank"}, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don't know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of RCTs, including those that are particpating in the ongoing [COMPILE meta-analysis](https://bit.ly/3lTTc4Q){target="_blank"}.
 
 Barring any specific scientific rationale, we could pick an arbitrary threshold and continue with our analysis. Unfortunately, our estimates would not reflect the uncertainty around the selection of that threshold point; an approach that incorporates this uncertainty would be more appropriate. Last time, I described a relatively simple scenario with a single continuous predictor, a latent threshold, and a continuous outcome; the estimates were generated using the `R` package `chngppt`. Because I want to be able to build more flexible models in the future that could accommodate multiple continuous predictors (and latent thresholds), I decided to implement a Bayesian version of the model.
 
@@ -29,13 +28,13 @@ Barring any specific scientific rationale, we could pick an arbitrary threshold 
 
 Before laying out the model (described in much more detail in the [Stan User's Guide](https://bit.ly/3fYbd0M){target="_blank"}), I should highlight two key features. First, we assume that the distribution of the outcome differs on either side of the threshold. In this example, we expect that the outcome data for antibody levels below the threshold are distributed as $N(\alpha, \sigma)$, and that data above the threshold are $N(\beta, \sigma)$. Second, since we do not know the threshold value, the likelihood is specified as a mixture across the range of all possible thresholds; the posterior distribution of the parameters $\alpha$ and $\beta$ reflect the uncertainty where the threshold lies.
 
-The observed data include the continuous outcome $\textbf{y}$ and a continuous antibody measure $\textbf{x}$. There are $M$ possible thresholds provided by the researcher as a vector $\mathbf{c}$.The threshold $c[m], \; m \in 1,\dots,M$ determines the relationship of $x$ to $y$; each candidate threshold is treated as a discrete quantity and a probability $\lambda_m$ is attached to each. Here is the model for the outcome conditional on the distribution parameters as well as the probability of the thresholds:
+The observed data include the continuous outcome $\textbf{y}$ and a continuous antibody measure $\textbf{x}$. There are $M$ possible pre-specified thresholds that are reflected in the vector $\mathbf{c}$. Each candidate threshold is treated as a discrete quantity and a probability $\lambda_m$ is attached to each. Here is the model for the outcome conditional on the distribution parameters as well as the probability of the thresholds:
 
 $$p(\textbf{y}|\alpha, \beta, \sigma, \mathbf{\lambda}) = \sum_{m=1}^M \lambda_m \left(\prod_{i: \; x_i < c[m]} \text{normal}(y_i | \alpha, \sigma)  \prod_{i: \; x_i \ge c[m]} \text{normal}(y_i | \beta, \sigma)\right)$$
 
 ### Implmentation in Stan
 
-Here is a translation of the model into `Stan`. The data submitted to Stan include the antibody level $x$, the outcome $y$, as well as the candidate thresholds included in the vector $\mathbf{c}$ which has length $M$. In this example, the candidate vector is based on the range of observed antibody levels.
+Here is a translation of the model into `Stan`. The data for the model include the antibody level $x$, the outcome $y$, and the candidate thresholds included in the vector $\mathbf{c}$ which has length $M$. In this example, the candidate vector is based on the *range* of observed antibody levels.
 
 ```{stan output.var='priors', eval = FALSE}
 data {
@@ -48,7 +47,7 @@ data {
 }
 ```
 
-To start, equal probability will be assigned to each of the $M$ candidate thresholds, so that will be $1/M$. Since Stan lives in log-probability world, this is translated to $\text{log}(1/M) = \text{-log}(M)$:
+At the outset, equal probability will be assigned to each of the $M$ candidate thresholds, which is $1/M$. Since Stan operates in log-probabilities, this is translated to $\text{log}(1/M) = \text{-log}(M)$:
 
 ```{stan output.var='priors', eval = FALSE}
 transformed data {
@@ -67,7 +66,7 @@ parameters {
 }
 ```
 
-This next block is really the implementation of the threshold model. $lp$ is a vector of log probabilities, where each element represents the log of each summand in the model specified above. 
+This next block is really the implementation of the threshold model. $\mathbf{lp}$ is a vector of log probabilities, where each element represents the log of each summand in the model specified above. 
 
 ```{stan output.var='priors', eval = FALSE}
 transformed parameters {
@@ -124,7 +123,7 @@ The threshold is quite apparent here. In the right hand plot, the latent classes
 
 ### Model fitting
 
-We use the `rstan` package to sample from the Stan model, passing along the observed antibody data, outcome data, as well as the candidate thresholds:
+We use the `rstan` package to access Stan, passing along the observed antibody data, outcome data, as well as the candidate thresholds:
 
 ```{r, eval = FALSE}
 library(rstan)
@@ -194,7 +193,7 @@ And here are the posterior probabilities for the parameters - now with much wide
 
 ![](/img/post-bayesthreshold/estimates0.png){width=70%}
 
-And finally, here is the posterior distribution of thresholds. The plot is intentionally drawn to highlight the lack of distinction across the candidate thresholds:
+Here is the posterior distribution of thresholds, intentionally plotted to highlight the lack of distinction across the candidate thresholds:
 
 ![](/img/post-bayesthreshold/threshold0.png){width=80%}
 
@@ -206,7 +205,7 @@ And finally, here is the posterior distribution of thresholds. The plot is inten
 
 ### Addendum - posterior probabilties of the threshold
 
-Here's a little more background on how the posterior probabilities for the threshold were calculated. As a reminder, $c$ is a vector of candidate thresholds of length $M$. We define a quantity $q(c_m | data)$ as
+Here's a little more background on how the posterior probabilities for the threshold were calculated. As a reminder, $\textbf{c}$ is a vector of candidate thresholds of length $M$. We define a quantity $q(c_m | data)$ as
 
 $$
 q(c_m | data) = \frac{1}{R}\sum_{r=1}^R \text{exp}(lp_{rc_m})
@@ -219,7 +218,7 @@ $$
 
 The `R` code is a little bit involved, because the log-probabilities are so small that exponentiating them to recover the probabilities runs into floating point limitations. In the examples I have been using here, the log probabilities ranged from $-4400$ to $-700$. On my device the smallest value I can meaningfully exponentiate is $-745$; anything smaller results in a value of 0, rendering it impossible to estimate $q$. 
 
-To get around this problem, I was used the `mpfr` function in the `Rmfpr` package. Here is a simple example to show how exponentiate a very negative variable $b$. A helper variable $a$ is specified to set the precision, which can then be used to derive the desired result, which is $\text{exp}(b)$.
+To get around this problem, I used the `mpfr` function in the `Rmfpr` package. Here is a simple example to show how exponentiate a hihgly negative variable $b$. A helper variable $a$ is specified to set the precision, which can then be used to derive the desired result, which is $\text{exp}(b)$.
 
 Everything is fine if $b \ge -745$:
 ```{r, message=FALSE}

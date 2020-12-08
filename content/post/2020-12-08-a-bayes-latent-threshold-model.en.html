@@ -14,23 +14,22 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: yes
 ---
 
 <script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
-<p>In the <a href="https://www.rdatagen.net/post/a-latent-threshold-model/" target="_blank">previous post</a>, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don’t know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of ongoing RCTs.</p>
+<p>In the <a href="https://www.rdatagen.net/post/a-latent-threshold-model/" target="_blank">previous post</a>, I described a latent threshold model that might be helpful if we want to dichotomize a continuous predictor but we don’t know the appropriate cut-off point. This was motivated by a need to identify a threshold of antibody levels present in convalescent plasma that is currently being tested as a therapy for hospitalized patients with COVID in a number of RCTs, including those that are particpating in the ongoing <a href="https://bit.ly/3lTTc4Q" target="_blank">COMPILE meta-analysis</a>.</p>
 <p>Barring any specific scientific rationale, we could pick an arbitrary threshold and continue with our analysis. Unfortunately, our estimates would not reflect the uncertainty around the selection of that threshold point; an approach that incorporates this uncertainty would be more appropriate. Last time, I described a relatively simple scenario with a single continuous predictor, a latent threshold, and a continuous outcome; the estimates were generated using the <code>R</code> package <code>chngppt</code>. Because I want to be able to build more flexible models in the future that could accommodate multiple continuous predictors (and latent thresholds), I decided to implement a Bayesian version of the model.</p>
 <div id="the-model" class="section level3">
 <h3>The model</h3>
 <p>Before laying out the model (described in much more detail in the <a href="https://bit.ly/3fYbd0M" target="_blank">Stan User’s Guide</a>), I should highlight two key features. First, we assume that the distribution of the outcome differs on either side of the threshold. In this example, we expect that the outcome data for antibody levels below the threshold are distributed as <span class="math inline">\(N(\alpha, \sigma)\)</span>, and that data above the threshold are <span class="math inline">\(N(\beta, \sigma)\)</span>. Second, since we do not know the threshold value, the likelihood is specified as a mixture across the range of all possible thresholds; the posterior distribution of the parameters <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta\)</span> reflect the uncertainty where the threshold lies.</p>
-<p>The observed data include the continuous outcome <span class="math inline">\(\textbf{y}\)</span> and a continuous antibody measure <span class="math inline">\(\textbf{x}\)</span>. There are <span class="math inline">\(M\)</span> possible thresholds provided by the researcher as a vector <span class="math inline">\(\mathbf{c}\)</span>.The threshold <span class="math inline">\(c[m], \; m \in 1,\dots,M\)</span> determines the relationship of <span class="math inline">\(x\)</span> to <span class="math inline">\(y\)</span>; each candidate threshold is treated as a discrete quantity and a probability <span class="math inline">\(\lambda_m\)</span> is attached to each. Here is the model for the outcome conditional on the distribution parameters as well as the probability of the thresholds:</p>
+<p>The observed data include the continuous outcome <span class="math inline">\(\textbf{y}\)</span> and a continuous antibody measure <span class="math inline">\(\textbf{x}\)</span>. There are <span class="math inline">\(M\)</span> possible pre-specified thresholds that are reflected in the vector <span class="math inline">\(\mathbf{c}\)</span>. Each candidate threshold is treated as a discrete quantity and a probability <span class="math inline">\(\lambda_m\)</span> is attached to each. Here is the model for the outcome conditional on the distribution parameters as well as the probability of the thresholds:</p>
 <p><span class="math display">\[p(\textbf{y}|\alpha, \beta, \sigma, \mathbf{\lambda}) = \sum_{m=1}^M \lambda_m \left(\prod_{i: \; x_i &lt; c[m]} \text{normal}(y_i | \alpha, \sigma)  \prod_{i: \; x_i \ge c[m]} \text{normal}(y_i | \beta, \sigma)\right)\]</span></p>
 </div>
 <div id="implmentation-in-stan" class="section level3">
 <h3>Implmentation in Stan</h3>
-<p>Here is a translation of the model into <code>Stan</code>. The data submitted to Stan include the antibody level <span class="math inline">\(x\)</span>, the outcome <span class="math inline">\(y\)</span>, as well as the candidate thresholds included in the vector <span class="math inline">\(\mathbf{c}\)</span> which has length <span class="math inline">\(M\)</span>. In this example, the candidate vector is based on the range of observed antibody levels.</p>
+<p>Here is a translation of the model into <code>Stan</code>. The data for the model include the antibody level <span class="math inline">\(x\)</span>, the outcome <span class="math inline">\(y\)</span>, and the candidate thresholds included in the vector <span class="math inline">\(\mathbf{c}\)</span> which has length <span class="math inline">\(M\)</span>. In this example, the candidate vector is based on the <em>range</em> of observed antibody levels.</p>
 <pre class="stan"><code>data {
   int&lt;lower=1&gt; N;                // number of observations
   real x[N];                     // antibody measures
@@ -39,7 +38,7 @@ draft: yes
   int&lt;lower=1&gt; M;                // number of candidate thresholds
   real c[M];                     // candidate thresholds
 }</code></pre>
-<p>To start, equal probability will be assigned to each of the <span class="math inline">\(M\)</span> candidate thresholds, so that will be <span class="math inline">\(1/M\)</span>. Since Stan lives in log-probability world, this is translated to <span class="math inline">\(\text{log}(1/M) = \text{-log}(M)\)</span>:</p>
+<p>At the outset, equal probability will be assigned to each of the <span class="math inline">\(M\)</span> candidate thresholds, which is <span class="math inline">\(1/M\)</span>. Since Stan operates in log-probabilities, this is translated to <span class="math inline">\(\text{log}(1/M) = \text{-log}(M)\)</span>:</p>
 <pre class="stan"><code>transformed data {
   real lambda;
   lambda = -log(M);
@@ -50,7 +49,7 @@ draft: yes
   real beta;
   real&lt;lower=0&gt; sigma;
 }</code></pre>
-<p>This next block is really the implementation of the threshold model. <span class="math inline">\(lp\)</span> is a vector of log probabilities, where each element represents the log of each summand in the model specified above.</p>
+<p>This next block is really the implementation of the threshold model. <span class="math inline">\(\mathbf{lp}\)</span> is a vector of log probabilities, where each element represents the log of each summand in the model specified above.</p>
 <pre class="stan"><code>transformed parameters {
   vector[M] lp;
   lp = rep_vector(lambda, M);
@@ -91,7 +90,7 @@ dd &lt;- genData(500, d1)</code></pre>
 </div>
 <div id="model-fitting" class="section level3">
 <h3>Model fitting</h3>
-<p>We use the <code>rstan</code> package to sample from the Stan model, passing along the observed antibody data, outcome data, as well as the candidate thresholds:</p>
+<p>We use the <code>rstan</code> package to access Stan, passing along the observed antibody data, outcome data, as well as the candidate thresholds:</p>
 <pre class="r"><code>library(rstan)
 
 rt &lt;- stanc(&quot;/.../threshold.stan&quot;);
@@ -138,14 +137,14 @@ dd &lt;- genData(500, d1)</code></pre>
 <p><img src="/img/post-bayesthreshold/p0.png" style="height:80.0%" /></p>
 <p>And here are the posterior probabilities for the parameters - now with much wider credible intervals:</p>
 <p><img src="/img/post-bayesthreshold/estimates0.png" style="width:70.0%" /></p>
-<p>And finally, here is the posterior distribution of thresholds. The plot is intentionally drawn to highlight the lack of distinction across the candidate thresholds:</p>
+<p>Here is the posterior distribution of thresholds, intentionally plotted to highlight the lack of distinction across the candidate thresholds:</p>
 <p><img src="/img/post-bayesthreshold/threshold0.png" style="width:80.0%" /></p>
 <p id="addendum">
 </p>
 </div>
 <div id="addendum---posterior-probabilties-of-the-threshold" class="section level3">
 <h3>Addendum - posterior probabilties of the threshold</h3>
-<p>Here’s a little more background on how the posterior probabilities for the threshold were calculated. As a reminder, <span class="math inline">\(c\)</span> is a vector of candidate thresholds of length <span class="math inline">\(M\)</span>. We define a quantity <span class="math inline">\(q(c_m | data)\)</span> as</p>
+<p>Here’s a little more background on how the posterior probabilities for the threshold were calculated. As a reminder, <span class="math inline">\(\textbf{c}\)</span> is a vector of candidate thresholds of length <span class="math inline">\(M\)</span>. We define a quantity <span class="math inline">\(q(c_m | data)\)</span> as</p>
 <p><span class="math display">\[
 q(c_m | data) = \frac{1}{R}\sum_{r=1}^R \text{exp}(lp_{rc_m})
 \]</span>
@@ -154,7 +153,7 @@ where <span class="math inline">\(lp_{cr_m}\)</span> is the value of <span class
 p(c_m | data) = \frac{q(c_m | data)}{\sum_{m&#39;=1}^M q(c_{m&#39;}|data)}
 \]</span></p>
 <p>The <code>R</code> code is a little bit involved, because the log-probabilities are so small that exponentiating them to recover the probabilities runs into floating point limitations. In the examples I have been using here, the log probabilities ranged from <span class="math inline">\(-4400\)</span> to <span class="math inline">\(-700\)</span>. On my device the smallest value I can meaningfully exponentiate is <span class="math inline">\(-745\)</span>; anything smaller results in a value of 0, rendering it impossible to estimate <span class="math inline">\(q\)</span>.</p>
-<p>To get around this problem, I was used the <code>mpfr</code> function in the <code>Rmfpr</code> package. Here is a simple example to show how exponentiate a very negative variable <span class="math inline">\(b\)</span>. A helper variable <span class="math inline">\(a\)</span> is specified to set the precision, which can then be used to derive the desired result, which is <span class="math inline">\(\text{exp}(b)\)</span>.</p>
+<p>To get around this problem, I used the <code>mpfr</code> function in the <code>Rmfpr</code> package. Here is a simple example to show how exponentiate a hihgly negative variable <span class="math inline">\(b\)</span>. A helper variable <span class="math inline">\(a\)</span> is specified to set the precision, which can then be used to derive the desired result, which is <span class="math inline">\(\text{exp}(b)\)</span>.</p>
 <p>Everything is fine if <span class="math inline">\(b \ge -745\)</span>:</p>
 <pre class="r"><code>library(Rmpfr)
 
