@@ -18,90 +18,169 @@ draft: true
 <script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
-<p>This is a test still.</p>
+<p>On an incredibly heartening note, two COVID-19 vaccines have been approved for use in the US and other countries around the world. More are possibly on the way. The big challenge, at least here in the United States, is to convince people that these vaccines are safe and effective; we need people to get vaccinated as soon as they are able to slow the spread of this disease. I for one will not hesitate for a moment to get a shot when I have the opportunity, though I don’t think biostatisticians are too high on the priority list.</p>
+<p>Those who <em>are</em> at the top of the priority list are staff and residents of nursing homes. Unfortunately, within these communities, there are pockets of ambivalence or skepticism about vaccines in general, and the COVID vaccine in particular. In the past, influenza vaccine rates for residents at some facilities could be as low as 50%. I am involved with an effort organized by researchers affiliated with the <a href="https://impactcollaboratory.org/" target="_blank">IMPACT Collaboratory</a> to figure out a way to increase these numbers.</p>
+<p>The effort involves conducting a cluster randomized trial (CRT) to evaluate the effectiveness of a wide-ranging outreach program designed to encourage nursing home residents to get their shots. The focus is on facilities that have relatively high proportions of African-American and Latinx residents, because it these facilities that have been least successful in the past in convincing residents to get vaccinated. The outcome measure, which will be measured at the individual level, will be the probability of vaccination within 5 weeks of being available at the nursing home.</p>
+<p>The nursing homes in the study are members of one of four national nursing home networks or corporations. In this CRT, the randomization will be stratified by these networks and by the proportion of African-American and Latinx residents. We are defining the race/ethnicity strata by using cutoffs of proportions: &lt;25%, 25% to 40%, and &gt;40%. We want our randomization to provide balance with respect to racial/ethnic composition in the intervention and control arms within each individual stratum. However, we are concerned that the strata with fewer nursing homes have a high risk of imbalance just by chance. Constrained randomization is one possible way to mitigate this risk, which brings us to the topic of today’s post.</p>
+<div id="constrained-randomization" class="section level3">
+<h3>Constrained randomization</h3>
+<p>The basic idea is pretty simple. We generate a large number of possible randomization schemes based on the requirements of the study design. For each of the randomizations, we evaluate whether the balancing criteria have been met, and we create a sample of eligible randomizations based on this criteria. Once this list of possible randomizations is in hand, we randomly select one of them, which becomes the actual randomization. Because we have limited the final selection only to possible randomizations that have been vetted for balance (or whatever criteria we require), we are guaranteed to satisfy those criteria.</p>
+</div>
+<div id="simulated-data" class="section level3">
+<h3>Simulated data</h3>
+<p>I am using a single simulated data set to illustrate the constrained randomization process. Using the <code>simstudy</code> package, this is a two-step process of <em>defining</em> the data and then <em>generating</em> the data.</p>
+<div id="defining-the-data" class="section level4">
+<h4>Defining the data</h4>
+<p>There will be a total of 200 nursing homes in 3 (rather than 4) networks. Just as in the real data, racial/ethnic composition will differ by network (because they are based in different parts of the country). And the networks are different sizes. The proportions of African-American/Latinx residents are generated using the <code>beta</code> distribution, which ranges from 0 to 1. In <code>simstudy</code>, the beta distribution is parameterized with a mean in the <code>formula</code> argument and dispersion in the <code>variance</code> argument (see <a href="https://kgoldfeld.github.io/simstudy/articles/simstudy.html" target="_blank">this</a> for more details on the distribution).</p>
 <pre class="r"><code>library(simstudy)
+library(data.table)
 
-def &lt;- defData(varname = &quot;network&quot;, formula = &quot;0.3;0.5;0.2&quot;, dist = &quot;categorical&quot;, id = &quot;site&quot;)
+def &lt;- defData(varname = &quot;network&quot;, formula = &quot;0.3;0.5;0.2&quot;, 
+  dist = &quot;categorical&quot;, id = &quot;site&quot;)
 
 defC &lt;- defCondition(condition = &quot;network == 1&quot;, 
   formula = &quot;0.25&quot;, variance = 10, dist = &quot;beta&quot;)
 defC &lt;- defCondition(defC, condition = &quot;network == 2&quot;, 
   formula = &quot;0.3&quot;, variance = 7.5, dist = &quot;beta&quot;)
 defC &lt;- defCondition(defC, condition = &quot;network == 3&quot;, 
-  formula = &quot;0.35&quot;, variance = 5, dist = &quot;beta&quot;)
-
-set.seed(10271)
+  formula = &quot;0.35&quot;, variance = 5, dist = &quot;beta&quot;)</code></pre>
+</div>
+<div id="generating-the-data" class="section level4">
+<h4>Generating the data</h4>
+<pre class="r"><code>set.seed(2323761)
 
 dd &lt;- genData(200, def, id = &quot;site&quot;)
 dd &lt;- addCondition(defC, dd, newvar = &quot;prop&quot;)
 
-dd[, stratum := cut(prop, breaks = c(0, .25, .4, 1), include.lowest = TRUE, labels = c(1, 2, 3))]
+dd[, stratum := cut(prop, breaks = c(0, .25, .4, 1), 
+  include.lowest = TRUE, labels = c(1, 2, 3))]
 
 dd</code></pre>
 <pre><code>##      site  prop network stratum
-##   1:    1 0.085       1       1
-##   2:    2 0.148       2       1
-##   3:    3 0.392       2       2
-##   4:    4 0.545       2       3
-##   5:    5 0.130       2       1
+##   1:    1 0.340       2       2
+##   2:    2 0.181       2       1
+##   3:    3 0.163       2       1
+##   4:    4 0.099       3       1
+##   5:    5 0.178       2       1
 ##  ---                           
-## 196:  196 0.341       2       2
-## 197:  197 0.221       1       1
-## 198:  198 0.541       3       3
-## 199:  199 0.053       2       1
-## 200:  200 0.398       2       2</code></pre>
+## 196:  196 0.500       2       3
+## 197:  197 0.080       3       1
+## 198:  198 0.479       3       3
+## 199:  199 0.071       2       1
+## 200:  200 0.428       2       3</code></pre>
+</div>
+</div>
+<div id="randomization" class="section level3">
+<h3>Randomization</h3>
+<p>Now that we have a data set in hand, we can go ahead an randomize. I am using the <code>simstudy</code> function <code>trtAssign</code>, which allows us to specify the strata as well as the the ratio of controls to intervention facilities. In this case, we have a limit in the number of sites at which we can implement the intervention. In this simulation, I assume that we’ll randomize 150 sites to control, and 50 to the intervention, a 3:1 ratio.</p>
 <pre class="r"><code>dr &lt;- trtAssign(dd, nTrt = 2, balanced = TRUE, strata = c(&quot;network&quot;, &quot;stratum&quot;), 
-                ratio = c(3, 1), grpName = &quot;rx&quot;)
-  
-dx &lt;- dr[, mean(prop), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]
-dx &lt;- dcast(dx, network + stratum ~ rx, value.var = &quot;V1&quot;)
-dx[, dif := abs(`1` - `0`)]
-
-dx</code></pre>
-<pre><code>##    network stratum    0    1    dif
-## 1:       1       1 0.15 0.15 0.0022
-## 2:       1       2 0.34 0.33 0.0082
-## 3:       1       3 0.48 0.47 0.0100
-## 4:       2       1 0.15 0.15 0.0018
-## 5:       2       2 0.33 0.33 0.0037
-## 6:       2       3 0.52 0.48 0.0413
-## 7:       3       1 0.14 0.17 0.0364
-## 8:       3       2 0.31 0.34 0.0254
-## 9:       3       3 0.57 0.45 0.1140</code></pre>
+  ratio = c(3, 1), grpName = &quot;rx&quot;)</code></pre>
+<p>Now, we want to inspect an average proportion of African-American/Latinx residents within each strata (without adjusting for nursing home size, which is ignored here). First, we create a data table that includes the difference in average proportions between the facilities randomized to the intervention and those randomized to control:</p>
+<pre class="r"><code>dx &lt;- dr[, .(mu_prop = mean(prop)), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]
+dc &lt;- dcast(dx, network + stratum ~ rx, value.var = &quot;mu_prop&quot;)
+dc[, dif := abs(`1` - `0`)]</code></pre>
+<p>Looking at both the table and the figure, Stratum 3 (&gt;40%) in Network 1 jumps out as having the largest discrepancy, about 14 percentage points:</p>
+<pre><code>##    network stratum    0     1     dif
+## 1:       1       1 0.16 0.192 0.03062
+## 2:       1       2 0.31 0.305 0.00641
+## 3:       1       3 0.45 0.600 0.14568
+## 4:       2       1 0.15 0.143 0.00394
+## 5:       2       2 0.32 0.321 0.00310
+## 6:       2       3 0.49 0.547 0.05738
+## 7:       3       1 0.13 0.085 0.04948
+## 8:       3       2 0.33 0.331 0.00029
+## 9:       3       3 0.56 0.607 0.04284</code></pre>
+<p><img src="/post/2020-12-22-constrained-randomization-to-evaulate-the-vaccine-rollout-in-nursing-homes/index.en_files/figure-html/unnamed-chunk-7-1.png" width="576" /></p>
+</div>
+<div id="constraining-the-randomization" class="section level3">
+<h3>Constraining the randomization</h3>
+<p>We might want to do better, and ensure that the maximum difference within a stratum falls below some specified threshold, say a 3 percentage point difference. All we need to do is repeatedly randomize and then check balance. I’ve written a function <code>randomize</code> that will be repeatedly called. Here I generate 1000 randomizations, but I might want to generate many more, particularly if it is difficult to achieve targeted balance.</p>
 <pre class="r"><code>randomize &lt;- function(dd) {
   
   dr &lt;- trtAssign(dd, nTrt = 2, strata = c(&quot;network&quot;, &quot;stratum&quot;), balanced = TRUE,
-                  ratio = c(3, 1), grpName = &quot;rx&quot;)
+    ratio = c(3, 1), grpName = &quot;rx&quot;)
   
-  dx &lt;- dr[, mean(prop), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]
-  dx &lt;- dcast(dx, network + stratum ~ rx, value.var = &quot;V1&quot;)
+  dx &lt;- dr[, .(mu_prop = mean(prop)), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]
+  dx &lt;- dcast(dx, network + stratum ~ rx, value.var = &quot;mu_prop&quot;)
   dx[, dif := abs(`1` - `0`)]
   
-  list(candidate = all(dx$dif &lt; 0.03), dr = dr[,.(site, rx)])
+  list(is_candidate = all(dx$dif &lt; 0.03), randomization = dr[,.(site, rx)], 
+    balance = dx)
   
 }
 
-candidates &lt;- lapply(1:1000, function(x) randomize(dd))
-con_candidates &lt;- candidates[sapply(candidates, function(x) x[[&quot;candidate&quot;]] )]
+rand_list &lt;- lapply(1:1000, function(x) randomize(dd))</code></pre>
+<p>Here is one randomization that fails to meet the criteria as 5 of the 9 strata exceed the 3 percentage point threshold:</p>
+<pre><code>## [[1]]
+## [[1]]$is_candidate
+## [1] FALSE
+## 
+## [[1]]$randomization
+##      site rx
+##   1:    1  0
+##   2:    2  1
+##   3:    3  0
+##   4:    4  1
+##   5:    5  0
+##  ---        
+## 196:  196  0
+## 197:  197  1
+## 198:  198  0
+## 199:  199  0
+## 200:  200  0
+## 
+## [[1]]$balance
+##    network stratum    0     1    dif
+## 1:       1       1 0.16 0.207 0.0503
+## 2:       1       2 0.30 0.334 0.0330
+## 3:       1       3 0.45 0.600 0.1457
+## 4:       2       1 0.15 0.138 0.0107
+## 5:       2       2 0.32 0.330 0.0078
+## 6:       2       3 0.50 0.514 0.0142
+## 7:       3       1 0.13 0.085 0.0493
+## 8:       3       2 0.34 0.311 0.0239
+## 9:       3       3 0.55 0.647 0.0950</code></pre>
+<p>Here is another that passes, as all differences are below the 3 percentage point threshold:</p>
+<pre><code>## [[1]]
+## [[1]]$is_candidate
+## [1] TRUE
+## 
+## [[1]]$randomization
+##      site rx
+##   1:    1  1
+##   2:    2  0
+##   3:    3  1
+##   4:    4  0
+##   5:    5  1
+##  ---        
+## 196:  196  1
+## 197:  197  0
+## 198:  198  1
+## 199:  199  1
+## 200:  200  0
+## 
+## [[1]]$balance
+##    network stratum    0    1    dif
+## 1:       1       1 0.16 0.18 0.0168
+## 2:       1       2 0.31 0.31 0.0039
+## 3:       1       3 0.49 0.49 0.0041
+## 4:       2       1 0.15 0.14 0.0144
+## 5:       2       2 0.32 0.33 0.0064
+## 6:       2       3 0.50 0.52 0.0196
+## 7:       3       1 0.12 0.12 0.0095
+## 8:       3       2 0.34 0.31 0.0239
+## 9:       3       3 0.57 0.58 0.0134</code></pre>
+<p>Now all that remains is to identify all the randomization sets that met the criteria (in this case there are only 6, suggesting we should probably generate at least 100,000 randomizations to ensure we have enough to pick from).</p>
+<pre class="r"><code>candidate_indices &lt;- sapply(rand_list, function(x) x[[&quot;is_candidate&quot;]])
+candidates &lt;- rand_list[candidate_indices]
+(n_candidates &lt;- length(candidates))</code></pre>
+<pre><code>## [1] 6</code></pre>
+<pre class="r"><code>selected &lt;- sample(x = n_candidates, size = 1)
+ds &lt;- candidates[[selected]][[&quot;randomization&quot;]]
 
-size &lt;- length(con_candidates)
-
-selected &lt;- con_candidates[[sample(x = size, 1)]][[&quot;dr&quot;]]
-
-ds &lt;- merge(dd, selected, by = &quot;site&quot;)
-
-dx &lt;- ds[, mean(prop), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]
-dx &lt;- dcast(dx, network + stratum ~ rx, value.var = &quot;V1&quot;)
-dx[, dif := abs(`1` - `0`)]
-
-dx</code></pre>
-<pre><code>##    network stratum    0    1    dif
-## 1:       1       1 0.15 0.17 0.0264
-## 2:       1       2 0.33 0.33 0.0038
-## 3:       1       3 0.48 0.49 0.0079
-## 4:       2       1 0.15 0.15 0.0023
-## 5:       2       2 0.32 0.34 0.0187
-## 6:       2       3 0.50 0.51 0.0081
-## 7:       3       1 0.14 0.15 0.0120
-## 8:       3       2 0.32 0.33 0.0124
-## 9:       3       3 0.54 0.54 0.0039</code></pre>
+ds &lt;- merge(dd, ds, by = &quot;site&quot;)
+dx &lt;- ds[, .(mu_prop = mean(prop)), keyby = c(&quot;network&quot;, &quot;stratum&quot;, &quot;rx&quot;)]</code></pre>
+<p>And looking at the plot confirms that we have a randomization scheme that is balanced based on our target:</p>
+<p><img src="/post/2020-12-22-constrained-randomization-to-evaulate-the-vaccine-rollout-in-nursing-homes/index.en_files/figure-html/unnamed-chunk-12-1.png" width="576" /></p>
+<p>Of course, the selection criteria could be based on any combination of factors. We may have multiple means that we want to balance, or we might want the two arms to be similar with respect to the standard deviation of a measure. These additional criteria may require more randomization schemes to be generated just because balance is that much more difficult to achieve, but all that really costs you is time, not effort.</p>
+</div>
