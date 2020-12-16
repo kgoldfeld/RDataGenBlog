@@ -1,0 +1,89 @@
+---
+title: Constrained randomization to evaulate the vaccine rollout in nursing homes
+author: Keith Goldfeld
+date: '2020-12-22'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+```{r, echo=FALSE}
+library(knitr)
+options(digits = 2)
+# opts_chunk$set(cache.extra = rand_seed)
+```
+This is a test still.
+
+```{r}
+library(simstudy)
+
+def <- defData(varname = "network", formula = "0.3;0.5;0.2", dist = "categorical", id = "site")
+
+defC <- defCondition(condition = "network == 1", 
+  formula = "0.25", variance = 10, dist = "beta")
+defC <- defCondition(defC, condition = "network == 2", 
+  formula = "0.3", variance = 7.5, dist = "beta")
+defC <- defCondition(defC, condition = "network == 3", 
+  formula = "0.35", variance = 5, dist = "beta")
+
+set.seed(10271)
+
+dd <- genData(200, def, id = "site")
+dd <- addCondition(defC, dd, newvar = "prop")
+
+dd[, stratum := cut(prop, breaks = c(0, .25, .4, 1), include.lowest = TRUE, labels = c(1, 2, 3))]
+
+dd
+
+```
+
+```{r}
+dr <- trtAssign(dd, nTrt = 2, balanced = TRUE, strata = c("network", "stratum"), 
+                ratio = c(3, 1), grpName = "rx")
+  
+dx <- dr[, mean(prop), keyby = c("network", "stratum", "rx")]
+dx <- dcast(dx, network + stratum ~ rx, value.var = "V1")
+dx[, dif := abs(`1` - `0`)]
+
+dx
+```
+
+```{r}
+randomize <- function(dd) {
+  
+  dr <- trtAssign(dd, nTrt = 2, strata = c("network", "stratum"), balanced = TRUE,
+                  ratio = c(3, 1), grpName = "rx")
+  
+  dx <- dr[, mean(prop), keyby = c("network", "stratum", "rx")]
+  dx <- dcast(dx, network + stratum ~ rx, value.var = "V1")
+  dx[, dif := abs(`1` - `0`)]
+  
+  list(candidate = all(dx$dif < 0.03), dr = dr[,.(site, rx)])
+  
+}
+
+candidates <- lapply(1:1000, function(x) randomize(dd))
+con_candidates <- candidates[sapply(candidates, function(x) x[["candidate"]] )]
+
+size <- length(con_candidates)
+
+selected <- con_candidates[[sample(x = size, 1)]][["dr"]]
+
+ds <- merge(dd, selected, by = "site")
+
+dx <- ds[, mean(prop), keyby = c("network", "stratum", "rx")]
+dx <- dcast(dx, network + stratum ~ rx, value.var = "V1")
+dx[, dif := abs(`1` - `0`)]
+
+dx
+
+```
+
