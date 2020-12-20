@@ -6,13 +6,17 @@ slug: importance-sampling-adds-a-little-excitement-to-monte-carlo-simulation
 categories: []
 tags:
   - R
+output:
+  blogdown::html_page:
+    anchor_sections: no
 ---
 
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
-<p>I’m contemplating the idea of teaching a course on simulation next fall, so I have been exploring various topics that I might include. (If anyone has great ideas either because you have taught such a course or taken one, definitely drop me a note.) Monte Carlo (MC) simulation is an obvious one. I like the idea of talking about <em>importance sampling</em>, because it sheds light on the idea that not all MC simulations are created equally. I thought I’d do a brief blog to share some code I put together that demonstrates MC simulation generally, and shows how importance sampling can be an improvement.</p>
+<p>I’m contemplating the idea of teaching a course on simulation next fall, so I have been exploring various topics that I might include. (If anyone has great ideas either because you have taught such a course or taken one, definitely drop me a note.) Monte Carlo (MC) simulation is an obvious one. I like the idea of talking about <em>importance sampling</em>, because it sheds light on the idea that not all MC simulations are created equally. I thought I’d do a brief post to share some code I put together that demonstrates MC simulation generally, and shows how importance sampling can be an improvement.</p>
 <p>Like many of the topics I’ve written about, this is a vast one that certainly warrants much, much more than a blog entry. MC simulation in particular, since it is so fundamental to the practice of statistics. MC methods are an essential tool to understand the behavior of statistical models. In fact, I’ve probably used MC simulations in just about all of my posts - to generate repeated samples from a model to explore bias, variance, and other distributional characteristics of a particular method.</p>
-<p>For example, if we want to assess the variability of a regression parameter estimate, we can repeatedly generate data from a particular “hidden” model, and for each data set fit a regression model to estimate the parameter in question. For each iteration, we will arrive at a different estimate; the variation of all those estimates might be of great interest. In particular, the standard deviation of those estimates is the standard error of the estimate. (Of course, with certain problems, there are ways to analytically derive the standard errors. In these cases, MC simulation can be used to verify an analysis was correct. That’s the beauty of statistics - you can actually show yourself you’ve gotten the right answer.)</p>
+<p>For example, if we want to assess the variability of a regression parameter estimate, we can repeatedly generate data from a particular “hidden” model, and for each data set fit a regression model to estimate the parameter in question. For each iteration, we will arrive at a different estimate; the variation of all these estimates might be of great interest. In particular, the standard deviation of these estimates is the standard error of the estimate. (Of course, with certain problems, there are ways to analytically derive the standard errors. In these cases, MC simulation can be used to verify an analysis was correct. That’s the beauty of statistics - you can actually show yourself you’ve gotten the right answer.)</p>
 <div id="a-simple-problem" class="section level3">
 <h3>A simple problem</h3>
 <p>In this post, I am considering a simple problem. We are interested in estimating the probability of drawing a value between 2 and 2.5 from a standard normal distribution. That is, we want to use MC simulation to estimate</p>
@@ -25,7 +29,7 @@ tags:
   result &lt;- (x &gt;= minx &amp; x &lt;= maxx) 
   return(as.integer(result))
 }</code></pre>
-<p>To estimate the desired probability, we just repeatedly draw from the standard normal distribution. After each draw, we check to see if the value falls between 2.0 and 2.5, and store that information in a vector. The vector will have a value of 1 each time a value falls into the range, and 0 otherwise. The proportion of 1’s is the desired probability. Or in other words, <span class="math inline">\(\hat{p} = \bar{z}\)</span>, where <span class="math inline">\(\bar{z} = \frac{1}{1000} \sum{z}\)</span>.</p>
+<p>To estimate the desired probability, we just repeatedly draw from the standard normal distribution. After each draw, we check to see if the value falls between 2.0 and 2.5, and store that information in a vector. The vector will have a value of 1 each time a value falls in the range, and 0 otherwise. The proportion of 1’s is the desired probability. Or in other words, <span class="math inline">\(\hat{p} = \bar{z}\)</span>, where <span class="math inline">\(\bar{z} = \frac{1}{1000} \sum{z}\)</span>.</p>
 <pre class="r"><code>set.seed(1234)
 z &lt;- vector(&quot;numeric&quot;, 1000)
 
@@ -70,14 +74,14 @@ dMC[ , .(mean(z), sd(z)/sqrt(1000))]</code></pre>
 mb &lt;- microbenchmark(tradMCsim(1000), genData(1000, defMC))
 summary(mb)[, c(&quot;expr&quot;, &quot;lq&quot;, &quot;mean&quot;, &quot;uq&quot;, &quot;neval&quot;)]</code></pre>
 <pre><code>##                   expr       lq     mean       uq neval
-## 1      tradMCsim(1000) 1.428656 2.186979 2.573003   100
-## 2 genData(1000, defMC) 1.376450 1.668248 1.674146   100</code></pre>
+## 1      tradMCsim(1000) 2.111598 3.045829 3.215135   100
+## 2 genData(1000, defMC) 1.561012 2.092073 1.989184   100</code></pre>
 <p>With 1000 draws, there is actually very little difference between the two approaches. But if we start to increase the number of simulations, the differences become apparent. With 10000 draws, the simstudy approach is more than 7 times faster. The relative improvement continues to increase as the number of draws increases.</p>
 <pre class="r"><code>mb &lt;- microbenchmark(tradMCsim(10000), genData(10000, defMC))
 summary(mb)[, c(&quot;expr&quot;, &quot;lq&quot;, &quot;mean&quot;, &quot;uq&quot;, &quot;neval&quot;)]</code></pre>
 <pre><code>##                    expr        lq      mean        uq neval
-## 1      tradMCsim(10000) 18.453128 21.619022 22.226165   100
-## 2 genData(10000, defMC)  2.006622  2.432078  2.508662   100</code></pre>
+## 1      tradMCsim(10000) 26.113492 31.167994 34.050238   100
+## 2 genData(10000, defMC)  2.617552  3.258709  3.321416   100</code></pre>
 </div>
 <div id="estimating-variation-of-hatp" class="section level3">
 <h3>Estimating variation of <span class="math inline">\(\hat{p}\)</span></h3>
@@ -93,14 +97,14 @@ for (i in 1:iter) {
 }
 
 head(estMC)</code></pre>
-<pre><code>## [1] 0.020 0.013 0.023 0.017 0.016 0.019</code></pre>
+<pre><code>## [1] 0.019 0.015 0.021 0.018 0.016 0.019</code></pre>
 <p>We can estimate the average of the <span class="math inline">\(\hat{p}\)</span>’s, which should be close to the true value of <span class="math inline">\(p \approx 0.0165\)</span>. And we can check to see if the standard error of <span class="math inline">\(\hat{p}\)</span> is close to our earlier estimate of 0.004.</p>
 <pre class="r"><code>c(mean(estMC), sd(estMC))</code></pre>
-<pre><code>## [1] 0.016820000 0.004113094</code></pre>
+<pre><code>## [1] 0.016818667 0.004044175</code></pre>
 </div>
 <div id="importance-sampling" class="section level3">
 <h3>Importance sampling</h3>
-<p>As we were trying to find an estimate for <span class="math inline">\(p\)</span> using the simulations above, we spent a lot of time drawing values far outside the range of 2 to 2.5. In fact, almost all of the draws were outside that range. You could almost so that most of those draws were providing little if any information. What if we could focus our attention on the area we are interested in - in this case the 2 to 2.5, without sacrificing our ability to make an unbiased estimate? That would be great, wouldn’t it? That is the idea behind importance sampling.</p>
+<p>As we were trying to find an estimate for <span class="math inline">\(p\)</span> using the simulations above, we spent a lot of time drawing values far outside the range of 2 to 2.5. In fact, almost all of the draws were outside that range. You could almost see that most of those draws were providing little if any information. What if we could focus our attention on the area we are interested in - in this case the 2 to 2.5, without sacrificing our ability to make an unbiased estimate? That would be great, wouldn’t it? That is the idea behind importance sampling.</p>
 <p>The idea is to draw from a distribution that is (a) easy to draw from and (b) is close to the region of interest. Obviously, if 100% of our draws is from the set/range in question, then we’ve way over-estimated the proportion. So, we need to reweight the draws in such a way that we get an unbiased estimate.</p>
 </div>
 <div id="a-very-small-amount-of-theory" class="section level3">
@@ -108,7 +112,8 @@ head(estMC)</code></pre>
 <p>A teeny bit of stats theory here (hope you don’t jump ship). The expected value of a draw falling between 2 and 2.5 is</p>
 <p><span class="math display">\[E_x(I_R) = \int_{-\infty}^{\infty}{I_{R}(x)f(x)dx} \ ,\]</span></p>
 <p>where <span class="math inline">\(I_R(x)=1\)</span> when <span class="math inline">\(2.0 \le x \le 2.5\)</span>, and is 0 otherwise, and <span class="math inline">\(f(x)\)</span> is the standard normal density. This is the quantity that we were estimating above. Now, let’s say we want to draw closer to the range in question - say using <span class="math inline">\(Y\sim N(2.25, 1)\)</span>. We will certainly get more values around 2 and 2.5. If <span class="math inline">\(g(y)\)</span> represents this new density, we can write <span class="math inline">\(E(I_R)\)</span> another way:</p>
-<p><span class="math display">\[E_y(I_R) = \int_{-\infty}^{\infty}{I_{R}(y)\frac{f(y)}{g(y)}g(y)dy} \ .\]</span> Notice that the <span class="math inline">\(g(y)\)</span>’s cancel out and we end up with the same expectation as above, except it is with respect to <span class="math inline">\(y\)</span>. Also, notice that the second equation is also a representation of <span class="math inline">\(E_y \left( I_{R}(y)\frac{f(y)}{g(y)} \right)\)</span>.</p>
+<p><span class="math display">\[E_y(I_R) = \int_{-\infty}^{\infty}{I_{R}(y)\frac{f(y)}{g(y)}g(y)dy} \ .\]</span>
+Notice that the <span class="math inline">\(g(y)\)</span>’s cancel out and we end up with the same expectation as above, except it is with respect to <span class="math inline">\(y\)</span>. Also, notice that the second equation is also a representation of <span class="math inline">\(E_y \left( I_{R}(y)\frac{f(y)}{g(y)} \right)\)</span>.</p>
 <p>I know I am doing a lot of hand waving here, but the point is that</p>
 <p><span class="math display">\[E_x(I_R) = E_y \left( I_{R}\frac{f}{g} \right)\]</span></p>
 <p>Again, <span class="math inline">\(f\)</span> and <span class="math inline">\(g\)</span> are just the original density of interest - <span class="math inline">\(N(0,1)\)</span> - and the “important” density - <span class="math inline">\(N(2.25, 1)\)</span> - respectively. In our modified MC simulation, we draw a <span class="math inline">\(y_i\)</span> from the <span class="math inline">\(N(2.25, 1)\)</span>, and then we calculate <span class="math inline">\(f(y_i)\)</span>, <span class="math inline">\(g(y_i)\)</span>, and <span class="math inline">\(I_R(y_i)\)</span>, or more precisely, <span class="math inline">\(z_i = I_{R}(y_i)\frac{f(y_i)}{g(y_i)}\)</span>. To get <span class="math inline">\(\hat{p}\)</span>, we average the <span class="math inline">\(z_i\)</span>’s, as we did before.</p>
@@ -148,24 +153,24 @@ def1 &lt;- defData(def1, varname = &quot;z&quot;, formula = &quot;h(I, f, g)&quo
 def2 &lt;- updateDef(def1, &quot;y&quot;, newvariance = 0.4^2)
 def2 &lt;- updateDef(def2, &quot;g&quot;, newformula = &quot;dnorm(y, 2.25, 0.4)&quot;)
 
-# Uniform(2, 3)
-def3 &lt;- updateDef(def1, &quot;y&quot;, newformula = &quot;2;2.5&quot;, 
+# Uniform(2.0, 2.5)
+def3 &lt;- updateDef(def1, &quot;y&quot;, newformula = &quot;2.0;2.5&quot;, 
                   newvariance = 0, newdist = &quot;uniform&quot;)
-def3 &lt;- updateDef(def3, &quot;g&quot;, newformula = &quot;dunif(y, 2, 2.5)&quot;)</code></pre>
+def3 &lt;- updateDef(def3, &quot;g&quot;, newformula = &quot;dunif(y, 2.0, 2.5)&quot;)</code></pre>
 <p>Here is a peek at one data set using the uniform sampling approach:</p>
 <pre class="r"><code>genData(1000, def3)</code></pre>
 <pre><code>##         id        y          f g I           z
-##    1:    1 2.181324 0.03695603 2 1 0.018478013
-##    2:    2 2.381306 0.02341805 2 1 0.011709023
-##    3:    3 2.338066 0.02593364 2 1 0.012966819
-##    4:    4 2.200399 0.03544350 2 1 0.017721749
-##    5:    5 2.461919 0.01926509 2 1 0.009632543
+##    1:    1 2.333064 0.02623838 2 1 0.013119192
+##    2:    2 2.486934 0.01810877 2 1 0.009054386
+##    3:    3 2.232953 0.03297592 2 1 0.016487961
+##    4:    4 2.280487 0.02962167 2 1 0.014810835
+##    5:    5 2.179042 0.03714037 2 1 0.018570187
 ##   ---                                         
-##  996:  996 2.118506 0.04229983 2 1 0.021149914
-##  997:  997 2.433722 0.02064175 2 1 0.010320876
-##  998:  998 2.265325 0.03066025 2 1 0.015330127
-##  999:  999 2.107219 0.04332075 2 1 0.021660374
-## 1000: 1000 2.444599 0.02010130 2 1 0.010050651</code></pre>
+##  996:  996 2.416574 0.02151825 2 1 0.010759125
+##  997:  997 2.304301 0.02804796 2 1 0.014023980
+##  998:  998 2.113207 0.04277672 2 1 0.021388361
+##  999:  999 2.190010 0.03626104 2 1 0.018130520
+## 1000: 1000 2.086952 0.04520163 2 1 0.022600813</code></pre>
 <p>And here are the estimates based on the three different importance samples. Again each iteration is 1000 draws from the distribution - and we use 1500 iterations:</p>
 <pre class="r"><code>iter &lt;- 1500
 N &lt;- 1000
@@ -189,12 +194,12 @@ for (i in 1:iter) {
 
 # N(2.25, 1)
 c(mean(est1), sd(est1))</code></pre>
-<pre><code>## [1] 0.016525503 0.001128918</code></pre>
+<pre><code>## [1] 0.016534731 0.001123126</code></pre>
 <pre class="r"><code># N(2.25, .16)
 c(mean(est2), sd(est2))</code></pre>
-<pre><code>## [1] 0.0165230677 0.0005924007</code></pre>
+<pre><code>## [1] 0.0165235092 0.0006098698</code></pre>
 <pre class="r"><code># Uniform(2, 2.5)
 c(mean(est3), sd(est3))</code></pre>
-<pre><code>## [1] 0.0165394920 0.0001643243</code></pre>
+<pre><code>## [1] 0.0165417650 0.0001622635</code></pre>
 <p>In each case, the average <span class="math inline">\(\hat{p}\)</span> is 0.0165, and the standard errors are all below the standard MC standard error of 0.0040. The estimates based on draws from the uniform distribution are the most efficient, with a standard error below 0.0002.</p>
 </div>

@@ -6,13 +6,16 @@ slug: importance-sampling-adds-a-little-excitement-to-monte-carlo-simulation
 categories: []
 tags:
   - R
+output:
+  blogdown::html_page:
+    anchor_sections: no
 ---
 
-I'm contemplating the idea of teaching a course on simulation next fall, so I have been exploring various topics that I might include. (If anyone has great ideas either because you have taught such a course or taken one, definitely drop me a note.) Monte Carlo (MC) simulation is an obvious one. I like the idea of talking about *importance sampling*, because it sheds light on the idea that not all MC simulations are created equally. I thought I'd do a brief blog to share some code I put together that demonstrates MC simulation generally, and shows how importance sampling can be an improvement.
+I'm contemplating the idea of teaching a course on simulation next fall, so I have been exploring various topics that I might include. (If anyone has great ideas either because you have taught such a course or taken one, definitely drop me a note.) Monte Carlo (MC) simulation is an obvious one. I like the idea of talking about *importance sampling*, because it sheds light on the idea that not all MC simulations are created equally. I thought I'd do a brief post to share some code I put together that demonstrates MC simulation generally, and shows how importance sampling can be an improvement.
 
 Like many of the topics I've written about, this is a vast one that certainly warrants much, much more than a blog entry. MC simulation in particular, since it is so fundamental to the practice of statistics. MC methods are an essential tool to understand the behavior of statistical models. In fact, I've probably used MC simulations in just about all of my posts - to generate repeated samples from a model to explore bias, variance, and other distributional characteristics of a particular method.
 
-For example, if we want to assess the variability of a regression parameter estimate, we can repeatedly generate data from a particular "hidden" model, and for each data set fit a regression model to estimate the parameter in question. For each iteration, we will arrive at a different estimate; the variation of all those estimates might be of great interest. In particular, the standard deviation of those estimates is the standard error of the estimate. (Of course, with certain problems, there are ways to analytically derive the standard errors. In these cases, MC simulation can be used to verify an analysis was correct. That's the beauty of statistics - you can actually show yourself you've gotten the right answer.)
+For example, if we want to assess the variability of a regression parameter estimate, we can repeatedly generate data from a particular "hidden" model, and for each data set fit a regression model to estimate the parameter in question. For each iteration, we will arrive at a different estimate; the variation of all these estimates might be of great interest. In particular, the standard deviation of these estimates is the standard error of the estimate. (Of course, with certain problems, there are ways to analytically derive the standard errors. In these cases, MC simulation can be used to verify an analysis was correct. That's the beauty of statistics - you can actually show yourself you've gotten the right answer.)
 
 ### A simple problem
 
@@ -35,7 +38,7 @@ inSet <- function(x, minx, maxx) {
 }
 ```
 
-To estimate the desired probability, we just repeatedly draw from the standard normal distribution. After each draw, we check to see if the value falls between 2.0 and 2.5, and store that information in a vector. The vector will have a value of 1 each time a value falls into the range, and 0 otherwise. The proportion of 1's is the desired probability. Or in other words, $\hat{p} = \bar{z}$, where $\bar{z} = \frac{1}{1000} \sum{z}$.
+To estimate the desired probability, we just repeatedly draw from the standard normal distribution. After each draw, we check to see if the value falls between 2.0 and 2.5, and store that information in a vector. The vector will have a value of 1 each time a value falls in the range, and 0 otherwise. The proportion of 1's is the desired probability. Or in other words, $\hat{p} = \bar{z}$, where $\bar{z} = \frac{1}{1000} \sum{z}$.
 
 ```{r}
 set.seed(1234)
@@ -138,7 +141,7 @@ c(mean(estMC), sd(estMC))
 
 ### Importance sampling
 
-As we were trying to find an estimate for $p$ using the simulations above, we spent a lot of time drawing values far outside the range of 2 to 2.5. In fact, almost all of the draws were outside that range. You could almost so that most of those draws were providing little if any information. What if we could focus our attention on the area we are interested in - in this case the 2 to 2.5, without sacrificing our ability to make an unbiased estimate? That would be great, wouldn't it? That is the idea behind importance sampling.
+As we were trying to find an estimate for $p$ using the simulations above, we spent a lot of time drawing values far outside the range of 2 to 2.5. In fact, almost all of the draws were outside that range. You could almost see that most of those draws were providing little if any information. What if we could focus our attention on the area we are interested in - in this case the 2 to 2.5, without sacrificing our ability to make an unbiased estimate? That would be great, wouldn't it? That is the idea behind importance sampling.
 
 The idea is to draw from a distribution that is (a) easy to draw from and (b) is close to the region of interest. Obviously, if 100\% of our draws is from the set/range in question, then we've way over-estimated the proportion. So, we need to reweight the draws in such a way that we get an unbiased estimate. 
 
@@ -225,10 +228,10 @@ def1 <- defData(def1, varname = "z", formula = "h(I, f, g)",
 def2 <- updateDef(def1, "y", newvariance = 0.4^2)
 def2 <- updateDef(def2, "g", newformula = "dnorm(y, 2.25, 0.4)")
 
-# Uniform(2, 3)
-def3 <- updateDef(def1, "y", newformula = "2;2.5", 
+# Uniform(2.0, 2.5)
+def3 <- updateDef(def1, "y", newformula = "2.0;2.5", 
                   newvariance = 0, newdist = "uniform")
-def3 <- updateDef(def3, "g", newformula = "dunif(y, 2, 2.5)")
+def3 <- updateDef(def3, "g", newformula = "dunif(y, 2.0, 2.5)")
 ```
 
 Here is a peek at one data set using the uniform sampling approach:
