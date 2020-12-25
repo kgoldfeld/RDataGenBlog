@@ -9,8 +9,13 @@ My name is Keith Goldfeld and I am on the faculty in the Division of Biostatisti
 ## Other stats sites I read regularly
 
 [R-bloggers](https://www.r-bloggers.com/)
+
 [Simply Statistics](https://simplystatistics.org/)
+
 [Stats Chat](http://www.statschat.org.nz/)
+
 [Statistical Thinking](http://www.fharrell.com/)
+
 [Statistical Modeling, Causal Inference, and Social Science](http://andrewgelman.com/)</a>
+
 [xkcd](https://xkcd.com/)
