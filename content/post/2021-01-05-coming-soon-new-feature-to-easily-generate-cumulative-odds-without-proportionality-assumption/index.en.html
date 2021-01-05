@@ -1,0 +1,79 @@
+---
+title: 'Coming soon: effortlessly generate ordinal data without assuming proportional odds'
+author: Keith Goldfeld
+date: '2021-01-05'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+---
+
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
+
+
+<p>I’m starting off 2021 with my 99th post ever to introduce a new feature that will be incorporated into <code>simstudy</code> soon to make it a bit easier to generate ordinal data without requiring an assumption of proportional odds. I should wait until this feature has been incorporated into the development version, but I want to put it out there in case any one has any further suggestions. In any case, having this out in plain view will motivate me to get back to work on the package.</p>
+<p>In the <a href="https://www.rdatagen.net/post/more-fun-with-ordinal-scales-combining-categories-may-not-make-solve-the-problem-of-non-proportionality/" target="_blank">past</a>, I have generated ordinal without the non-proportional odds assumption, but it was a bit cumbersome. I’ve wanted to simplify the approach by incorporating the functionality directly into <code>genOrdCat</code>. While this last step is not complete, it is very close. For now, there is a temporary function <code>genOrdCatNP</code>.</p>
+<div id="starting-with-the-proportional-odds-assumption" class="section level2">
+<h2>Starting with the proportional odds assumption</h2>
+<p>First, I am generating a data set using <code>genOrdCat</code> and an assumption of proportionality. This will be a large data set to eliminate any sampling issues when summarizing the odds ratios. (Please take a look <a href="https://www.rdatagen.net/post/the-advantage-of-increasing-the-number-of-categories-in-an-ordinal-outcome/" target="_blank">here</a> for a little more detail on how how the odds and cumulative odds are defined.) The data will include a treatment or exposure indicator and an ordinal categorical outcome with four possible responses. In this case, the log odds-ratio comparing the odds for the treatment group with the control group will be -1.3, which translates to an odds ratio (OR) of 0.27.</p>
+<pre class="r"><code>d1 &lt;- defDataAdd(varname = &quot;z&quot;, formula = &quot;rx * 1.3&quot;, dist = &quot;nonrandom&quot;)
+
+set.seed(382763)
+dd &lt;- genData(100000)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(d1, dd)
+
+baseprobs &lt;- c(.4, .3, .2, .1)
+dd_p &lt;- genOrdCat(dtName = dd, adjVar = &quot;z&quot;, baseprobs = baseprobs)</code></pre>
+<p>Here is a calculation of the cumulative proportions and odds, as well as the odds ratios, which are all close to -1.3:</p>
+<pre class="r"><code>(prop &lt;- prop.table(dd_p[, table(rx, cat)], 1))</code></pre>
+<pre><code>##    cat
+## rx     1    2    3    4
+##   0 0.40 0.30 0.20 0.10
+##   1 0.15 0.24 0.32 0.29</code></pre>
+<pre class="r"><code>(cumprop &lt;- data.table(apply(prop, 1, cumsum)))</code></pre>
+<pre><code>##      0    1
+## 1: 0.4 0.15
+## 2: 0.7 0.39
+## 3: 0.9 0.71
+## 4: 1.0 1.00</code></pre>
+<pre class="r"><code>(cumodds &lt;- cumprop[, .(odds0 = `0`/(1 - `0`), odds1=`1`/(1 - `1`))])</code></pre>
+<pre><code>##    odds0 odds1
+## 1:  0.67  0.18
+## 2:  2.32  0.63
+## 3:  8.84  2.45
+## 4:   Inf   Inf</code></pre>
+<pre class="r"><code>cumodds[1:3, odds1/odds0]</code></pre>
+<pre><code>## [1] 0.27 0.27 0.28</code></pre>
+<p>To visualize cumulative proportional odds, here’s a plot using the really nice <code>likert</code> package:</p>
+<pre class="r"><code>library(likert)
+
+item &lt;- data.frame(dd_p[, &quot;cat&quot;])
+names(item) &lt;- &quot;response&quot;
+bin.grp &lt;- factor(dd_p[, rx])
+likert.bin &lt;- likert(item, grouping = bin.grp)
+
+plot(likert.bin) + ggtitle(&quot;Proportional odds&quot;)</code></pre>
+<p><img src="/post/2021-01-05-coming-soon-new-feature-to-easily-generate-cumulative-odds-without-proportionality-assumption/index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+</div>
+<div id="its-now-simple-to-relax-the-proportionality-assumption" class="section level2">
+<h2>It’s now simple to relax the proportionality assumption</h2>
+<p>Two arguments are needed to relax the assumption: <code>npVar</code> and <code>npAdj</code>. The user specifies the first argument to indicate what variable is driving the lack of proportionality. In this case, it will be the treatment itself, since that is the only covariate in the data set. The second argument is a vector that represents the violation of the assumption at each level of the ordinal measure. The length of this vector is currently the same length as the number of ordinal categories, though the last value will always be 0.</p>
+<p>In this example, the cumulative log-odds ratio for the first category will be 0.3 points more than the proportional assumption of -1.3, so should be quite close to -1.0 (or 0.37 on the OR scale). The cumulative log-odds ratio (and OR) for the second category will be the same as in the case of proportionality. And, the cumulative log-odds ratio for the third category will be 1.0 less than -1.3, or around -2.3 (which translates to 0.10 on the OR scale)</p>
+<pre class="r"><code>npAdj &lt;- c(-0.3, 0.0, 1.0, 0)
+dd_np &lt;- genOrdCatNP(dtName = dd, adjVar = &quot;z&quot;, baseprobs = baseprobs,
+                  npVar = &quot;rx&quot;, npAdj = npAdj)
+
+cumprop &lt;- data.table(apply(prop.table(dd_np[, table(rx, cat)], 1), 1, cumsum))
+cumodds &lt;- cumprop[, .(odds0 = `0`/(1 - `0`), odds1=`1`/(1 - `1`))]
+cumodds[1:3, odds1/odds0]</code></pre>
+<pre><code>## [1] 0.37 0.27 0.10</code></pre>
+<p>And here is what non-proportional cumulative odds looks like:</p>
+<p><img src="/post/2021-01-05-coming-soon-new-feature-to-easily-generate-cumulative-odds-without-proportionality-assumption/index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+</div>
