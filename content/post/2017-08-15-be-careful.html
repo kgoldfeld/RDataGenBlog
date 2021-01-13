@@ -9,6 +9,7 @@ tags:
 subtitle: ''
 ---
 
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
 <p>A researcher was presenting an analysis of the impact various types of childhood trauma might have on subsequent substance abuse in adulthood. Obviously, a very interesting and challenging research question. The statistical model included adjustments for several factors that are plausible confounders of the relationship between trauma and substance use, such as childhood poverty. However, the model also include a measurement for poverty in adulthood - believing it was somehow confounding the relationship of trauma and substance use. A confounder is a common cause of an exposure/treatment and an outcome; it is hard to conceive of adult poverty as a cause of childhood events, even though it might be related to adult substance use (or maybe not). At best, controlling for adult poverty has no impact on the conclusions of the research; less good, though, is the possibility that it will lead to the conclusion that the effect of trauma is less than it actually is.</p>
@@ -22,7 +23,7 @@ subtitle: ''
 <div id="simple-confounding" class="section level2">
 <h2>Simple confounding</h2>
 <p>Here’s a relatively straightforward example. Let’s say we are interested in understanding if some measure <span class="math inline">\(X\)</span> causes an outcome <span class="math inline">\(Y\)</span>, where there is a common cause <span class="math inline">\(C\)</span> (the diagram is called a DAG - a directed acyclic graph - and is useful for many things, including laying out data generating process):</p>
-<p><img src="/img/post-careful/SimpleCausal.png" width="300px" /></p>
+<p><img src="/img/post-careful/SimpleCausal.png" style="width:40.0%" /></p>
 <pre class="r"><code>library(broom)
 library(data.table)
 library(simstudy)
@@ -54,34 +55,37 @@ dt &lt;- genData(1000, def)</code></pre>
 <p>We can estimate the same effect using simple linear regression:</p>
 <pre class="r"><code>lm1 &lt;- lm(Y_obs ~ X, data = dt)
 tidy(lm1)</code></pre>
-<pre><code>##          term  estimate  std.error statistic      p.value
-## 1 (Intercept) 0.5515963 0.07325865  7.529436 1.137854e-13
-## 2           X 1.2850091 0.10674523 12.038094 2.916261e-31</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)    0.552    0.0733      7.53 1.14e-13
+## 2 X              1.29     0.107      12.0  2.92e-31</code></pre>
 <p>And finally, if we adjust for the confounder <span class="math inline">\(C\)</span>, we recover the true causal effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span>, or at least get very close to it:</p>
 <pre class="r"><code>lm2 &lt;- lm(Y_obs ~ X + C, data = dt)
 tidy(lm2)</code></pre>
-<pre><code>##          term   estimate  std.error statistic      p.value
-## 1 (Intercept) 0.08491216 0.06502545  1.305830 1.919117e-01
-## 2           X 0.48935880 0.09678110  5.056347 5.083959e-07
-## 3           C 2.05729945 0.09825925 20.937464 5.767575e-81</code></pre>
+<pre><code>## # A tibble: 3 x 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)   0.0849    0.0650      1.31 1.92e- 1
+## 2 X             0.489     0.0968      5.06 5.08e- 7
+## 3 C             2.06      0.0983     20.9  5.77e-81</code></pre>
 </div>
 <div id="adjusting-for-a-post-exposure-covariate" class="section level2">
 <h2>Adjusting for a post-exposure covariate</h2>
 <p>Now, we are ready to see what happens in a slightly more complicated setting that is defined by this DAG:</p>
-<p><img src="/img/post-careful/ComplexCausal.png" width="400px" /></p>
+<p><img src="/img/post-careful/ComplexCausal.png" style="width:40.0%" /></p>
 <p>In this example <span class="math inline">\(C\)</span> is measured in two time periods, and exposure in period 1 relates to exposure in period 2. (For example, if a child is poor, he is more likely to be poor as an adult.) We are primarily interested in whether or not <span class="math inline">\(X\)</span> (trauma) causes <span class="math inline">\(Y\)</span> (substance use). The difficulty is that <span class="math inline">\(X\)</span> and <span class="math inline">\(C_2\)</span> are related, as are <span class="math inline">\(C_2\)</span> and <span class="math inline">\(Y\)</span>.</p>
 <p>I suggest that in order to fully understand the effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span>, we cannot control for <span class="math inline">\(C_2\)</span>, as tempting as it might be. The intuition is that part of the effect of <span class="math inline">\(X\)</span> on <span class="math inline">\(Y\)</span> is due to the fact that <span class="math inline">\(X\)</span> has an effect on <span class="math inline">\(C_2\)</span>, at least for some individuals. <em>If we control for <span class="math inline">\(C_2\)</span>, we are actually removing a key component of the causal mechanism.</em> Below in is the data generating process - a few things to note: (1) <span class="math inline">\(C_2\)</span> has potential outcomes based on the exposure <span class="math inline">\(X\)</span>. (2) We have restricted the potential outcome <span class="math inline">\(C_{21}\)</span> to be set to 1 if <span class="math inline">\(C_{20}\)</span> is 1. For example, if someone would have been poor in adulthood <em>without</em> exposure to trauma, we assume that they also would have been poor in adulthood had they been exposed to trauma. (3) The potential outcome for <span class="math inline">\(Y\)</span> is dependent on the relevant potential outcome for <span class="math inline">\(C_2\)</span>. That is <span class="math inline">\(Y_0\)</span> depends on <span class="math inline">\(C_{20}\)</span> and <span class="math inline">\(Y_1\)</span> depends on <span class="math inline">\(C_{21}\)</span>.</p>
-<pre><code>##     varname                  formula variance      dist     link
-##  1:      C1                     0.25        0    binary identity
-##  2:       X            -2 + 0.8 * C1        0    binary    logit
-##  3:    C2.0            -2.0 + 1 * C1        0    binary    logit
-##  4:   C2.1x            -1.5 + 1 * C1        0    binary    logit
-##  5:    C2.1        pmax(C2.0, C2.1x)        0 nonrandom identity
-##  6:       e                        0        4    normal identity
-##  7:      Y0          -3 + 5*C2.0 + e        0 nonrandom identity
-##  8:      Y1           0 + 5*C2.1 + e        0 nonrandom identity
-##  9:  C2_obs C2.0 + (C2.1 - C2.0) * X        0 nonrandom identity
-## 10:   Y_obs       Y0 + (Y1 - Y0) * X        0 nonrandom identity</code></pre>
+<pre class="r"><code>def2 &lt;- defData(varname = &quot;C1&quot;, formula = .25, dist = &quot;binary&quot;)
+def2 &lt;- defData(def2, &quot;X&quot;, formula = &quot;-2 + 0.8 * C1&quot;, dist = &quot;binary&quot;, link = &quot;logit&quot;)
+def2 &lt;- defData(def2, &quot;C2.0&quot;, formula = &quot;-2.0 + 1 * C1&quot;, dist = &quot;binary&quot;, link = &quot;logit&quot;)
+def2 &lt;- defData(def2, &quot;C2.1x&quot;, formula = &quot;-1.5 + 1 * C1&quot;, dist = &quot;binary&quot;, link = &quot;logit&quot;)
+def2 &lt;- defData(def2, &quot;C2.1&quot;, formula = &quot;pmax(C2.0, C2.1x)&quot;, dist = &quot;nonrandom&quot;)
+def2 &lt;- defData(def2, &quot;e&quot;, formula = 0, variance = 4, dist = &quot;normal&quot;)
+def2 &lt;- defData(def2, &quot;Y0&quot;, formula = &quot;-3 + 5*C2.0 + e&quot;, dist = &quot;nonrandom&quot;)
+def2 &lt;- defData(def2, &quot;Y1&quot;, formula = &quot;0 + 5*C2.1 + e&quot;, dist = &quot;nonrandom&quot;)
+def2 &lt;- defData(def2, &quot;C2_obs&quot;, formula = &quot;C2.0 + (C2.1 - C2.0) * X&quot;, dist = &quot;nonrandom&quot;)
+def2 &lt;- defData(def2, &quot;Y_obs&quot;, formula = &quot;Y0 + (Y1 - Y0) * X&quot;, dist = &quot;nonrandom&quot;)</code></pre>
 <pre class="r"><code>set.seed(25)
 dt &lt;- genData(5000, def2)</code></pre>
 <p>Here is the true average causal effect, based on information we will never know:</p>
@@ -91,18 +95,22 @@ dt &lt;- genData(5000, def2)</code></pre>
 <p>Here is the inappropriate model that adjusts for <span class="math inline">\(C_2\)</span>:</p>
 <pre class="r"><code>lm2a &lt;- lm( Y_obs ~ C1 + C2_obs + X , data = dt)
 tidy(lm2a)</code></pre>
-<pre><code>##          term    estimate  std.error   statistic       p.value
-## 1 (Intercept) -3.01360235 0.03481082 -86.5708464  0.000000e+00
-## 2          C1 -0.02078171 0.06765129  -0.3071887  7.587126e-01
-## 3      C2_obs  4.92972384 0.07625838  64.6450138  0.000000e+00
-## 4           X  3.04600204 0.08114223  37.5390478 6.677416e-272</code></pre>
+<pre><code>## # A tibble: 4 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)  -3.01      0.0348   -86.6   0.       
+## 2 C1           -0.0208    0.0677    -0.307 7.59e-  1
+## 3 C2_obs        4.93      0.0763    64.6   0.       
+## 4 X             3.05      0.0811    37.5   6.68e-272</code></pre>
 <p>The estimate for the coefficient of <span class="math inline">\(X\)</span> is 3.0, just as anticipated. Here now is the correct model, and you will see that we recover the true causal effect in the coefficient estimate of <span class="math inline">\(X\)</span> (or at least, we get much, much closer):</p>
 <pre class="r"><code>lm2b &lt;- lm( Y_obs ~ C1 + X , data = dt)
 tidy(lm2b)</code></pre>
-<pre><code>##          term   estimate  std.error statistic       p.value
-## 1 (Intercept) -2.4886726 0.04586832 -54.25689  0.000000e+00
-## 2          C1  0.9665413 0.08930265  10.82321  5.315059e-27
-## 3           X  3.9377832 0.10834926  36.34343 7.868650e-257</code></pre>
+<pre><code>## # A tibble: 3 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)   -2.49     0.0459     -54.3 0.       
+## 2 C1             0.967    0.0893      10.8 5.32e- 27
+## 3 X              3.94     0.108       36.3 7.87e-257</code></pre>
 <p>Of course, in the real world, we don’t know the underlying data generating process or the true DAG. And what I have described here is a gross oversimplification of the underlying relationships, and have indeed left out many other factors that likely affect the relationship between childhood trauma and adult substance use. Other measures, such as parental substance use, may be related to both childhood trauma and adult substance use, and may affect poverty in the two time periods in different, complicated ways.</p>
 <p>But the point is that one should give careful thought to what gets included in a model. We may not want to throw everything we measure into the model. Be careful.</p>
 </div>

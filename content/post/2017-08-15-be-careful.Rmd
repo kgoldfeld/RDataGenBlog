@@ -25,9 +25,7 @@ In the real world, we only observe one potential outcome - the one associated wi
 
 Here's a relatively straightforward example. Let's say we are interested in understanding if some measure $X$ causes an outcome $Y$, where there is a common cause $C$ (the diagram is called a DAG - a directed acyclic graph - and is useful for many things, including laying out data generating process):
 
-```{r, out.width = "300px", echo = FALSE}
-knitr::include_graphics("/img/post-careful/SimpleCausal.png")
-```
+![](/img/post-careful/SimpleCausal.png){width=40%}
 
 ```{r}
 library(broom)
@@ -80,15 +78,13 @@ tidy(lm2)
 
 Now, we are ready to see what happens in a slightly more complicated setting that is defined by this DAG:
 
-```{r, out.width = "400px", echo = FALSE}
-knitr::include_graphics("/img/post-careful/ComplexCausal.png")
-```
+![](/img/post-careful/ComplexCausal.png){width=40%}
 
 In this example $C$ is measured in two time periods, and exposure in period 1 relates to exposure in period 2. (For example, if a child is poor, he is more likely to be poor as an adult.) We are primarily interested in whether or not $X$ (trauma) causes $Y$ (substance use). The difficulty is that $X$ and $C_2$ are related, as are $C_2$ and $Y$.
 
 I suggest that in order to fully understand the effect of $X$ on $Y$, we cannot control for $C_2$, as tempting as it might be. The intuition is that part of the effect of $X$ on $Y$ is due to the fact that $X$ has an effect on $C_2$, at least for some individuals. *If we control for $C_2$, we are actually removing a key component of the causal mechanism.* Below in is the data generating process - a few things to note: (1) $C_2$ has potential outcomes based on the exposure $X$. (2) We have restricted the potential outcome $C_{21}$ to be set to 1 if $C_{20}$ is 1. For example, if someone would have been poor in adulthood *without* exposure to trauma, we assume that they also would have been poor in adulthood had they been exposed to trauma. (3) The potential outcome for $Y$ is dependent on the relevant potential outcome for $C_2$. That is $Y_0$ depends on $C_{20}$ and $Y_1$ depends on $C_{21}$.
 
-```{r, echo = FALSE}
+```{r, echo = TRUE}
 def2 <- defData(varname = "C1", formula = .25, dist = "binary")
 def2 <- defData(def2, "X", formula = "-2 + 0.8 * C1", dist = "binary", link = "logit")
 def2 <- defData(def2, "C2.0", formula = "-2.0 + 1 * C1", dist = "binary", link = "logit")
@@ -99,7 +95,6 @@ def2 <- defData(def2, "Y0", formula = "-3 + 5*C2.0 + e", dist = "nonrandom")
 def2 <- defData(def2, "Y1", formula = "0 + 5*C2.1 + e", dist = "nonrandom")
 def2 <- defData(def2, "C2_obs", formula = "C2.0 + (C2.1 - C2.0) * X", dist = "nonrandom")
 def2 <- defData(def2, "Y_obs", formula = "Y0 + (Y1 - Y0) * X", dist = "nonrandom")
-def2
 ```
 
 ```{r}
