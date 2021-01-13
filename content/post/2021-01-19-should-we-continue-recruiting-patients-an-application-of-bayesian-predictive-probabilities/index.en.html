@@ -1,0 +1,182 @@
+---
+title: "Finding answers faster for COVID-19: applying Bayesian predictive probabilities"
+author: Keith Goldfeld
+date: '2021-01-19'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - slurm
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, we need to be able to make recommendations as quickly as possible. There really is no time to waste. In the <a href="https://bit.ly/3qhY2f5" target="_blank">COMPILE</a> study, a prospective individual patient data meta-analysis, the Data &amp; Safety Monitoring Board (DSMB) recognizes that, and is regularly monitoring the data to determine if there is a sufficiently strong signal indicating effectiveness of convalescent plasma (CP) for patients hospitalized (but not on ventilation).</p>
+<p>But, how much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the COMPILE meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, our meta-analysis data set will be complete. Before that end-point, the DSMB analysis may indicate that while there is a high probability that CP is effective it does not meet the threshold of 95%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us past the threshold for recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results.</p>
+<p>Predicting the probability of success (or futility) is based on the most recent information collected from the study - including observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). My aim here is to provide a relatively (but not too) simple example using a simulated data set to show how this prediction can be made.</p>
+<div id="determining-success" class="section level2">
+<h2>Determining success</h2>
+<p>The outcome for this analysis is the WHO 11-point ordinal scale for clinical status at 14 days, which ranges from 0 (uninfected and out of the hospital) to 10 (dead), with various stages of severity in between. We are using Bayesian proportional odds model to assess the effectiveness of CP. The measure of effectiveness is an odds ratio (OR) that compares the cumulative odds of having a worse outcome for the treated group compared to the cumulative odds for the control group:</p>
+<p><span class="math display">\[
+\text{Cumulative odds for level } k =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}
+\]</span></p>
+<p>The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where <span class="math inline">\(OR \lt 1\)</span>. In a Bayesian context we estimate the posterior probability distribution of the <span class="math inline">\(OR\)</span> (based on prior assumptions about the distribution before we collected any data). We will recommend the therapy in the case that most of the probability distribution lies to the left of 1; in particular we will claim success only when <span class="math inline">\(P(OR \lt 1) &gt; 0.95\)</span>. For example, this posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+</div>
+<div id="data-set" class="section level2">
+<h2>Data set</h2>
+<p>This data set is much simpler then the COMPILE data that has motivated all of this. Rather than structuring this as a multi-study data set, I am assuming a rather simple two-arm design without any sort of clustering. I am including two binary covariates related to sex and age. The treatment in this case reduces the odds of worse outcomes (or increases the odds of better outcomes). For more detailed discussion of generating ordinal outcomes, see this earlier <a href="https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/" target="_blank">post</a> (but note that I have flipped direction of the sign in the odds formula).</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+
+def1 &lt;- defDataAdd(varname=&quot;male&quot;, formula=&quot;0.7&quot;, dist = &quot;binary&quot;)
+def1 &lt;- defDataAdd(def1, varname=&quot;over69&quot;, formula=&quot;0.6&quot;, dist = &quot;binary&quot;)
+def1 &lt;- defDataAdd(def1, 
+  varname=&quot;z&quot;, formula=&quot;0.2*male + 0.3*over69 - 0.3*rx&quot;, dist = &quot;nonrandom&quot;)
+
+baseprobs &lt;-  c(0.10, 0.15, 0.08, 0.07, 0.08, 0.08, 0.11, 0.10, 0.09, 0.08, 0.06)
+
+RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(9121173)
+
+dd &lt;- genData(450)
+dd &lt;- trtAssign(dd, nTrt = 2, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(def1, dd)
+dd &lt;- genOrdCat(dd, adjVar = &quot;z&quot;, baseprobs = baseprobs, catVar = &quot;y&quot;)</code></pre>
+<p>Here is a plot of the cumulative proportions by treatment arm for the first 450 patients in the trial. The treatment arm has more patients with lower WHO-11 scores, so for the most part lies above the control arm line. (This may be a little counter-intuitive, so it may be worthwhile to think about it for a moment.)</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+</div>
+<div id="estimate-a-bayes-ordinal-cumulative-model" class="section level2">
+<h2>Estimate a Bayes ordinal cumulative model</h2>
+<pre class="r"><code>library(cmdstanr)
+
+dt_to_list &lt;- function(dx) {
+  
+  N &lt;- nrow(dx)                               ## number of observations 
+  L &lt;- dx[, length(unique(y))]                ## number of levels of outcome 
+  y &lt;- as.numeric(dx$y)                       ## individual outcome 
+  rx &lt;- dx$rx                                 ## treatment arm for individual 
+  x &lt;- model.matrix(y ~ factor(male) + factor(over69), data = dx)[, -1]
+  D &lt;- ncol(x)
+  
+  list(N=N, L=L, y=y, rx=rx, x=x, D=D)
+}
+
+mod &lt;- cmdstan_model(&quot;pprob.stan&quot;)
+
+fit &lt;- mod$sample(
+  data = dt_to_list(dd),
+  seed = 271263,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 2000,
+  iter_sampling = 2500,
+  step_size = 0.1
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 4 finished in 58.7 seconds.
+## Chain 1 finished in 59.3 seconds.
+## Chain 3 finished in 59.9 seconds.
+## Chain 2 finished in 62.8 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 60.2 seconds.
+## Total execution time: 63.3 seconds.</code></pre>
+</div>
+<div id="extract-posterior-distribution" class="section level2">
+<h2>Extract posterior distribution</h2>
+<pre class="r"><code>library(posterior)
+library(bayesplot)
+
+fit$summary(variables = c(&quot;beta&quot;,&quot;delta&quot;, &quot;tau&quot;, &quot;OR&quot;))</code></pre>
+<pre><code>## # A tibble: 14 x 10
+##    variable   mean median    sd   mad      q5     q95  rhat ess_bulk ess_tail
+##    &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;   &lt;dbl&gt;   &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+##  1 beta[1]   0.378  0.378 0.178 0.178  0.0845  0.673   1.00   10979.    7845.
+##  2 beta[2]   0.758  0.758 0.172 0.174  0.478   1.04    1.00   10665.    7646.
+##  3 delta    -0.203 -0.205 0.164 0.162 -0.475   0.0626  1.00    9985.    7454.
+##  4 tau[1]   -1.81  -1.81  0.235 0.233 -2.19   -1.42    1.00    6378.    6469.
+##  5 tau[2]   -0.725 -0.725 0.206 0.205 -1.06   -0.382   1.00    7295.    6767.
+##  6 tau[3]   -0.223 -0.226 0.204 0.203 -0.555   0.119   1.00    7502.    7128.
+##  7 tau[4]    0.131  0.128 0.203 0.202 -0.198   0.474   1.00    7506.    6859.
+##  8 tau[5]    0.521  0.518 0.204 0.203  0.191   0.870   1.00    7474.    6989.
+##  9 tau[6]    0.890  0.888 0.208 0.206  0.552   1.24    1.00    7581.    7338.
+## 10 tau[7]    1.36   1.36  0.214 0.212  1.01    1.72    1.00    7458.    7237.
+## 11 tau[8]    2.08   2.08  0.226 0.226  1.72    2.46    1.00    7600.    7269.
+## 12 tau[9]    2.64   2.63  0.240 0.239  2.25    3.04    1.00    8253.    7706.
+## 13 tau[10]   3.49   3.48  0.279 0.278  3.04    3.96    1.00    9208.    7776.
+## 14 OR        0.827  0.815 0.136 0.131  0.622   1.06    1.00    9985.    7454.</code></pre>
+<pre class="r"><code>draws_df &lt;- as_draws_df(fit$draws())
+draws_dt &lt;- data.table(draws_df[-grep(&quot;^yhat&quot;, colnames(draws_df))])
+
+mean(draws_dt[, OR &lt; 1])</code></pre>
+<pre><code>## [1] 0.8915</code></pre>
+</div>
+<div id="add-future-data" class="section level2">
+<h2>Add future data</h2>
+<pre class="r"><code>library(glue)
+
+dd_new &lt;- dd[, .(id = sample(id, 25, replace = TRUE)), keyby = rx]
+dd_new &lt;- merge(dd[, .(id, male, over69)], dd_new, by = &quot;id&quot;)
+dd_new[, id:= (nrow(dd) + 1):(nrow(dd) +.N)]
+
+draw &lt;- as.data.frame(draws_dt[sample(.N, 1)])
+
+D &lt;- dt_to_list(dd)$D
+beta &lt;- as.vector(x = draw[, glue(&quot;beta[{1:D}]&quot;)], mode = &quot;numeric&quot;)
+delta &lt;- draw$delta
+coefs &lt;- as.matrix(c(beta, delta))
+
+tau &lt;- as.vector(draw[grep(&quot;^tau&quot;, colnames(draw))], mode = &quot;numeric&quot;)
+tau &lt;- c(tau, Inf)
+cprop &lt;- plogis(tau)
+xprop &lt;- diff(cprop)
+baseline &lt;- c(cprop[1], xprop) 
+
+zmat &lt;- model.matrix(~male + over69 + rx, data = dd_new)[, -1]
+dd_new$z &lt;- zmat %*% coefs
+setkey(dd_new, id)
+
+dd_new &lt;- genOrdCat(dd_new, adjVar = &quot;z&quot;, baseline, catVar = &quot;y&quot;)
+
+dx &lt;- rbind(dd, dd_new)</code></pre>
+</div>
+<div id="estimate-model-with-current-and-simulated-future-data" class="section level2">
+<h2>Estimate model with current and simulated future data</h2>
+<pre class="r"><code>fit_pp &lt;- mod$sample(
+  data = dt_to_list(dx),
+  seed = 737163,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 2000,
+  iter_sampling = 2500,
+  step_size = 0.1
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 2 finished in 68.6 seconds.
+## Chain 4 finished in 68.6 seconds.
+## Chain 3 finished in 68.9 seconds.
+## Chain 1 finished in 69.4 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 68.9 seconds.
+## Total execution time: 69.4 seconds.</code></pre>
+<pre class="r"><code>draws_pp &lt;- data.table(as_draws_df(fit_pp$draws()))
+draws_pp[, mean(OR &lt; 1)]</code></pre>
+<pre><code>## [1] 0.7852</code></pre>
+<pre class="r"><code>library(slurmR)</code></pre>
+</div>

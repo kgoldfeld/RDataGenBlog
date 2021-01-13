@@ -1,0 +1,199 @@
+---
+title: "Finding answers faster for COVID-19: applying Bayesian predictive probabilities"
+author: Keith Goldfeld
+date: '2021-01-19'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - slurm
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, we need to be able to make recommendations as quickly as possible. There really is no time to waste. In the [COMPILE](https://bit.ly/3qhY2f5){target="_blank"} study, a prospective individual patient data meta-analysis, the Data & Safety Monitoring Board (DSMB) recognizes that, and is regularly monitoring the data to determine if there is a sufficiently strong signal indicating effectiveness of convalescent plasma (CP) for patients hospitalized (but not on ventilation).
+
+But, how much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the COMPILE meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, our meta-analysis data set will be complete. Before that end-point, the DSMB analysis may indicate that while there is a high probability that CP is effective it does not meet the threshold of 95\%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us past the threshold for recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results.
+
+Predicting the probability of success (or futility) is based on the most recent information collected from the study - including observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). My aim here is to provide a relatively (but not too) simple example using a simulated data set to show how this prediction can be made.
+
+## Determining success
+
+The outcome for this analysis is the WHO 11-point ordinal scale for clinical status at 14 days, which ranges from 0 (uninfected and out of the hospital) to 10 (dead), with various stages of severity in between. We are using Bayesian proportional odds model to assess the effectiveness of CP. The measure of effectiveness is an odds ratio (OR) that compares the cumulative odds of having a worse outcome for the treated group compared to the cumulative odds for the control group:
+
+$$
+\text{Cumulative odds for level } k =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}
+$$
+
+The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where $OR \lt 1$. In a Bayesian context we estimate the posterior probability distribution of the $OR$ (based on prior assumptions about the distribution before we collected any data). We will recommend the therapy in the case that most of the probability distribution lies to the left of 1; in particular we will claim success only when $P(OR \lt 1) > 0.95$. For example, this posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:
+
+```{r, echo=FALSE, fig.height = 3.5, message=FALSE, warning=FALSE}
+library(distributional)
+library(ggdist)
+
+dd <- data.table(
+  group = c("successful", "not successful"),
+  mean = c(-.35, -.2),
+  sd = c(0.2, 0.2)
+)
+
+ggplot(dd)+
+  aes(
+    y = group, 
+    dist = dist_transformed(dist_normal(mean, sd), exp, log), 
+    fill=stat(x < 1)
+  ) +
+  stat_dist_slab(n=1001) +
+  scale_fill_manual(values = c("grey80", "skyblue")) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none",
+        axis.title.y = element_blank()) +
+  xlab("posterior distribution of OR")
+```
+
+## Data set
+
+This data set is much simpler then the COMPILE data that has motivated all of this. Rather than structuring this as a multi-study data set, I am assuming a rather simple two-arm design without any sort of clustering. I am including two binary covariates related to sex and age. The treatment in this case reduces the odds of worse outcomes (or increases the odds of better outcomes). For more detailed discussion of generating ordinal outcomes, see this earlier [post](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/){target="_blank"} (but note that I have flipped direction of the sign in the odds formula).
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(data.table)
+
+def1 <- defDataAdd(varname="male", formula="0.7", dist = "binary")
+def1 <- defDataAdd(def1, varname="over69", formula="0.6", dist = "binary")
+def1 <- defDataAdd(def1, 
+  varname="z", formula="0.2*male + 0.3*over69 - 0.3*rx", dist = "nonrandom")
+
+baseprobs <-  c(0.10, 0.15, 0.08, 0.07, 0.08, 0.08, 0.11, 0.10, 0.09, 0.08, 0.06)
+
+RNGkind("L'Ecuyer-CMRG")
+set.seed(9121173)
+
+dd <- genData(450)
+dd <- trtAssign(dd, nTrt = 2, grpName = "rx")
+dd <- addColumns(def1, dd)
+dd <- genOrdCat(dd, adjVar = "z", baseprobs = baseprobs, catVar = "y")
+```
+
+Here is a plot of the cumulative proportions by treatment arm for the first 450 patients in the trial. The treatment arm has more patients with lower WHO-11 scores, so for the most part lies above the control arm line. (This may be a little counter-intuitive, so it may be worthwhile to think about it for a moment.)
+
+```{r, fig.height = 3.5, echo=FALSE}
+sumdd <- dd[, .N, keyby = .(rx, y)]
+sumdd[, prop := N/sum(N), keyby =  .(rx)]
+sumdd[, cumprop := cumsum(prop), keyby = .(rx)]
+
+ggplot(data = sumdd, aes(x = factor(y, labels = 0:10), y = cumprop)) +
+  geom_line(aes(group = rx, 
+     color = factor(rx, labels = c("Control", "Treatment"))), size = 1) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+  scale_color_manual(values = c("red", "black"), 
+                     guide = guide_legend(reverse = TRUE)) +
+  ylab("Cumulative proportion") +
+  xlab("Health status")
+```
+
+## Estimate a Bayes ordinal cumulative model
+
+```{r, message = FALSE, warning=FALSE}
+library(cmdstanr)
+
+dt_to_list <- function(dx) {
+  
+  N <- nrow(dx)                               ## number of observations 
+  L <- dx[, length(unique(y))]                ## number of levels of outcome 
+  y <- as.numeric(dx$y)                       ## individual outcome 
+  rx <- dx$rx                                 ## treatment arm for individual 
+  x <- model.matrix(y ~ factor(male) + factor(over69), data = dx)[, -1]
+  D <- ncol(x)
+  
+  list(N=N, L=L, y=y, rx=rx, x=x, D=D)
+}
+
+mod <- cmdstan_model("pprob.stan")
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  seed = 271263,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 2000,
+  iter_sampling = 2500,
+  step_size = 0.1
+)
+```
+
+## Extract posterior distribution
+
+```{r, message=FALSE, warning=FALSE}
+library(posterior)
+library(bayesplot)
+
+fit$summary(variables = c("beta","delta", "tau", "OR"))
+
+draws_df <- as_draws_df(fit$draws())
+draws_dt <- data.table(draws_df[-grep("^yhat", colnames(draws_df))])
+
+mean(draws_dt[, OR < 1])
+```
+
+## Add future data
+
+```{r, message = FALSE, warning=FALSE}
+library(glue)
+
+dd_new <- dd[, .(id = sample(id, 25, replace = TRUE)), keyby = rx]
+dd_new <- merge(dd[, .(id, male, over69)], dd_new, by = "id")
+dd_new[, id:= (nrow(dd) + 1):(nrow(dd) +.N)]
+
+draw <- as.data.frame(draws_dt[sample(.N, 1)])
+
+D <- dt_to_list(dd)$D
+beta <- as.vector(x = draw[, glue("beta[{1:D}]")], mode = "numeric")
+delta <- draw$delta
+coefs <- as.matrix(c(beta, delta))
+
+tau <- as.vector(draw[grep("^tau", colnames(draw))], mode = "numeric")
+tau <- c(tau, Inf)
+cprop <- plogis(tau)
+xprop <- diff(cprop)
+baseline <- c(cprop[1], xprop) 
+
+zmat <- model.matrix(~male + over69 + rx, data = dd_new)[, -1]
+dd_new$z <- zmat %*% coefs
+setkey(dd_new, id)
+
+dd_new <- genOrdCat(dd_new, adjVar = "z", baseline, catVar = "y")
+
+dx <- rbind(dd, dd_new)
+```
+
+## Estimate model with current and simulated future data
+
+```{r, message=FALSE, warning=FALSE}
+fit_pp <- mod$sample(
+  data = dt_to_list(dx),
+  seed = 737163,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 2000,
+  iter_sampling = 2500,
+  step_size = 0.1
+)
+
+draws_pp <- data.table(as_draws_df(fit_pp$draws()))
+draws_pp[, mean(OR < 1)]
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(slurmR)
+```
