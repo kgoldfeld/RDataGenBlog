@@ -18,21 +18,21 @@ output:
 draft: true
 ---
 
-As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, we need to be able to make recommendations as quickly as possible. There really is no time to waste. In the [COMPILE](https://bit.ly/3qhY2f5){target="_blank"} study, a prospective individual patient data meta-analysis, the Data & Safety Monitoring Board (DSMB) recognizes that, and is regularly monitoring the data to determine if there is a sufficiently strong signal indicating effectiveness of convalescent plasma (CP) for patients hospitalized (but not on ventilation).
+As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, we need to be able to make recommendations as quickly as possible. There really is no time to lose. In the [COMPILE](https://bit.ly/3qhY2f5){target="_blank"} study, a prospective individual patient data meta-analysis, the Data & Safety Monitoring Board (DSMB) recognizes this, and is regularly monitoring the data to determine if there is a sufficiently strong signal indicating effectiveness of convalescent plasma (CP) for hospitalized patients not on ventilation.
 
-But, how much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the COMPILE meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, our meta-analysis data set will be complete. Before that end-point, the DSMB analysis may indicate that while there is a high probability that CP is effective it does not meet the threshold of 95\%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us past the threshold for recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results.
+How much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the COMPILE meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, our meta-analysis data set will be complete. Before that end-point, an interim DSMB analysis might indicate there is a high probability that CP is effective although it does not meet the threshold of 95\%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us past the threshold for recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results before drawing any conclusions.
 
-Predicting the probability of success (or futility) is based on the most recent information collected from the study - including observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). My aim here is to provide a relatively (but not too) simple example using a simulated data set to show how this prediction can be made.
+Predicting the probability of success (or futility) is based on the most recent information collected from the study - including observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). This post provides an example using a simulated data set to show how this prediction can be made.
 
 ## Determining success
 
-The outcome for this analysis is the WHO 11-point ordinal scale for clinical status at 14 days, which ranges from 0 (uninfected and out of the hospital) to 10 (dead), with various stages of severity in between. We are using Bayesian proportional odds model to assess the effectiveness of CP. The measure of effectiveness is an odds ratio (OR) that compares the cumulative odds of having a worse outcome for the treated group compared to the cumulative odds for the control group:
+In this example, the outcome is the WHO 11-point ordinal scale for clinical status at 14 days, which ranges from 0 (uninfected and out of the hospital) to 10 (dead), with various stages of severity in between. As in COMPILE, I'll use a Bayesian proportional odds model to assess the effectiveness of CP. The measure of effectiveness is an odds ratio (OR) that compares the cumulative odds of having a worse outcome for the treated group compared to the cumulative odds for the control group:
 
 $$
-\text{Cumulative odds for level } k =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}
+\text{Cumulative odds for level } k \text{ in treatment arm } j =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}, \ k \in {1,\dots, 10}
 $$
 
-The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where $OR \lt 1$. In a Bayesian context we estimate the posterior probability distribution of the $OR$ (based on prior assumptions about the distribution before we collected any data). We will recommend the therapy in the case that most of the probability distribution lies to the left of 1; in particular we will claim success only when $P(OR \lt 1) > 0.95$. For example, this posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:
+The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where $OR \lt 1$. In a Bayesian context, we estimate the posterior probability distribution of the $OR$ (based on prior assumptions about the distribution before we collected any data). We will recommend the therapy in the case that most of the probability distribution lies to the left of 1; in particular we will claim success only when $P(OR \lt 1) > 0.95$. For example, in the figure the posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:
 
 ```{r, echo=FALSE, fig.height = 3.5, message=FALSE, warning=FALSE}
 library(distributional)
@@ -60,7 +60,7 @@ ggplot(dd)+
 
 ## Data set
 
-This data set is much simpler then the COMPILE data that has motivated all of this. Rather than structuring this as a multi-study data set, I am assuming a rather simple two-arm design without any sort of clustering. I am including two binary covariates related to sex and age. The treatment in this case reduces the odds of worse outcomes (or increases the odds of better outcomes). For more detailed discussion of generating ordinal outcomes, see this earlier [post](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/){target="_blank"} (but note that I have flipped direction of the sign in the odds formula).
+This data set here is considerably simpler than the COMPILE data that has motivated all of this. Rather than structuring this example as a multi-study data set, I am assuming a rather simple two-arm design without any sort of clustering. I am including two binary covariates related to sex and age. The treatment in this case reduces the odds of worse outcomes (or increases the odds of better outcomes). For more detailed discussion of generating ordinal outcomes, see this earlier [post](https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/){target="_blank"} (but note that I have flipped direction of cumulative probability in the odds formula).
 
 ```{r, message=FALSE, warning=FALSE}
 library(simstudy)
@@ -94,13 +94,23 @@ ggplot(data = sumdd, aes(x = factor(y, labels = 0:10), y = cumprop)) +
      color = factor(rx, labels = c("Control", "Treatment"))), size = 1) +
   theme(panel.grid = element_blank(),
         legend.title = element_blank()) +
-  scale_color_manual(values = c("red", "black"), 
+  scale_color_manual(values = c("#ebd687", "#eb879c"), 
                      guide = guide_legend(reverse = TRUE)) +
   ylab("Cumulative proportion") +
   xlab("Health status")
 ```
 
 ## Estimate a Bayes ordinal cumulative model
+
+With the data from 450 patients in hand, the first step is to estimate a Bayesian proportional odds model, which I am doing in `Stan`. I use the package `cmdstanr` to interface between `R` and `Stan`.
+
+Here is the model we are using:
+
+$$
+\text{logit}\left(P(y_{i}) \ge k \right) = \tau_k + \beta_1 I(\text{male}) + \beta_2 I(\text{over69}) + \delta T_i, \ \ \ k \in \{ 1,\dots,10 \}
+$$
+
+where $T_i$ is the treatment indicator for patient $i$, and $T_i = 1$ when patient $i$ receives CP. I've included the Stan code for the model in the the first <a href="#addendumA">addendum</a>.
 
 ```{r, message = FALSE, warning=FALSE}
 library(cmdstanr)
@@ -133,11 +143,10 @@ fit <- mod$sample(
 
 ## Extract posterior distribution
 
+Once the model is fit, our primary interest is whether we can make a recommendation about the therapy. A quick check to verify if $P(OR < 1) > 0.95$ confirms that we are not there yet.
+
 ```{r, message=FALSE, warning=FALSE}
 library(posterior)
-library(bayesplot)
-
-fit$summary(variables = c("beta","delta", "tau", "OR"))
 
 draws_df <- as_draws_df(fit$draws())
 draws_dt <- data.table(draws_df[-grep("^yhat", colnames(draws_df))])
@@ -145,7 +154,40 @@ draws_dt <- data.table(draws_df[-grep("^yhat", colnames(draws_df))])
 mean(draws_dt[, OR < 1])
 ```
 
-## Add future data
+A visual showing the bottom 95\% portion of the density in blue makes it clear that the threshold has not been met:
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height = 3}
+ggplot(data = draws_dt) +
+  aes(x = OR,
+      fill=stat(x < quantile(draws_dt$OR, 0.95))
+  ) +
+  geom_vline(xintercept = 1, color = "white") +
+  stat_slab() +
+  scale_fill_manual(values = c("grey80", "skyblue")) +
+  theme(legend.position = "none",
+        panel.grid = element_blank()) +
+  scale_x_continuous(limits = c(0.4, 1.5), breaks = seq(0.25, 1.5, .25))
+
+```
+
+## The elements of the predictive probability
+
+We have collected complete data from 450 patients out of an expect 500, and we are not yet ready declare success. An interesting question to ask at this point is "*given what we have observed up until this point, what is the probability that we will declare success after 50 more patients?*" If the probability is sufficiently high, we may decide to delay releasing the inconclusive results pending the updated data set. (On the other hand, if the probability is quite low, there may be no point in delaying.)
+
+The prediction incorporates three potential sources of uncertainty. First, there is the uncertainty regarding the parameters, which is described by the posterior distribution. Second, even if we knew the parameters with certainty, the outcome remains stochastic (i.e. not pre-determined conditional on the parameters). Finally, we don't necessarily know the characteristics of the remaining patients (though we may have some or all of that information if recruitment has been completed but complete follow-up has not).
+
+In the algorithm that follows - the steps follow from these three elements of uncertainty:
+
+1. Generate 50 new patients by bootstrap sampling (with replacement) from the observed patients. The distribution of covariates of the new 50 patients will be based on the original 450 patients.
+2. Make a single draw from the posterior distribution of our estimates to generate a set of parameters.
+3. Using the combination of new patients and parameters, generate ordinal outcomes for each of the 50 patients.
+4. Combine this new data set with the 450 existing patients to create a single analytic file.
+5. Fit a new Bayesian model with the 500-patient data set.
+6. Record $P(OR < 1)$ based on this new posterior distribution. If $P(OR < 1)$ is $\gt 95\%$, we consider the result to be a  "success", otherwise, it is "not a success".
+
+We repeat this cycle, say 1000 times. *The proportion of cycles that are counted as a success represents the predictive probability of success*.
+
+#### Step 1: new patients
 
 ```{r, message = FALSE, warning=FALSE}
 library(glue)
@@ -153,6 +195,11 @@ library(glue)
 dd_new <- dd[, .(id = sample(id, 25, replace = TRUE)), keyby = rx]
 dd_new <- merge(dd[, .(id, male, over69)], dd_new, by = "id")
 dd_new[, id:= (nrow(dd) + 1):(nrow(dd) +.N)]
+```
+
+#### Step 2: draw set of parameters
+
+```{r}
 
 draw <- as.data.frame(draws_dt[sample(.N, 1)])
 
@@ -166,17 +213,25 @@ tau <- c(tau, Inf)
 cprop <- plogis(tau)
 xprop <- diff(cprop)
 baseline <- c(cprop[1], xprop) 
+```
 
+#### Step 3: generate outcome
+
+```{r}
 zmat <- model.matrix(~male + over69 + rx, data = dd_new)[, -1]
 dd_new$z <- zmat %*% coefs
 setkey(dd_new, id)
 
 dd_new <- genOrdCat(dd_new, adjVar = "z", baseline, catVar = "y")
+```
 
+#### Step 4: combine new with existing
+
+```{r}
 dx <- rbind(dd, dd_new)
 ```
 
-## Estimate model with current and simulated future data
+#### Step 5: fit model
 
 ```{r, message=FALSE, warning=FALSE}
 fit_pp <- mod$sample(
@@ -189,11 +244,141 @@ fit_pp <- mod$sample(
   iter_sampling = 2500,
   step_size = 0.1
 )
+```
 
+#### Step 6: assess success for single iteration
+
+```{r}
 draws_pp <- data.table(as_draws_df(fit_pp$draws()))
 draws_pp[, mean(OR < 1)]
 ```
 
-```{r, message=FALSE, warning=FALSE}
+##  Estimating the predictive probability
+
+The next step is to put all of these elements in a single function that we can call repeatedly. We can estimate the predictive probability of success by calculating the proportion of iterations that resulted in a success. If we iterate 1000 times, this means we need to fit 1000 Bayesian models, and this could be prohibitive with standard computing resources; a high performance computing cluster may be necessary. (I touched on this [earlier](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} when I describe exploring the characteristic properties of Bayesian models.) I have provided the code below in the second  <a href="#addendumB">addendum</a> in case any readers are interested in trying to implement on an HPC.
+
+<a name="addendumA"></a>  
+
+\ 
+
+## Addendum A: stan code
+
+```{stan output.var='priors', eval = FALSE}
+data {
+  int<lower=0> N;                // number of observations
+  int<lower=2> L;                // number of WHO categories
+  int<lower=1,upper=L> y[N];     // vector of categorical outcomes
+  int<lower=0,upper=1> rx[N];    // treatment or control
+  int<lower=1> D;                // number of covariates
+  row_vector[D] x[N];            // matrix of covariates  N x D matrix
+}
+
+parameters {
+  
+  vector[D] beta;           // covariate estimates 
+  real delta;               // overall control effect
+  ordered[L-1] tau;         // cut-points for cumulative odds model ([L-1] vector)
+  
+}
+
+transformed parameters{ 
+  
+  vector[N] yhat;
+
+  for (i in 1:N){
+    yhat[i] = x[i] * beta + rx[i] * delta;
+  }
+}
+
+model {
+  
+  // priors
+  
+  beta ~ student_t(3, 0, 10);
+  delta ~ student_t(3, 0, 2);
+  tau ~ student_t(3, 0, 8);
+      
+  // outcome model
+  
+  for (i in 1:N)
+    y[i] ~ ordered_logistic(yhat[i], tau);
+}
+
+generated quantities {
+  real OR = exp(delta);
+}
+```
+
+<a name="addendumB"></a>  
+
+\ 
+
+## Appendix B: HPC code
+
+```{r, eval=FALSE, message=FALSE, warning=FALSE}
 library(slurmR)
+
+est_from_draw <- function(n_draw, Draws, dd_obs, D, s_model) {
+  
+  set_cmdstan_path(path = "/.../cmdstan/2.25.0")
+  
+  dd_new <- dd_obs[, .(id = sample(id, 125, replace = TRUE)), keyby = rx]
+  dd_new <- merge(dd_obs[, .(id, male, over69)], dd_new, by = "id")
+  dd_new[, id:= (nrow(dd_obs) + 1):(nrow(dd_obs) +.N)]
+  
+  draw <- as.data.frame(Draws[sample(.N, 1)])
+  
+  beta <- as.vector(x = draw[, glue("beta[{1:D}]")], mode = "numeric")
+  delta <- draw$delta
+  coefs <- as.matrix(c(beta, delta))
+  
+  tau <- as.vector(draw[grep("^tau", colnames(draw))], mode = "numeric")
+  tau <- c(tau, Inf)
+  cprop <- plogis(tau)
+  xprop <- diff(cprop)
+  baseline <- c(cprop[1], xprop) 
+  
+  zmat <- model.matrix(~male + over69 + rx, data = dd_new)[, -1]
+  dd_new$z <- zmat %*% coefs
+  setkey(dd_new, id)
+  
+  dd_new <- genOrdCat(dd_new, adjVar = "z", baseline, catVar = "y")
+  
+  dx <- rbind(dd_obs, dd_new)
+  
+  fit_pp <- s_model$sample(
+    data = dt_to_list(dx),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 2000,
+    iter_sampling = 2500,
+    step_size = 0.1
+  )
+  
+  draws_pp <- data.table(as_draws_df(fit_pp$draws()))
+  return(data.table(n_draw, prop_success = draws_pp[, mean(OR < 1)]))
+}
+
+job <- Slurm_lapply(
+  X = 1L:1080L, 
+  FUN = est_from_draw, 
+  Draws = draws_dt,
+  dd_obs = dd,
+  D = D,
+  s_model = mod,
+  njobs = 90L, 
+  mc.cores = 4L,
+  job_name = "i_pp",
+  tmp_path = "/.../scratch",
+  plan = "wait",
+  sbatch_opt = list(time = "03:00:00", partition = "cpu_short"),
+  export = c("dt_to_list"),
+  overwrite = TRUE
+)
+
+job
+res <- Slurm_collect(job)
+rbindlist(res)[, mean(prop_success >= 0.95)]
+
 ```
