@@ -1,5 +1,5 @@
 ---
-title: "Finding answers faster for COVID-19: applying Bayesian predictive probabilities"
+title: "Finding answers faster for COVID-19: an application of Bayesian predictive probabilities"
 author: Keith Goldfeld
 date: '2021-01-19'
 slug: []
@@ -18,21 +18,27 @@ output:
 draft: true
 ---
 
-As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, we need to be able to make recommendations as quickly as possible. There really is no time to lose. In the [COMPILE](https://bit.ly/3qhY2f5){target="_blank"} study, a prospective individual patient data meta-analysis, the Data & Safety Monitoring Board (DSMB) recognizes this, and is regularly monitoring the data to determine if there is a sufficiently strong signal indicating effectiveness of convalescent plasma (CP) for hospitalized patients not on ventilation.
+```{r, echo=FALSE}
+options(digits = 2)
+```
 
-How much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the COMPILE meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, our meta-analysis data set will be complete. Before that end-point, an interim DSMB analysis might indicate there is a high probability that CP is effective although it does not meet the threshold of 95\%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us past the threshold for recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results before drawing any conclusions.
+As we evaluate therapies for COVID-19 to help improve outcomes during the pandemic, researchers need to be able to make recommendations as quickly as possible. There really is no time to lose. The Data & Safety Monitoring Board (DSMB) of [COMPILE](https://bit.ly/3qhY2f5){target="_blank"}, a prospective individual patient data meta-analysis, recognizes this. They are regularly monitoring the data to determine as quickly as possible if there is a sufficiently strong signal to indicate effectiveness of convalescent plasma (CP) for hospitalized patients not on ventilation.
 
-Predicting the probability of success (or futility) is based on the most recent information collected from the study - including observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). This post provides an example using a simulated data set to show how this prediction can be made.
+How much data is enough to draw a conclusion? We know that at some point in the next few months, many if not all of the studies included in the meta-analysis will reach their target enrollment, and will stop recruiting new patients; at that point, the meta-analysis data set will be complete. Before that end-point, an interim DSMB analysis might indicate there is a high probability that CP is effective although it does not meet the pre-established threshold of 95\%. If we know the specific number of patients that will ultimately be included in the final data set, we can predict the probability that the findings will put us over that threshold, and possibly enable a recommendation. If this probability is not too low, the DSMB may decide it is worth waiting for the complete results before drawing any conclusions.
+
+Predicting the probability of success (or futility) is done using the most recent information collected from the study, which includes observed data, the parameter estimates, and the uncertainty surrounding these estimates (which is reflected in the posterior probability distribution). 
+
+This post provides an example using a simulated data set to show how this prediction can be made.
 
 ## Determining success
 
 In this example, the outcome is the WHO 11-point ordinal scale for clinical status at 14 days, which ranges from 0 (uninfected and out of the hospital) to 10 (dead), with various stages of severity in between. As in COMPILE, I'll use a Bayesian proportional odds model to assess the effectiveness of CP. The measure of effectiveness is an odds ratio (OR) that compares the cumulative odds of having a worse outcome for the treated group compared to the cumulative odds for the control group:
 
 $$
-\text{Cumulative odds for level } k \text{ in treatment arm } j =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}, \ k \in {1,\dots, 10}
+\text{Cumulative odds for level } k \text{ in treatment arm } j =\frac{P(Y_{ij} \ge k)}{P(Y_{ij} \lt k)}, \ k \in \{1,\dots, 10\}
 $$
 
-The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where $OR \lt 1$. In a Bayesian context, we estimate the posterior probability distribution of the $OR$ (based on prior assumptions about the distribution before we collected any data). We will recommend the therapy in the case that most of the probability distribution lies to the left of 1; in particular we will claim success only when $P(OR \lt 1) > 0.95$. For example, in the figure the posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:
+The goal is to reduce the odds of having a bad outcome, so a successful therapy is one where $OR \lt 1$. In a Bayesian context, we estimate the posterior probability distribution of the $OR$ (based on prior assumptions before we have collected any data). We will recommend the therapy in the case that most of the probability density lies to the left of 1; in particular we will claim success only when $P(OR \lt 1) > 0.95$. For example, in the figure the posterior distribution on top would lead us to consider the therapy successful since 95% of the density falls below 1, whereas the distribution on the bottom would not:
 
 ```{r, echo=FALSE, fig.height = 3.5, message=FALSE, warning=FALSE}
 library(distributional)
@@ -51,7 +57,7 @@ ggplot(dd)+
     fill=stat(x < 1)
   ) +
   stat_dist_slab(n=1001) +
-  scale_fill_manual(values = c("grey80", "skyblue")) +
+  scale_fill_manual(values = c("grey80", "#8ab72d")) +
   theme(panel.grid = element_blank(),
         legend.position = "none",
         axis.title.y = element_blank()) +
@@ -82,7 +88,7 @@ dd <- addColumns(def1, dd)
 dd <- genOrdCat(dd, adjVar = "z", baseprobs = baseprobs, catVar = "y")
 ```
 
-Here is a plot of the cumulative proportions by treatment arm for the first 450 patients in the trial. The treatment arm has more patients with lower WHO-11 scores, so for the most part lies above the control arm line. (This may be a little counter-intuitive, so it may be worthwhile to think about it for a moment.)
+Here is a plot of the cumulative proportions by treatment arm for the first 450 patients in the (simulated) trial. The treatment arm has more patients with lower WHO-11 scores, so for the most part lies above the control arm line. (This may be a little counter-intuitive, so it may be worthwhile to think about it for a moment.)
 
 ```{r, fig.height = 3.5, echo=FALSE}
 sumdd <- dd[, .N, keyby = .(rx, y)]
@@ -94,7 +100,7 @@ ggplot(data = sumdd, aes(x = factor(y, labels = 0:10), y = cumprop)) +
      color = factor(rx, labels = c("Control", "Treatment"))), size = 1) +
   theme(panel.grid = element_blank(),
         legend.title = element_blank()) +
-  scale_color_manual(values = c("#ebd687", "#eb879c"), 
+  scale_color_manual(values = c("#b72d8a", "#2d8ab7"), 
                      guide = guide_legend(reverse = TRUE)) +
   ylab("Cumulative proportion") +
   xlab("Health status")
@@ -104,13 +110,13 @@ ggplot(data = sumdd, aes(x = factor(y, labels = 0:10), y = cumprop)) +
 
 With the data from 450 patients in hand, the first step is to estimate a Bayesian proportional odds model, which I am doing in `Stan`. I use the package `cmdstanr` to interface between `R` and `Stan`.
 
-Here is the model we are using:
+Here is the model:
 
 $$
 \text{logit}\left(P(y_{i}) \ge k \right) = \tau_k + \beta_1 I(\text{male}) + \beta_2 I(\text{over69}) + \delta T_i, \ \ \ k \in \{ 1,\dots,10 \}
 $$
 
-where $T_i$ is the treatment indicator for patient $i$, and $T_i = 1$ when patient $i$ receives CP. I've included the Stan code for the model in the the first <a href="#addendumA">addendum</a>.
+where $T_i$ is the treatment indicator for patient $i$, and $T_i = 1$ when patient $i$ receives CP. $\delta$ represents the log odds ratio, so $OR = e^{\delta}$. I've included the Stan code for the model in the the first <a href="#addendumA">addendum</a>. 
 
 ```{r, message = FALSE, warning=FALSE}
 library(cmdstanr)
@@ -154,7 +160,7 @@ draws_dt <- data.table(draws_df[-grep("^yhat", colnames(draws_df))])
 mean(draws_dt[, OR < 1])
 ```
 
-A visual showing the bottom 95\% portion of the density in blue makes it clear that the threshold has not been met:
+A plot that shows the bottom 95\% portion of the density in blue makes it clear that the threshold has not been met:
 
 ```{r, echo=FALSE, message=FALSE, warning=FALSE, fig.height = 3}
 ggplot(data = draws_dt) +
@@ -163,7 +169,7 @@ ggplot(data = draws_dt) +
   ) +
   geom_vline(xintercept = 1, color = "white") +
   stat_slab() +
-  scale_fill_manual(values = c("grey80", "skyblue")) +
+  scale_fill_manual(values = c("grey80", "#8ab72d")) +
   theme(legend.position = "none",
         panel.grid = element_blank()) +
   scale_x_continuous(limits = c(0.4, 1.5), breaks = seq(0.25, 1.5, .25))
@@ -172,9 +178,9 @@ ggplot(data = draws_dt) +
 
 ## The elements of the predictive probability
 
-We have collected complete data from 450 patients out of an expect 500, and we are not yet ready declare success. An interesting question to ask at this point is "*given what we have observed up until this point, what is the probability that we will declare success after 50 more patients?*" If the probability is sufficiently high, we may decide to delay releasing the inconclusive results pending the updated data set. (On the other hand, if the probability is quite low, there may be no point in delaying.)
+We have collected complete data from 450 patients out of an expect 500, though we are not yet ready declare success. An interesting question to ask at this point is "*given what we have observed up until this point, what is the probability that we will declare success after 50 additional patients are included in the analysis?*" If the probability is sufficiently high, we may decide to delay releasing the inconclusive results pending the updated data set. (On the other hand, if the probability is quite low, there may be no point in delaying.)
 
-The prediction incorporates three potential sources of uncertainty. First, there is the uncertainty regarding the parameters, which is described by the posterior distribution. Second, even if we knew the parameters with certainty, the outcome remains stochastic (i.e. not pre-determined conditional on the parameters). Finally, we don't necessarily know the characteristics of the remaining patients (though we may have some or all of that information if recruitment has been completed but complete follow-up has not).
+The prediction incorporates three potential sources of uncertainty. First, there is the uncertainty regarding the parameters, which is described by the posterior distribution. Second, even if we knew the parameters with certainty, the outcome remains stochastic (i.e. not pre-determined conditional on the parameters). Finally, we don't necessarily know the characteristics of the remaining patients (though we may have some or all of that information if recruitment has been finished but complete follow-up has not).
 
 In the algorithm that follows - the steps follow from these three elements of uncertainty:
 
@@ -183,7 +189,7 @@ In the algorithm that follows - the steps follow from these three elements of un
 3. Using the combination of new patients and parameters, generate ordinal outcomes for each of the 50 patients.
 4. Combine this new data set with the 450 existing patients to create a single analytic file.
 5. Fit a new Bayesian model with the 500-patient data set.
-6. Record $P(OR < 1)$ based on this new posterior distribution. If $P(OR < 1)$ is $\gt 95\%$, we consider the result to be a  "success", otherwise, it is "not a success".
+6. Record $P(OR < 1)$ based on this new posterior distribution. If $P(OR < 1)$ is $\gt 95\%$, we consider the result to be a  "success", otherwise it is "not a success".
 
 We repeat this cycle, say 1000 times. *The proportion of cycles that are counted as a success represents the predictive probability of success*.
 
@@ -200,22 +206,33 @@ dd_new[, id:= (nrow(dd) + 1):(nrow(dd) +.N)]
 #### Step 2: draw set of parameters
 
 ```{r}
-
 draw <- as.data.frame(draws_dt[sample(.N, 1)])
+```
 
+The coefficients $\hat{\beta}_1$ (male), $\hat{\beta}_2$ (over69), and $\hat{\delta}$ (treatment effect) are extracted from the draw from the posterior:
+
+```{r}
 D <- dt_to_list(dd)$D
 beta <- as.vector(x = draw[, glue("beta[{1:D}]")], mode = "numeric")
 delta <- draw$delta
 coefs <- as.matrix(c(beta, delta))
 
+coefs
+```
+
+Using the draws of the $\tau_k$'s, I've calculated the corresponding probabilities that can be used to generate the ordinal outcome for the new observations:
+
+```{r}
 tau <- as.vector(draw[grep("^tau", colnames(draw))], mode = "numeric")
 tau <- c(tau, Inf)
 cprop <- plogis(tau)
 xprop <- diff(cprop)
 baseline <- c(cprop[1], xprop) 
+
+baseline
 ```
 
-#### Step 3: generate outcome
+#### Step 3: generate outcome using coefficients and baseline probabilities
 
 ```{r}
 zmat <- model.matrix(~male + over69 + rx, data = dd_new)[, -1]
@@ -255,7 +272,25 @@ draws_pp[, mean(OR < 1)]
 
 ##  Estimating the predictive probability
 
-The next step is to put all of these elements in a single function that we can call repeatedly. We can estimate the predictive probability of success by calculating the proportion of iterations that resulted in a success. If we iterate 1000 times, this means we need to fit 1000 Bayesian models, and this could be prohibitive with standard computing resources; a high performance computing cluster may be necessary. (I touched on this [earlier](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} when I describe exploring the characteristic properties of Bayesian models.) I have provided the code below in the second  <a href="#addendumB">addendum</a> in case any readers are interested in trying to implement on an HPC.
+The next step is to pull all these elements together in a single function that we can call repeatedly to estimate the predictive probability of success. This probability is estimated by calculating the proportion of iterations that result in a success. 
+
+Computing resources required for this estimation might be quite substantial. If we iterate 1000 times, we need to fit that many Bayesian models. And 1000 Bayesian model estimates could be prohibitive - a high performance computing cluster (HPC) may be necessary. (I touched on this [earlier](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} when I describe exploring the characteristic properties of Bayesian models.) I have provided the code below in the second  <a href="#addendumB">addendum</a> in case any readers are interested in trying to implement on an HPC.
+
+I'll conclude with a figure that shows how predictive probabilities can vary depending on the observed sample size and $P(OR < 1)$ for the interim data set. Based on the data generating process I've used here, if we observe a $P(OR < 1) = 90\%$ at an interim look after 250 patients, it is considerably more probable that we will end up over 95% than if we observe that same probability at an interim look after 450 patients. This makes sense, of course, since the estimate at 450 patients will have less uncertainty, and adding 50 patients will not likely change to results dramatically. The converse is true after 250 patients.
+
+```{r, echo = FALSE, fig.height = 3.5}
+test <- fread("predprobs.csv")
+
+ggplot(data = test) +
+  aes(x=obs, y = pprob, group = n) +
+  geom_line(aes(color = factor(n)), size = 1) +
+  theme(panel.grid = element_blank()) +
+  scale_color_manual(values =  c("#b72d8a","#8ab72d", "#2d8ab7"), name = "# obs") +
+  scale_x_continuous(breaks = seq(0.90, 0.98, by = .01), name = "observed P(OR < 1)") +
+  scale_y_continuous(breaks = seq(0.2, 1, by =.2), name = "predicted probability of success")
+```
+
+Ultimately, the interpretation of the predictive probability will depend on the urgency of making a recommendation, the costs of waiting, the costs of deciding to soon, and other factors specific to the trial and those making the decisions.
 
 <a name="addendumA"></a>  
 
