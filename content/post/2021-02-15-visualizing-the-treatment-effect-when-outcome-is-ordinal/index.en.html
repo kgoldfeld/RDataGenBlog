@@ -1,0 +1,197 @@
+---
+title: Visualizing the treatment effect with an ordinal outcome
+author: R package build
+date: '2021-02-15'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>If it’s true that most readers of an academic journal article only read the abstract and look at the figures and tables, while skimming the rest, then it is particularly important that you can tell the story (or at least suggest it) with a well conceived graphic or two. My collaborators and I are in the process of figuring out how we’d like to represent our findings in a paper that has yet to be written, and I thought I’d document just a few of the options that I’ve come up with so far, and share the code.</p>
+<p>As I mentioned, the motivation for this code I am sharing here is a data set we don’t have yet. The study is a large multi-site trial called <a href="https://bit.ly/3b7aZCr" target="_blank">CONTAIN</a>, which is evaluating the effectiveness of using convalescent plasma (CP) from patients who already had COVID-19 to treat newly hospitalized patients with COVID-19. The primary outcome is a World Health Organization (WHO) score that ranges from 0 to 10, where 0 is healthy and virus-free and 10 is death:</p>
+<p><img src="img/WHO-11.png" /></p>
+<p>The goal of study is to show that patients who receive CP will be more likely to have lower WHO scores 14 days after starting treatment compared to those who receive a saline solution placebo.</p>
+<p>The analysis will use a cumulative proportional odds model, which I have written about before (see <a href="https://www.rdatagen.net/post/a-hidden-process-part-2-of-2/" target="_blank">here</a>, for example). I won’t get into the model here (I wrote about the model in the context of a related project <a href="https://www.rdatagen.net/post/2021-01-19-should-we-continue-recruiting-patients-an-application-of-bayesian-predictive-probabilities/" target="_blank">here</a>), but want to show a few options for presenting the data visually in a way that indicates whether or not the treatment had an effect. Often, I will not show the <code>ggplot</code> code, but that is really the point here so I am showing everything.</p>
+<div id="the-data" class="section level3">
+<h3>The data</h3>
+<p>Since we are in the middle of the RCT, I don’t have access to any actual data. Simulation will work just fine here. The data generation process is quite simple - I generate 1000 individuals, assign half to treatment and half to control. The baseline probabilities for the distribution of outcomes in the control arm are specified by providing the 11 probabilities for each category. The probabilities for the treatment arm are based on an assumed log cumulative odds ratio of -0.6 (which translates to a cumulative odds ratio of 0.55). The odds we are talking about are</p>
+<p><span class="math display">\[
+Odds = \frac{P(WHO \ge y)}{P(WHO &lt; y)}, \ \ y \in \{2,\dots,10\},
+\]</span>
+so it is clear that lower odds is preferred.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+
+def &lt;- defDataAdd(varname = &quot;z&quot;, formula = &quot;rx * -0.6&quot;, dist = &quot;nonrandom&quot;)
+
+set.seed(39821)
+
+dd &lt;- genData(1000)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(def, dd)
+
+dd &lt;- genOrdCat(
+  dd, 
+  adjVar = &quot;z&quot;, 
+  baseprobs = c(0.06, 0.06, 0.10, 0.10, 0.10, 0.13, 0.13, 0.10, 0.10, 0.06, 0.06),
+  catVar = &quot;WHO&quot;
+)</code></pre>
+</div>
+<div id="summarizing-the-data" class="section level3">
+<h3>Summarizing the data</h3>
+<p>In the plots that follow, I will be using summary data: proportions and cumulative proportions of patients that fall into each category. I will calculate those manually from the categorical counts:</p>
+<pre class="r"><code>dsum &lt;- dd[, .(N = sum(.N)), keyby = .(rx, WHO)]
+dsum[, rx := factor(rx, labels = c(&quot;control&quot;, &quot;treatment&quot;))]
+dsum</code></pre>
+<pre><code>##            rx WHO  N
+##  1:   control   1 27
+##  2:   control   2 28
+##  3:   control   3 48
+##  4:   control   4 54
+##  5:   control   5 52
+##  6:   control   6 62
+##  7:   control   7 63
+##  8:   control   8 63
+##  9:   control   9 40
+## 10:   control  10 42
+## 11:   control  11 21
+## 12: treatment   1 50
+## 13: treatment   2 46
+## 14: treatment   3 78
+## 15: treatment   4 63
+## 16: treatment   5 64
+## 17: treatment   6 62
+## 18: treatment   7 53
+## 19: treatment   8 27
+## 20: treatment   9 33
+## 21: treatment  10 13
+## 22: treatment  11 11
+##            rx WHO  N</code></pre>
+<p>I will also need the total number of patients in each arm so that I can provide informative labels:</p>
+<pre class="r"><code>dnames &lt;- dsum[, sum(N), keyby = rx]
+dnames[, legend_label := paste0(rx, &quot; (n = &quot;, V1, &quot;)&quot;)]
+dnames[, axis_label := paste0(rx, &quot;\n(n = &quot;, V1, &quot;)&quot;)]
+dnames</code></pre>
+<pre><code>##           rx  V1        legend_label           axis_label
+## 1:   control 500   control (n = 500)   control\n(n = 500)
+## 2: treatment 500 treatment (n = 500) treatment\n(n = 500)</code></pre>
+</div>
+<div id="proportions-by-arm" class="section level3">
+<h3>Proportions by arm</h3>
+<p>The first plot is quite straightforward, showing the proportion of each arm that falls in each category. In this case, we see right away, that the treatment arm has more patients in the lower categories. I’d say the downside to this is that it is not particularly elegant, but it is easy to read off the percentages:</p>
+<pre class="r"><code>dsum[, prop := N/sum(N), keyby = rx]
+dsum[, legend_label := factor(rx, labels = dnames[, legend_label])]
+
+ggplot(data = dsum, aes(x = WHO, y = prop)) +
+  geom_line(aes(group = legend_label, color = legend_label), size = 1) +
+  geom_point(aes(color = legend_label), size = 2) +
+  ylim(0, 0.2) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(.8, .88),
+        legend.background = element_rect(fill = &quot;grey92&quot;),
+        legend.key = element_rect(fill = &quot;grey92&quot;)) +
+  scale_color_manual(values = c(&quot;#798E87&quot;, &quot;#C27D38&quot;),
+                     guide = guide_legend(revers = TRUE)) +
+  scale_x_discrete(labels = c(&quot;virus-free&quot;, 1:9, &quot;died&quot;)) +
+  ylab(&quot;proportion&quot;) +
+  xlab(&quot;WHO score&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="480" /></p>
+</div>
+<div id="cumulative-proportion-by-arm" class="section level3">
+<h3>Cumulative proportion by arm</h3>
+<p>A more elegant version of the proportional line plot might be the same idea but with cumulative probabilities or proportions. We again see that the treatment is having the desired effect, as the cumulative proportion is higher at the low end of the scale. I actually like this one, but it may be hard for folks to interpret, particularly if they haven’t worked with ordinal data extensively.</p>
+<pre class="r"><code>dsum[, cumprop := cumsum(prop), keyby = rx]
+
+ggplot(data = dsum, aes(x = WHO, y = cumprop)) +
+  geom_line(aes(group = legend_label, color = legend_label), size = 1) +
+  geom_point(aes(color = legend_label), size = 2) +
+  scale_x_discrete(labels = c(&quot;virus-free&quot;, 1:9, &quot;died&quot;)) +
+  ylim(0, 1) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        legend.position = c(.75, .2),
+        legend.background = element_rect(fill = &quot;grey92&quot;),
+        legend.key = element_rect(fill = &quot;grey92&quot;)) +
+  scale_color_manual(values = c(&quot;#798E87&quot;, &quot;#C27D38&quot;),
+                     guide = guide_legend(revers = TRUE)) +
+  ylab(&quot;cumulative proportion&quot;) +
+  xlab(&quot;WHO score&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="480" /></p>
+</div>
+<div id="distribution-of-outcome-using-stacked-bars" class="section level3">
+<h3>Distribution of outcome using stacked bars</h3>
+<p>The next one has a lot of information on it, and looks pretty nice. It shows the distribution using the stacked bars. I think with a lot of categories, it might not be completely obvious that treatment appears effective. With additional use of colors, we might be able to overcome this. But I’ve reserved that for the final plot.</p>
+<pre class="r"><code>cc &lt;- scales::seq_gradient_pal(&quot;white&quot;, &quot;#267efa&quot;)(seq(0,1,length.out=11))
+dsum[, linept := (rx == &quot;treatment&quot;) * (2 - 0.3) + (rx == &quot;control&quot;) * (1 + 0.3)]
+dsum[, axis_label := factor(rx, labels = dnames[, axis_label])]
+
+ggplot(data = dsum, aes( fill = WHO, y = N, x = axis_label)) +
+  geom_bar(position=position_fill(reverse=TRUE), 
+           stat = &quot;identity&quot;, width = 0.6) +
+  geom_line(aes(x = linept, y = N), 
+            position = position_fill(reverse = TRUE),
+            lty = 3, size = .2, color = &quot;black&quot;) +
+  geom_text(aes(label = scales::percent(prop, accuracy = 1L), y = prop),
+            position = position_stack(vjust = 0.5, reverse= TRUE),
+            size = 2.5, color = &quot;grey20&quot;) +
+  theme(axis.title.x = element_blank(),
+        panel.grid = element_blank(),
+        legend.title = element_text(size = 8, face = &quot;bold&quot;)) +
+  scale_fill_manual(
+    values = cc, 
+    name = &quot;WHO score&quot;, 
+    labels = c(&quot;virus-free&quot;, 1:9, &quot;died&quot;),
+    guide = guide_legend(reverse = TRUE)) +
+  ylab(&quot;proportion&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="480" /></p>
+</div>
+<div id="distribution-of-outcome-using-aligned-bars" class="section level3">
+<h3>Distribution of outcome using aligned bars</h3>
+<p>In this last version, the stacked bars are shifted so that they align between categories 3 and 4 to emphasize that the treatment arm has a higher proportion of patients who are doing relatively well. The plot itself is a bit trickier to pull off, and requires some manipulation of the factors to make it work out the way we want.</p>
+<pre class="r"><code>cc_low &lt;- scales::seq_gradient_pal(&quot;#faa226&quot;, &quot;white&quot;)(seq(0.2, 0.8, length.out=4))
+cc_high &lt;- scales::seq_gradient_pal(&quot;white&quot;, &quot;#267efa&quot;)(seq(0.2, 0.8, length.out=7))
+cc &lt;- c(cc_low, cc_high)
+
+dsum[, w_alt := factor(WHO, levels = 1:11, labels=letters[1:11])]
+dsum_low &lt;- dsum[as.numeric(w_alt) %in% c(1:4)]
+dsum_high &lt;- dsum[as.numeric(w_alt) %in% c(5:11)]
+dsum_high[, w_alt := factor(w_alt, levels = letters[11:5])]
+
+ggplot() +
+  geom_bar(
+    data = dsum_low,
+    aes(x = axis_label, y = -prop, fill = w_alt),
+    width = .6, stat=&quot;identity&quot;) +
+  geom_bar(
+    data = dsum_high,
+    aes(x = axis_label, y = prop, fill = w_alt),
+    width = .6, stat=&quot;identity&quot;) +
+  scale_fill_manual(
+    values = cc, 
+    name = &quot;WHO score&quot;, 
+    labels = c(&quot;virus-free&quot;, 1:9, &quot;died&quot;)) +
+  ylab(&quot;proportion&quot;) +
+  theme(panel.grid = element_blank(),
+        axis.title.y = element_blank(),
+        legend.title = element_text(size = 8, face = &quot;bold&quot;)) + 
+  scale_y_continuous(limits = c(-.75,.75), 
+    breaks = c(-.75, -.50, -.25, 0, 0.25, .5, .75), 
+    labels = c(&quot;75%&quot;,&quot;50%&quot;, &quot;25%&quot;,&quot;0%&quot;, &quot;50%&quot;, &quot;25%&quot;,&quot;75%&quot;)) +
+  geom_hline(yintercept = 0, color = &quot;grey96&quot;) +
+  coord_flip() </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="768" /></p>
+<p>In the end, it is difficult to say which approach will be preferable - I think it will depend on the actual data and the differences between the groups. Of course, not all journals permit color, so that would certaily influence the design. But this is a good start: it gives us plenty to play around with once the data do finally arrive.</p>
+</div>
