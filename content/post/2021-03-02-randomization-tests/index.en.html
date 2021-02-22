@@ -1,0 +1,132 @@
+---
+title: Randomization tests make fewer assumptions and seem pretty intuitive
+author: R package build
+date: '2021-03-02'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>I am preparing a lecture on simulation for a statistical modeling class, and I want to talk about a couple of cases where simulation is intrinsic to the analytic method rather than as a tool for exploration and planning. MCMC methods used for Bayesian estimation, bootstrapping, and randomization tests all come to mind.</p>
+<p>I find randomization tests particularly interesting as an alternative approach to conducting hypothesis tests, because it allows us to avoid making unrealistic assumptions. In the context of an RCT with treatment and control arms where the aim is to compare average responses (measured by some outcome <span class="math inline">\(Y\)</span>), the standard hypothesis test is framed around a null hypothesis <span class="math inline">\(H_0: \mu_\text{t} = \mu_\text{c}\)</span>. In this framework, <span class="math inline">\(\mu_\text{t}\)</span> and <span class="math inline">\(\mu_\text{c}\)</span> are the average responses in the <em>population</em> under treatment and control, respectively. For this to be valid, we need to assume that the study sample is representative of the population of interest, that has been randomly selected; for most RCTs, this is a fairly untenable. Participants of studies are typically <em>not randomly drawn</em> from the population, but are more likely to have shown up in a particular setting, been identified for recruitment, and ultimately decided for themselves about participating.</p>
+<p>The randomization test makes no assumption about whether the sample is representative. Rather it asks a question that is limited to the sample at hand, regardless of how it was created. The null hypothesis in the randomization test is that the average response <em>in the sample</em> is unrelated to treatment assignment. If we reject the null hypothesis and conclude that the treatment assignment mattered in this sample, we can decide to extend this conclusion to the population based on our understanding of the intervention and how the sample relates to this broader population. While the jump from the sample to the population is baked into the standard hypothesis test, the generalization in the context of a randomization test is not necessarily a statistical question.</p>
+<div id="foundations-the-permutation-test" class="section level3">
+<h3>Foundations: the permutation test</h3>
+<p>I started this all of by talking about simulation, which is a key element of a randomization test. But before that, I need to mention the permutation test, which is very closely related; in fact, the randomization test is just an extension of the permutation test. I am just sketching out the basic ideas here.</p>
+<p>Let’s say we observe <span class="math inline">\(\Delta_\text{obs} = \bar{Y}_\text{t} - \bar{Y}_\text{c}\)</span>. Under the null hypothesis, the treatment arm is merely a label that has no relationship to the outcome. This means we should be able to scramble the labels, re-estimate the statistic using these new labels, and observe little change in the the difference in means across (or any other statistic we are using) these groups. If we could come up with all possible permutations of labels, we can calculate a <span class="math inline">\(\Delta^*\)</span> for each; this would give us a distribution of the statistic (in this case <span class="math inline">\(\Delta^*\)</span>) over all permutations. The hypothesis test is based on the location of <span class="math inline">\(\Delta_\text{obs}\)</span> in the context of this distribution. If we are using a Type I error <span class="math inline">\(\alpha=0.05\)</span>, then we would reject the null hypothesis if the <span class="math inline">\(|\Delta_\text{obs}|\)</span> is greater than 95% of the absolute values of the <span class="math inline">\(\Delta^*\)</span>’s.</p>
+<p>When the sample is relatively small, we can indeed come up with all the permutations. WIth 6 study subjects, there are 20 permutations (<span class="math inline">\(6!/3!3!\)</span>), including the observed ordering in the actual trial. In this case, <span class="math inline">\(|\Delta_\text{obs||\)</span> needs to be the largest value in order to reject the null. With <span class="math inline">\(N=10\)</span>, there are 252 possible permutations, so we can still easily estimate <span class="math inline">\(\Delta\)</span> for each permutation. However, when the sample size is 20, then we have 184,756 possible permutation, and things start to get more difficult computationally. At this point, we might start to randomly sample from all possible permutations to estimate the distribution. In practice, we don’t sample from permutations, but merely re-randomize the observations to different labels, and calculate <span class="math inline">\(\Delta^*\)</span> for each iteration. Using this simulated distribution, we can conduct the randomization test.</p>
+</div>
+<div id="simulated-data" class="section level3">
+<h3>Simulated data</h3>
+<p>OK, enough background, let’s look at some data. (There’s obviously a vast literature on this important topic. I found this <a href="https://bit.ly/3qIgzSc">book</a> very helpful.)</p>
+<p>One extremely important point I left out is that the randomization test makes no assumptions about the underlying distirubtion of the outcome data. While the standard hypothesis test does make assumptions about normality (or at least about the Central Limit Theorem kicking in with large enough sample sizes) and no outliers, the randomization test is robust in that regard. So, I will be using a decidedly non-random distribution here, actually a mixture of two normal distributions, to make things more interesting.</p>
+<p>In the data generation process, there are actually two different populations - Group 1 with the outcome distributed <span class="math inline">\(Y_1 \sim N(\mu=0, \sigma^2=1)\)</span> and Group 2 with larger mean and variance:<span class="math inline">\(Y_2 \sim N(5,4)\)</span>. The treatment effect also differs across the groups. The population (or actually the sample) will be comprised of 70% from Group 1 and 30% from Group 2.</p>
+<p>I’ll start off by generating 1000 observations total, randomizing 500 to each arm:</p>
+<pre class="r"><code>library(simstudy)
+
+d1 &lt;- defDataAdd(varname = &quot;Y_low&quot;, formula = &quot;0 + 2 * rx&quot;, 
+                 variance = 1, dist = &quot;normal&quot;)
+d1 &lt;- defDataAdd(d1, varname = &quot;Y_high&quot;, formula = &quot;5 + 1 * rx&quot;, 
+                 variance = 4, dist = &quot;normal&quot;)
+d1 &lt;- defDataAdd(d1, varname = &quot;Y&quot;, 
+                 formula = &quot;Y_low | 0.7 + Y_high | 0.3&quot;, dist = &quot;mixture&quot;)
+
+set.seed(11778)
+dd &lt;- genData(1000)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(d1, dd)</code></pre>
+<p>The histogram makes it quite clear that the data are <em>not</em> normally distributed:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/distY-1.png" width="480" /></p>
+</div>
+<div id="randomization" class="section level3">
+<h3>Randomization</h3>
+<p>In the simple case of two-arm trial, the randomization test is quite simple: we repeatedly assign randomly generated alternate treatment arm labels to each of the observations, and calculate the test statistic following each iteration.</p>
+<p>In a more complex situation, where the data have an underlying structure, such as clustering, we have to make sure that the re-randomization does not violate that structure. In the case of a cluster randomized trial where all individuals within the cluster are in the same intervention arm, the null hypothesis is that cluster-level treatment has no impact, so we would re-randomize the cluster as a whole, not the individuals.</p>
+<p>Here is an animation that depicts a single iteration, starting with original data, permuting the data, and calculating <span class="math inline">\(\Delta^*\)</span>. In the data just generated <span class="math inline">\(\Delta_\text{obs} = 1.6\)</span> and the re-randomized <span class="math inline">\(\Delta^* = 0.1\)</span>. (The code for the animation is in the <a href="#addendum">addendum</a>.)</p>
+<pre class="r"><code>dd[, rx_s := sample(rx, replace = FALSE)]</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/anim1-1.gif" /><!-- --></p>
+</div>
+<div id="estimating-a-p-value" class="section level3">
+<h3>Estimating a p-value</h3>
+<p>The animation is kind of a cool way to depict single iteration, but to estimate a distribution for <span class="math inline">\(\Delta^*\)</span> and ultimately the p-value, we need to do this repeatedly. Using 1000 iterations, the p-value will be vanishingly small, so I am creating a much smaller data set of 60 observations with an observed effect size of 1.8.</p>
+<pre class="r"><code>dd &lt;- genData(60)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(d1, dd)
+
+Delta_obs &lt;- dd[rx == 1, mean(Y)] - dd[rx == 0, mean(Y)]
+Delta_obs</code></pre>
+<pre><code>## [1] 1.809</code></pre>
+<p>The iteration process consists of repeatedly calling the simple function which randomly assigns labels and returns the group differences based on these new labels. It is generally recommended to run between 500 and 1500 iterations, so here I am using 1499.</p>
+<pre class="r"><code>randomize &lt;- function(dx) {
+  
+  rx_s &lt;- sample(dx$rx, replace = FALSE)
+  dn &lt;- data.table(Y = dx$Y, rx = rx_s)
+  Delta_star &lt;- dn[rx == 1, mean(Y)] - dn[rx == 0, mean(Y)]
+  Delta_star
+
+}
+
+Delta_stars &lt;- sapply(1:1499, function(x) randomize(dd))</code></pre>
+<p>Here is a distribution of the <span class="math inline">\(\Delta^*\)</span>’s where the red line indicates the observed value, <span class="math inline">\(\Delta_\text{obs}\)</span>:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plotDelta-1.png" width="480" /></p>
+<p>The p-value is estimated by comparing <span class="math inline">\(\Delta_\text{obs}\)</span> with a combined data set that includes the <span class="math inline">\(\Delta^*\)</span>’s and <span class="math inline">\(\Delta_\text{obs}\)</span>. Using an <span class="math inline">\(\alpha = 0.05\)</span>, we would reject that null hypothesis and conclude that within this sample, treatment had an effect.</p>
+<pre class="r"><code>1 - mean(abs(Delta_obs) &gt;= abs(c(Delta_obs, Delta_stars)))</code></pre>
+<pre><code>## [1] 0.004667</code></pre>
+</div>
+<div id="operating-characteristics-of-the-randomization-test" class="section level3">
+<h3>Operating characteristics of the randomization test</h3>
+<p><a name="addendum"></a></p>
+<p> 
+ </p>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>The animation is created using the <code>gganimate</code> package. This is completely new to me, so I am still exploring; if you want to learn more, I’d recommend checking out the <a href="https://gganimate.com/" target="_blank">website</a>. The key element is to define a sequence of plots that represent states; <code>gganimate</code> magically creates the necessary transitions, and you can control observation times and smoothness of the transitions. The output is a <em>gif</em> file.</p>
+<pre class="r"><code>library(ggplot2)
+library(gganimate)
+
+dif_in_means_orig &lt;- round(dd[rx == 1, mean(Y)] - dd[rx == 0, mean(Y)], 1)
+dif_in_means_perm &lt;- round(dd[rx_s == 1, mean(Y)] - dd[rx_s == 0, mean(Y)], 1)
+
+dd1 &lt;- dd[, .(iter = 1, id=id, rx = rx, rcolor = rx, Y=Y, perm = FALSE)]
+dd2 &lt;- dd[, .(iter = 2, id=id, rx = 0.5, rcolor = 3, Y=Y, perm = FALSE)]
+dd3 &lt;- dd[, .(iter = 3, id=id, rx = 0.5, rcolor = rx_s, Y=Y, perm = TRUE)]
+dd4 &lt;- dd[, .(iter = 4, id=id, rx = rx_s, rcolor = rx_s, Y=Y, perm = TRUE)]
+
+ddx &lt;- rbind(dd1, dd2, dd3, dd4)
+ddx[, iter := factor(iter, 
+  labels = c(
+    paste0(&quot;Original data (mean difference: &quot;, dif_in_means_orig, &quot;)&quot;), 
+    &quot;Permutation ...&quot;, 
+    &quot;Permuted&quot;, 
+    paste0(&quot;After permutation (mean difference: &quot;, dif_in_means_perm, &quot;)&quot;)))]
+
+a &lt;- ggplot(data = ddx, aes(x = rx, y = Y, group = id)) +
+  geom_point(position = position_jitter(seed = 42), 
+             aes(color = factor(rcolor), shape = perm)) +
+  geom_vline(xintercept = 0.5, color = &quot;white&quot;) +
+  scale_color_manual(values = c(&quot;#bbb66c&quot;, &quot;#6c71bb&quot;, &quot;grey80&quot;)) +
+  scale_shape_manual(values = c(19, 4)) +
+  scale_x_continuous(limits = c(-.5, 1.5), breaks = c(0, 1), 
+                     labels = c(&quot;control&quot;, &quot;treatment&quot;)) +
+  theme(legend.position = &quot;none&quot;,
+        panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        axis.text = element_text(size = 12),
+        axis.title.y = element_text(size = 14)) +
+  transition_states(iter, state_length = 2, transition_length = 1) +
+  labs(title = &quot;{closest_state}&quot;, y=&quot;Outcome&quot;)
+
+animate(a, duration = 15, fps = 10, height = 450, width = 350)</code></pre>
+</div>
