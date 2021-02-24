@@ -21,37 +21,33 @@ options(digits = 4)
 
 I am preparing a lecture on simulation for a statistical modeling class, and I want to talk about a couple of cases where simulation is intrinsic to the analytic method rather than as a tool for exploration and planning. MCMC methods used for Bayesian estimation, bootstrapping, and randomization tests all come to mind.
 
-I find randomization tests particularly interesting as an alternative approach to conducting hypothesis tests, because it allows us to avoid making unrealistic assumptions. In the context of an RCT with treatment and control arms where the aim is to compare average responses (measured by some outcome $Y$), the standard hypothesis test is framed around a null hypothesis $H_0: \mu_\text{t} = \mu_\text{c}$. In this framework, $\mu_\text{t}$ and $\mu_\text{c}$ are the average responses in the *population* under treatment and control, respectively. For this to be valid, we need to assume that the study sample is representative of the population of interest, that has been randomly selected; for most RCTs, this is a fairly untenable. Participants of studies are typically *not randomly drawn* from the population, but are more likely to have shown up in a particular setting, been identified for recruitment, and ultimately decided for themselves about participating.
+Randomization tests are particularly interesting as an alternative approach to conducting hypothesis tests, because they allow us to avoid unrealistic assumptions. I've described this [before](https://www.rdatagen.net/post/permutation-test-for-a-covid-19-pilot-nursing-home-study/){target="_blank"} under the rubric of a permutation test. The example I use here is a little a different, though, truth be told, the real reason I'm sharing is that I came up with a nice little animation to illustrate a simple randomization process. So, even if I decide not to include it in the lecture, at least you've seen it.
 
-The randomization test makes no assumption about whether the sample is representative. Rather it asks a question that is limited to the sample at hand, regardless of how it was created. The null hypothesis in the randomization test is that the average response *in the sample* is unrelated to treatment assignment. If we reject the null hypothesis and conclude that the treatment assignment mattered in this sample, we can decide to extend this conclusion to the population based on our understanding of the intervention and how the sample relates to this broader population. While the jump from the sample to the population is baked into the standard hypothesis test, the generalization in the context of a randomization test is not necessarily a statistical question.
+### The goal of a randomization test
 
-### Foundations: the permutation test
+In the context of an RCT with treatment and control arms where the aim is to compare average responses (measured by some outcome $Y$), the standard hypothesis test is framed around a null hypothesis $H_0: \mu_\text{t} = \mu_\text{c}$. In this framework, $\mu_\text{t}$ and $\mu_\text{c}$ are the average responses in the *population* under treatment and control, respectively. For this to be valid, we need to assume that the study sample is representative of the population of interest, that has been randomly selected; for most RCTs, this is a fairly untenable. Participants of studies are typically *not randomly drawn* from the population, but are more likely to have shown up in a particular setting, been identified for recruitment, and ultimately decided for themselves about participating.
 
-I started this all of by talking about simulation, which is a key element of a randomization test. But before that, I need to mention the permutation test, which is very closely related; in fact, the randomization test is just an extension of the permutation test. I am just sketching out the basic ideas here.
+The randomization test makes no assumption about whether the sample is representative. Rather, it asks a question that is limited to the sample at hand, regardless of how it was collected or created. The null hypothesis in the randomization test is that the average response *in the sample* is unrelated to treatment assignment. If we reject the null hypothesis and conclude that the treatment assignment mattered in this sample, we can decide to extend this conclusion to the population based on our understanding of the intervention and how the sample relates to this broader population. The leap from the sample to the population is baked into the standard hypothesis test, the generalization in the context of a randomization test is not so obvious.
 
-Let's say we observe $\Delta_\text{obs} = \bar{Y}_\text{t} - \bar{Y}_\text{c}$. Under the null hypothesis, the treatment arm is merely a label that has no relationship to the outcome. This means we should be able to scramble the labels, re-estimate the statistic using these new labels, and observe little change in the the difference in means across (or any other statistic we are using) these groups. If we could come up with all possible permutations of labels, we can calculate a $\Delta^*$ for each; this would give us a distribution of the statistic (in this case $\Delta^*$) over all permutations. The hypothesis test is based on the location of $\Delta_\text{obs}$ in the context of this distribution. If we are using a Type I error $\alpha=0.05$, then we would reject the null hypothesis if the $|\Delta_\text{obs}|$ is greater than 95% of the absolute values of the $\Delta^*$'s.
+And, it is important to reiterate that while the standard hypothesis test makes assumptions about normality (or at least about the validity of the Central Limit Theorem), the randomization test makes no assumptions about the underlying distribution of the outcome data.
 
-When the sample is relatively small, we can indeed come up with all the permutations. WIth 6 study subjects, there are 20 permutations ($6!/3!3!$), including the observed ordering in the actual trial. In this case, $|\Delta_\text{obs||$ needs to be the largest value in order to reject the null. With $N=10$, there are 252 possible permutations, so we can still easily estimate $\Delta$ for each permutation. However, when the sample size is 20, then we have 184,756 possible permutation, and things start to get more difficult computationally. At this point, we might start to randomly sample from all possible permutations to estimate the distribution. In practice, we don't sample from permutations, but merely re-randomize the observations to different labels, and calculate $\Delta^*$ for each iteration. Using this simulated distribution, we can conduct the randomization test.
+I hardly need to say there's a vast literature on this important topic, and if you want more, I found this [book](https://bit.ly/3qIgzSc){target=_"_blank"} very helpful.
 
 ### Simulated data
 
-OK, enough background, let's look at some data. (There's obviously a vast literature on this important topic. I found this [book](https://bit.ly/3qIgzSc) very helpful.)
-
-One extremely important point I left out is that the randomization test makes no assumptions about the underlying distirubtion of the outcome data. While the standard hypothesis test does make assumptions about  normality (or at least about the Central Limit Theorem kicking in with large enough sample sizes) and no outliers, the randomization test is robust in that regard. So, I will be using a decidedly non-random distribution here, actually a mixture of two normal distributions, to make things more interesting.
-
-In the data generation process, there are actually two different populations - Group 1 with the outcome distributed $Y_1 \sim N(\mu=0, \sigma^2=1)$ and Group 2 with larger mean and variance:$Y_2 \sim N(5,4)$. The treatment effect also differs across the groups. The population (or actually the sample) will be comprised of 70% from Group 1 and 30% from Group 2.
+To test the importance of the normality assumption, I'm using a data generation process that mixes two populations - Group 1, where the outcome $Y_1 \sim N(\mu=0, \sigma^2=1)$ and Group 2, with larger mean and variance: $Y_2 \sim N(5,4)$. The treatment effect also differs across the groups. The population (or actually the sample) will be comprised of 70% from Group 1 and 30% from Group 2.
 
 I'll start off by generating 1000 observations total, randomizing 500 to each arm:
 
 ```{r dgp}
 library(simstudy)
 
-d1 <- defDataAdd(varname = "Y_low", formula = "0 + 2 * rx", 
+d1 <- defDataAdd(varname = "Y_1", formula = "0 + 2 * rx", 
                  variance = 1, dist = "normal")
-d1 <- defDataAdd(d1, varname = "Y_high", formula = "5 + 1 * rx", 
+d1 <- defDataAdd(d1, varname = "Y_2", formula = "5 + 1 * rx", 
                  variance = 4, dist = "normal")
 d1 <- defDataAdd(d1, varname = "Y", 
-                 formula = "Y_low | 0.7 + Y_high | 0.3", dist = "mixture")
+                 formula = "Y_1 | 0.7 + Y_2 | 0.3", dist = "mixture")
 
 set.seed(11778)
 dd <- genData(1000)
@@ -59,7 +55,7 @@ dd <- trtAssign(dd, grpName = "rx")
 dd <- addColumns(d1, dd)
 ```
 
-The histogram makes it quite clear that the data are *not* normally distributed:
+The histogram of these data makes it quite clear that the data are *not* normally distributed:
 
 ```{r distY, echo=FALSE, fig.width = 5, fig.height = 4}
 flabels <- c(paste0("control (n=",  dd[, .N, keyby = rx][rx == 0, N], ")"), 
@@ -78,11 +74,11 @@ ggplot(data = dd,
 
 ### Randomization
 
-In the simple case of two-arm trial, the randomization test is quite simple: we repeatedly assign randomly generated alternate treatment arm labels to each of the observations, and calculate the test statistic following each iteration.
+In the simple case of two-arm trial, the randomization test is quite simple: we repeatedly assign randomly generated alternate treatment arm labels to each of the observations, and calculate the test statistic following each iteration. In this case the test statistic in the difference in means $\Delta_\text{obs} = \bar{Y}_t - \bar{Y}_c$.
 
-In a more complex situation, where the data have an underlying structure, such as clustering, we have to make sure that the re-randomization does not violate that structure. In the case of a cluster randomized trial where all individuals within the cluster are in the same intervention arm, the null hypothesis is that cluster-level treatment has no impact, so we would re-randomize the cluster as a whole, not the individuals.
+In a more complex situation, where the data have an underlying structure, such as clustering, we have to make sure that the re-randomization does not violate that structure. For example, in the case of a cluster randomized trial where all individuals within the cluster are in the same intervention arm, the null hypothesis is that cluster-level treatment has no impact, so we would re-randomize the cluster as a whole, not the individuals.
 
-Here is an animation that depicts a single iteration, starting with original data, permuting the data, and calculating $\Delta^*$. In the data just generated $\Delta_\text{obs} = 1.6$ and the re-randomized $\Delta^* = 0.1$. (The code for the animation is in the <a href="#addendum">addendum</a>.) 
+Here is an animation that depicts a single iteration of the re-randomization process, starting with original data, permuting the data, and calculating $\Delta_i^*$, the test statistic for iteration $i$ of the procedure. In the data just generated $\Delta_\text{obs} = 1.9$ and the re-randomized $\Delta^* = 0.1$. (The code for the animation is in the <a href="#addendum">addendum</a>.) 
 
 ```{r}
 dd[, rx_s := sample(rx, replace = FALSE)]
@@ -129,7 +125,7 @@ animate(a, duration = 15, fps = 10, height = 450, width = 350)
 
 ### Estimating a p-value
 
-The animation is kind of a cool way to depict single iteration, but to estimate a distribution for $\Delta^*$ and ultimately the p-value, we need to do this repeatedly. Using 1000 iterations, the p-value will be vanishingly small, so I am creating a much smaller data set of 60 observations with an observed effect size of 1.8.
+The animation is kind of a cool way to depict single iteration, but to estimate a distribution for $\Delta^*$ and ultimately the p-value, we need to do this repeatedly. Using 1000 observations, the p-value will be vanishingly small, so I'm creating a much smaller data set of 60 observations with an observed effect size of 1.8.
 
 ```{r replicate}
 dd <- genData(60)
@@ -140,7 +136,7 @@ Delta_obs <- dd[rx == 1, mean(Y)] - dd[rx == 0, mean(Y)]
 Delta_obs
 ```
 
-The iteration process consists of repeatedly calling the simple function which randomly assigns labels and returns the group differences based on these new labels. It is generally recommended to run between 500 and 1500 iterations, so here I am using 1499.
+The iteration process consists of repeatedly calling a function that randomly assigns labels and returns the group differences based on these new labels. It is generally recommended to run between 500 and 1500 iterations, so here I am using 1499.
 
 ```{r iteration}
 randomize <- function(dx) {
@@ -173,6 +169,14 @@ The p-value is estimated by comparing $\Delta_\text{obs}$ with a combined data s
 
 ### Operating characteristics of the randomization test
 
+I was very interested to see what the Type I error rate would be for this example, so I repeatedly generated data sets under the assumption of no treatment effect . For each data set, I estimated both a traditional as well as a randomization test p-value. I used a large number of iterations - 48,000 to be exact - to make sure my Type I error estimate converged as close to as possible to the truth. 
+
+This would have taken days, probably close to a week, on my laptop; to get around this I used a high performance computer which I have [described](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} in the context of Bayesian modeling, and it took about 2 hours. If you'd like the code for this, I'm happy to share. 
+
+Using datasets with 20 observations, the standard Type I error rate was 4.46% and the error rate using the randomization test was 5.01% (I'm comfortable using such a high level of precision given the large number observations). With 40 observations, the error rates were 4.80& and 4.94%, respectively. 
+
+Not a huge difference, but a difference.
+
 <a name="addendum"></a>  
 
 \ 
@@ -197,10 +201,10 @@ dd4 <- dd[, .(iter = 4, id=id, rx = rx_s, rcolor = rx_s, Y=Y, perm = TRUE)]
 ddx <- rbind(dd1, dd2, dd3, dd4)
 ddx[, iter := factor(iter, 
   labels = c(
-    paste0("Original data (mean difference: ", dif_in_means_orig, ")"), 
-    "Permutation ...", 
-    "Permuted", 
-    paste0("After permutation (mean difference: ", dif_in_means_perm, ")")))]
+    paste0("Original data with effect size = ", dif_in_means_orig, " ..."), 
+    "permutation ...", 
+    "permutation ....", 
+    paste0("... after permutation, the mean difference = ", dif_in_means_perm)))]
 
 a <- ggplot(data = ddx, aes(x = rx, y = Y, group = id)) +
   geom_point(position = position_jitter(seed = 42), 

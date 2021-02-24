@@ -1,0 +1,82 @@
+---
+title: Framework for power analysis using simulation
+author: R package build
+date: '2021-03-16'
+slug: []
+categories: []
+tags: []
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<pre class="r"><code>s_define &lt;- function() {
+  
+  #--- data definition code ---#
+  
+  #--- end ---#
+  
+  return(list_of_defs) # list_of_defs is a list of simstudy data definitions
+}
+
+s_generate &lt;- function(deflist, argsvec) {
+  
+  list2env(deflist, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  #--- data generation code ---#
+  
+  #--- end ---#
+  
+  return(generated_data) #  generated_data is a data.table
+}
+
+s_model &lt;- function(dd) {
+  
+  #--- model code ---#
+  
+  #--- end ---#
+  
+  return(model_results) # model_results is a data.table
+}
+
+s_single_rep &lt;- function(argsvec) {
+  
+  list_of defs &lt;- s_define()
+  generated_data &lt;- s_generate(list_of_defs, argsvec)
+  model_results &lt;- s_model(generated_data)
+  
+  return(model_results)
+}
+
+s_replicate &lt;- function(argsvec, nsim) {
+  
+  model_results &lt;- rbindlist(
+    parallel::mclapply(
+      X = 1 : nsim, 
+      FUN = function(x) s_single_rep(argsvec), 
+      mc.cores = 4)
+  )
+  
+  #--- summary statistics code ---#
+  
+  #--- end ---#
+  
+  return(summary_stats) # summary_stats is a data.table
+}</code></pre>
+<pre class="r"><code>#---- specify varying power-related parameters ---#
+
+param_1 &lt;- c(...)
+param_2 &lt;- c(...)
+param_3 &lt;- c(...)
+
+argmat &lt;- expand.grid(param_1, param_2, param_3)
+args &lt;- asplit(argmat, MARGIN = 1)
+
+#--- run locally ---#
+
+summary_stats &lt;- rbindlist(lapply(args, function(a) s_replicate(a, nsim = 1000)))</code></pre>
