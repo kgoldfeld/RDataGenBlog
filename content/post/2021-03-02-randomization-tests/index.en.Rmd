@@ -19,25 +19,23 @@ draft: TRUE
 options(digits = 4)
 ```
 
-I am preparing a lecture on simulation for a statistical modeling class, and I want to talk about a couple of cases where simulation is intrinsic to the analytic method rather than as a tool for exploration and planning. MCMC methods used for Bayesian estimation, bootstrapping, and randomization tests all come to mind.
+I'm preparing a lecture on simulation for a statistical modeling class, and I plan on describing a couple of cases where simulation is intrinsic to the analytic method rather than as a tool for exploration and planning. MCMC methods used for Bayesian estimation, bootstrapping, and randomization tests all come to mind.
 
-Randomization tests are particularly interesting as an alternative approach to conducting hypothesis tests, because they allow us to avoid unrealistic assumptions. I've described this [before](https://www.rdatagen.net/post/permutation-test-for-a-covid-19-pilot-nursing-home-study/){target="_blank"} under the rubric of a permutation test. The example I use here is a little a different, though, truth be told, the real reason I'm sharing is that I came up with a nice little animation to illustrate a simple randomization process. So, even if I decide not to include it in the lecture, at least you've seen it.
+Randomization tests are particularly interesting as an approach to conducting hypothesis tests, because they allow us to avoid making unrealistic assumptions. I've written about this [before](https://www.rdatagen.net/post/permutation-test-for-a-covid-19-pilot-nursing-home-study/){target="_blank"} under the rubric of a permutation test. The example I use here is a little a different; truth be told, the real reason I'm sharing is that I came up with a nice little animation to illustrate a simple randomization process. So, even if I decide not to include it in the lecture, at least you've seen it.
 
 ### The goal of a randomization test
 
-In the context of an RCT with treatment and control arms where the aim is to compare average responses (measured by some outcome $Y$), the standard hypothesis test is framed around a null hypothesis $H_0: \mu_\text{t} = \mu_\text{c}$. In this framework, $\mu_\text{t}$ and $\mu_\text{c}$ are the average responses in the *population* under treatment and control, respectively. For this to be valid, we need to assume that the study sample is representative of the population of interest, that has been randomly selected; for most RCTs, this is a fairly untenable. Participants of studies are typically *not randomly drawn* from the population, but are more likely to have shown up in a particular setting, been identified for recruitment, and ultimately decided for themselves about participating.
+In the context of an RCT with treatment and control arms and we want to compare average responses (measured by some outcome $Y$), the standard hypothesis test is framed around a null hypothesis $H_0: \mu_\text{t} = \mu_\text{c}$. In this framework, $\mu_\text{t}$ and $\mu_\text{c}$ are the average responses in the *population* under treatment and control, respectively. For this to be valid, we need to assume that the study sample is representative of the population of interest, that has been randomly selected; for most RCTs, this is a fairly untenable. Participants of studies are typically *not randomly drawn* from the population, but are more likely to have shown up in a particular setting, been identified for recruitment, and ultimately decided for themselves about participating.
 
-The randomization test makes no assumption about whether the sample is representative. Rather, it asks a question that is limited to the sample at hand, regardless of how it was collected or created. The null hypothesis in the randomization test is that the average response *in the sample* is unrelated to treatment assignment. If we reject the null hypothesis and conclude that the treatment assignment mattered in this sample, we can decide to extend this conclusion to the population based on our understanding of the intervention and how the sample relates to this broader population. The leap from the sample to the population is baked into the standard hypothesis test, the generalization in the context of a randomization test is not so obvious.
+The randomization test makes no assumption about whether the sample is representative. Rather, it asks a question that is limited to the sample at hand, regardless of how it was collected or created. The null hypothesis in the randomization test is that the average response *in the sample* is unrelated to treatment assignment. If we reject the null hypothesis and conclude treatment assignment mattered in this sample, we can decide to extend this conclusion to the population based on our understanding of the intervention and how the sample relates to this broader population. In the standard hypothesis testing framework, the leap from the sample to the population is baked in; in the context of a randomization test, the generalization is not so obvious.
 
-And, it is important to reiterate that while the standard hypothesis test makes assumptions about normality (or at least about the validity of the Central Limit Theorem), the randomization test makes no assumptions about the underlying distribution of the outcome data.
-
-I hardly need to say there's a vast literature on this important topic, and if you want more, I found this [book](https://bit.ly/3qIgzSc){target=_"_blank"} very helpful.
+It is also important to underscore that while the standard hypothesis test makes assumptions about normality (or at least about the validity of the Central Limit Theorem), the randomization test makes no assumptions about the underlying distribution of the outcome data.
 
 ### Simulated data
 
-To test the importance of the normality assumption, I'm using a data generation process that mixes two populations - Group 1, where the outcome $Y_1 \sim N(\mu=0, \sigma^2=1)$ and Group 2, with larger mean and variance: $Y_2 \sim N(5,4)$. The treatment effect also differs across the groups. The population (or actually the sample) will be comprised of 70% from Group 1 and 30% from Group 2.
+To make things a little more interesting, and to to test the importance of the normality assumption, I'm using a data generation process that mixes two populations - Group 1, where the outcome $Y_1 \sim N(\mu=0, \sigma^2=1)$ and Group 2, with larger mean and variance: $Y_2 \sim N(5,4)$. The treatment effect also differs across the groups. The population (or actually the sample) will be comprised of 70% from Group 1 and 30% from Group 2.
 
-I'll start off by generating 1000 observations total, randomizing 500 to each arm:
+For the purposes of creating the animation, I am generating 1000 observations in total, randomizing 500 to each arm:
 
 ```{r dgp}
 library(simstudy)
@@ -76,9 +74,9 @@ ggplot(data = dd,
 
 In the simple case of two-arm trial, the randomization test is quite simple: we repeatedly assign randomly generated alternate treatment arm labels to each of the observations, and calculate the test statistic following each iteration. In this case the test statistic in the difference in means $\Delta_\text{obs} = \bar{Y}_t - \bar{Y}_c$.
 
-In a more complex situation, where the data have an underlying structure, such as clustering, we have to make sure that the re-randomization does not violate that structure. For example, in the case of a cluster randomized trial where all individuals within the cluster are in the same intervention arm, the null hypothesis is that cluster-level treatment has no impact, so we would re-randomize the cluster as a whole, not the individuals.
+In a more complex situation, where the data have an underlying structure, such as clustering or block randomization, we have to make sure that the re-randomization does not violate that structure. For example, in the case of a cluster randomized trial where all individuals within the cluster are in the same intervention arm, the null hypothesis is that cluster-level treatment has no impact, so we would re-randomize the cluster as a whole, not the individuals.
 
-Here is an animation that depicts a single iteration of the re-randomization process, starting with original data, permuting the data, and calculating $\Delta_i^*$, the test statistic for iteration $i$ of the procedure. In the data just generated $\Delta_\text{obs} = 1.9$ and the re-randomized $\Delta^* = 0.1$. (The code for the animation is in the <a href="#addendum">addendum</a>.) 
+Here is the animation that depicts a single iteration of the re-randomization process, starting with original data, permuting the data, and calculating $\Delta_i^*$, the test statistic for iteration $i$ of the procedure. In the data just generated $\Delta_\text{obs} = 1.9$ and the re-randomized $\Delta^* = 0.1$. (The code for the animation is in the <a href="#addendum">addendum</a>.) 
 
 ```{r}
 dd[, rx_s := sample(rx, replace = FALSE)]
@@ -136,7 +134,7 @@ Delta_obs <- dd[rx == 1, mean(Y)] - dd[rx == 0, mean(Y)]
 Delta_obs
 ```
 
-The iteration process consists of repeatedly calling a function that randomly assigns labels and returns the group differences based on these new labels. It is generally recommended to run between 500 and 1500 iterations, so here I am using 1499.
+The iteration process consists of repeatedly calling a function that randomly assigns labels and returns the group differences based on these new labels. It is generally recommended to run between 500 and 1500 iterations (including the observed data set, which can be viewed as just one iteration under the null hypothesis); here I am using 1500.
 
 ```{r iteration}
 randomize <- function(dx) {
@@ -151,7 +149,7 @@ randomize <- function(dx) {
 Delta_stars <- sapply(1:1499, function(x) randomize(dd))
 ```
 
-Here is a distribution of the $\Delta^*$'s where the red line indicates the observed value, $\Delta_\text{obs}$:
+The distribution of the $\Delta^*$'s appears to be normally distributed even though the underlying data are not; the red line indicates the observed value, $\Delta_\text{obs}$:
 
 ```{r plotDelta, fig.width = 5, fig.height = 3, echo=FALSE}
 ggplot(data = data.table(Delta_stars),
@@ -171,16 +169,11 @@ The p-value is estimated by comparing $\Delta_\text{obs}$ with a combined data s
 
 I was very interested to see what the Type I error rate would be for this example, so I repeatedly generated data sets under the assumption of no treatment effect . For each data set, I estimated both a traditional as well as a randomization test p-value. I used a large number of iterations - 48,000 to be exact - to make sure my Type I error estimate converged as close to as possible to the truth. 
 
-This would have taken days, probably close to a week, on my laptop; to get around this I used a high performance computer which I have [described](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} in the context of Bayesian modeling, and it took about 2 hours. If you'd like the code for this, I'm happy to share. 
+This would have taken days, probably close to a week, on my laptop; to get around this I used a high performance computer which I have [described](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} in the context of Bayesian modeling. Rather than days, it took about 2 hours. If you'd like the code for this, I'm happy to share. Using datasets with 20 observations, the standard Type I error rate was 4.5% and the error rate using the randomization test was exactly 5.0%. With 40 observations, the error rates were 4.8% and 4.9%, respectively. So it appears that, in these scenarios at least, the randomization test does a slightly better job of realizing the targeted 5% Type I error rate.
+ 
+<br />
 
-Using datasets with 20 observations, the standard Type I error rate was 4.46% and the error rate using the randomization test was 5.01% (I'm comfortable using such a high level of precision given the large number observations). With 40 observations, the error rates were 4.80& and 4.94%, respectively. 
-
-Not a huge difference, but a difference.
-
-<a name="addendum"></a>  
-
-\ 
-\ 
+<a name="addendum"></a> 
 
 ### Addendum
 
