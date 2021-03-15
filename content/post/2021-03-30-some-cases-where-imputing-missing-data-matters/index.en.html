@@ -1,0 +1,143 @@
+---
+title: Some cases where imputing missing data matters
+author: 
+date: '2021-03-30'
+slug: []
+categories: []
+tags:
+  - R
+  - Missing data
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>I thought I’d written about this before, but I searched through my posts and I couldn’t find what I was looking for. So, if I am repeating myself, my apologies. I actually explored <a href="https://www.rdatagen.net/post/musings-on-missing-data/" target="_blank">missing data</a> a couple of years ago, using directed acyclic graphs (DAGs) to help understand the various missing data mechanisms (MAR, MCAR, and MNAR). The DAGs provided insight into when we can use observed data to provide us with unbiased estimates of population quantities even though some of the observations are missing some information.</p>
+<p>In that original post, I mentioned that I might have more to say at some point in the future. Well, two years later I am thinking about missing data in the context of an ongoing randomized controlled trial, and the research team has been discussing various ways to address the potential biases that this missing information might be introducing into the analysis. The analytic framework for this trial is Bayesian, so I need to incorporate a missing data analysis into this specific context. The group has decided that we need to use some form of imputation of the missing data, but I wanted to be clear why imputation might actually be necessary. After all, it is quite well known that imputation may not be necessary (see this <a href="https://statisticalhorizons.com/ml-is-better-than-mi" target="_blank">post</a>, for example.) So, I had to convince myself that it was necessary in this case before implementing the analysis.</p>
+<div id="the-study-design-and-data-collection" class="section level3">
+<h3>The study design and data collection</h3>
+<p>The actual RCT is a considerably more complicated than I am describing here, but I want to keep it as simple as possible to highlight a key point or two. In this simplified study, individuals are randomized to one of two study arms <span class="math inline">\(A\)</span>, where <span class="math inline">\(A_i=1\)</span> if patient <span class="math inline">\(i\)</span> is in the treatment arm, and <span class="math inline">\(A_i = 0\)</span> if the the patient is in the control arm. We measure the outcome <span class="math inline">\(Y\)</span> at two time points, so we have <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>; our primary interest, however, is <span class="math inline">\(Y_2\)</span>. We are unable to measure a key covariate <span class="math inline">\(U\)</span> that influences both <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>. This is the true underlying DAG:</p>
+<p><img src="img/Study_DAG.png" style="width:40.0%" /></p>
+<p>There could be a scenario where there is an arrow between <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>, but not in this case. Its absence doesn’t really change the discussion. Our primary interest is estimating the strength of the effect that <span class="math inline">\(A\)</span> has directly on <span class="math inline">\(Y_2\)</span>, so we wouldn’t want to adjust for <span class="math inline">\(Y_1\)</span>, as will introduce bias. (See <a href="https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/" target="_blank">here</a> for a discussion of what happens when you control for a collider such as <span class="math inline">\(Y_1\)</span>.)</p>
+</div>
+<div id="simulation-of-a-somewhat-simplified-scenario" class="section level3">
+<h3>Simulation of a somewhat simplified scenario</h3>
+<p>Ultimately, I want to describe how we estimate the causal effect in the event that <span class="math inline">\(Y_2\)</span> is not measured for all subjects. But before we do that, let’s simplify things even further. In this second scenario, there is only a single outcome measurement <span class="math inline">\(Y\)</span>, though we have managed to measure the key baseline covariate, which is <span class="math inline">\(X\)</span>:</p>
+<p><img src="img/Study_simple_DAG.png" style="width:40.0%" /></p>
+<p>It turns out we have been able to collect the outcome measurement <span class="math inline">\(Y\)</span> for only a subset of the sample, so that we observe <span class="math inline">\(Y^*\)</span> that includes missing values for some of the subjects. In this case, the missing data mechanism is missing at random (MAR), where the level of the observed baseline covariate <span class="math inline">\(X\)</span> determines the probability of observing <span class="math inline">\(Y\)</span>. The indicator <span class="math inline">\(R_y = 1\)</span> when we do observe <span class="math inline">\(Y\)</span> and <span class="math inline">\(R_y = 0\)</span> when we do not.</p>
+<p><img src="img/MAR.png" style="width:40.0%" /></p>
+<p>Here are the libraries necessary for the simulations:</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(broom)
+library(data.table)
+library(mice)</code></pre>
+<p>The data definitions establish the relationship between <span class="math inline">\(A\)</span>, <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> (the treatment effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span> is 3.0), as well as create a missingness mechanism for <span class="math inline">\(Y\)</span> that is a function <span class="math inline">\(X\)</span>.</p>
+<pre class="r"><code>def1 &lt;- defData(varname = &quot;x&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
+
+def2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;6 + 3*a + 1*x&quot;, variance = 3)
+
+defm &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-3.2 + 2*x&quot;, logit.link = TRUE)</code></pre>
+<p>To generate the observed data, we first generate a complete data set (based on the data definitions), a missing data matrix, and then the observed data set which includes <span class="math inline">\(\text{NA}\)</span>’s for about 12% of the <span class="math inline">\(Y\)</span>’s.</p>
+<pre class="r"><code>set.seed(98723)
+
+dd &lt;- genData(500, def1)
+dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)
+dd &lt;- addColumns(def2, dd)
+
+ddmiss &lt;- genMiss(dd, defm, id = &quot;id&quot;)
+ddobs &lt;- genObs(dd, ddmiss, id = &quot;id&quot;)
+
+ddobs</code></pre>
+<pre><code>##       id     x a    y
+##   1:   1 -0.85 1   NA
+##   2:   2  0.59 0  9.1
+##   3:   3  0.55 1 12.5
+##   4:   4 -1.06 1  8.1
+##   5:   5  0.21 0  5.0
+##  ---                 
+## 496: 496 -2.63 1 10.2
+## 497: 497 -0.12 0  5.5
+## 498: 498  0.24 0  5.1
+## 499: 499 -1.68 0  6.3
+## 500: 500  0.13 0  5.6</code></pre>
+<p>The full data set <code>dd</code> (without any missing data), we can get a point estimate of the treatment effect merely by calculating <span class="math inline">\(\bar{Y}_{a=1} - \bar{Y}_{a=0}\)</span>:</p>
+<pre class="r"><code>dd[, .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]</code></pre>
+<pre><code>## [1] 2.5</code></pre>
+<p>There is no reason to believe that <span class="math inline">\(\bar{Y^*}_{a=1}\)</span> = <span class="math inline">\(\bar{Y}_{a=1}\)</span> or <span class="math inline">\(\bar{Y^*}_{a=0}\)</span> = <span class="math inline">\(\bar{Y}_{a=0}\)</span>. Observations with higher values of <span class="math inline">\(X\)</span> (and thus higher values of <span class="math inline">\(Y\)</span>) are more likely to have missing <span class="math inline">\(Y\)</span>’s, so the average observed values in both treatment groups should be lower. And this seems to be the case with this data set:</p>
+<pre class="r"><code>dd[, .(avg = mean(y)), keyby = a]</code></pre>
+<pre><code>##    a avg
+## 1: 0 6.3
+## 2: 1 8.8</code></pre>
+<pre class="r"><code>ddobs[, (avg = mean(y, na.rm = TRUE)), keyby = a]</code></pre>
+<pre><code>##    a  V1
+## 1: 0 6.1
+## 2: 1 8.6</code></pre>
+<p>But, it looks like, in this case at least, the bias in estimates of the means just using the observed values are offsetting, so that the estimate of the <em>difference</em> is unbiased:</p>
+<pre class="r"><code>ddobs[!is.na(y), .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
+<pre><code>## [1] 2.5</code></pre>
+<p>If this is the case more generally for data sets generated using this mechanism, it may turn out we don’t need to worry at all about the missing data; even though we know it is MAR, we might be able to treat it as MCAR, and just use the complete observations only without any adjustment or imputation.</p>
+<p>Simulating 1000 data sets using steps outlined above provides insight into the nature of the bias. The plot shows the estimate for each data set, and it is clear that the estimates of the average outcome in each arm are biased when we do not take into consideration the missingness. However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data.</p>
+<p><img src="img/comp_obs.png" /></p>
+</div>
+<div id="next-section" class="section level3">
+<h3>Next section</h3>
+<p><img src="img/MAR_collide.png" style="width:40.0%" /></p>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
+
+d2 &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;5 + a*2 + u*2&quot;, variance = 2)
+d2 &lt;- defDataAdd(d2, &quot;y2&quot;, formula = &quot;6 + a*3 + u*2&quot;, variance = 2)
+
+dm &lt;- defMiss(varname = &quot;y2&quot;, formula = &quot;-3.5 + .4*y1&quot;, logit.link = TRUE)
+
+set.seed(67124)
+# set.seed(48172)
+
+dd &lt;- genData(500, d1)
+dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)
+dd &lt;- addColumns(d2, dd)
+
+dmiss &lt;- genMiss(dd, dm, id = &quot;id&quot;)
+dobs &lt;- genObs(dd, dmiss, id = &quot;id&quot;)
+
+dd[, .(.N, mean(y2)), keyby = .(a)]</code></pre>
+<pre><code>##    a   N V2
+## 1: 0 250  6
+## 2: 1 250  9</code></pre>
+<pre class="r"><code>dobs[!is.na(y2), .(avg = mean(y2)), keyby = a]</code></pre>
+<pre><code>##    a avg
+## 1: 0 5.9
+## 2: 1 8.4</code></pre>
+<pre class="r"><code>dd[, .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
+<pre><code>## [1] 2.9</code></pre>
+<pre class="r"><code>dobs[!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
+<pre><code>## [1] 2.6</code></pre>
+<pre class="r"><code>tidy(lm(y2 ~ a, data = dd))</code></pre>
+<pre><code>## # A tibble: 2 x 5
+##   term        estimate std.error statistic   p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
+## 1 (Intercept)     6.02     0.152      39.5 1.09e-155
+## 2 a               2.94     0.215      13.7 2.28e- 36</code></pre>
+<pre class="r"><code>tidy(lm(y2 ~ y1 + a, data = dobs))</code></pre>
+<pre><code>## # A tibble: 3 x 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)    2.96     0.228      13.0  6.57e-32
+## 2 y1             0.631    0.0413     15.3  5.50e-41
+## 3 a              1.38     0.205       6.74 6.19e-11</code></pre>
+<pre class="r"><code>library(mice)
+imp &lt;- mice(dobs[,-&quot;id&quot;], m=20, maxit=5, print=FALSE)
+
+fit &lt;- with(imp, lm(y2 ~ a))
+summary(pool(fit))</code></pre>
+<pre><code>##          term estimate std.error statistic  df p.value
+## 1 (Intercept)      6.1      0.16        39 370       0
+## 2           a      2.8      0.23        12 263       0</code></pre>
+</div>
