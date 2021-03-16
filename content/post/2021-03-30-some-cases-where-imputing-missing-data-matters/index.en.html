@@ -84,47 +84,36 @@ ddobs</code></pre>
 <pre class="r"><code>ddobs[!is.na(y), .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
 <pre><code>## [1] 2.5</code></pre>
 <p>If this is the case more generally for data sets generated using this mechanism, it may turn out we don’t need to worry at all about the missing data; even though we know it is MAR, we might be able to treat it as MCAR, and just use the complete observations only without any adjustment or imputation.</p>
-<p>Simulating 1000 data sets using steps outlined above provides insight into the nature of the bias. The plot shows the estimate for each data set, and it is clear that the estimates of the average outcome in each arm are biased when we do not take into consideration the missingness. However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data.</p>
+<p>Simulating 2500 data sets using steps outlined above provides insight into the nature of the bias. The plot shows the estimate for each data set, and it is clear that the estimates of the average outcome in each arm are biased when we do not take into consideration the missingness. However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data.</p>
 <p><img src="img/comp_obs.png" /></p>
 </div>
-<div id="next-section" class="section level3">
-<h3>Next section</h3>
+<div id="scenario-with-repeated-measurements" class="section level3">
+<h3>Scenario with repeated measurements</h3>
+<p>The original scenario that motivated this post with an added missing data mechanism is depicted in the next DAG. Those with higher scores in the first period are more likely to have missing values in the second time period, perhaps because they have improved sufficiently and no longer feel like participating in the study.</p>
 <p><img src="img/MAR_collide.png" style="width:40.0%" /></p>
-<pre class="r"><code>d1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
+<p>The DAG is implemented with these definitions:</p>
+<pre class="r"><code>def1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
 
-d2 &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;5 + a*2 + u*2&quot;, variance = 2)
-d2 &lt;- defDataAdd(d2, &quot;y2&quot;, formula = &quot;6 + a*3 + u*2&quot;, variance = 2)
+def2 &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;5 + 2*a + 2*u&quot;, variance = 2)
+def2 &lt;- defDataAdd(def2, &quot;y2&quot;, formula = &quot;6 + 3*a + 2*u&quot;, variance = 2)
 
-dm &lt;- defMiss(varname = &quot;y2&quot;, formula = &quot;-3.5 + .4*y1&quot;, logit.link = TRUE)
+defm &lt;- defMiss(varname = &quot;y2&quot;, formula = &quot;-3.5 + 0.4*y1&quot;, logit.link = TRUE)</code></pre>
+<p>And we can go ahead a generate a complete data set, a missing data matrix, and an observed data set with missing values.</p>
+<pre class="r"><code>set.seed(67124)
 
-set.seed(67124)
-# set.seed(48172)
-
-dd &lt;- genData(500, d1)
+dd &lt;- genData(500, def1)
 dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)
-dd &lt;- addColumns(d2, dd)
+dd &lt;- addColumns(def2, dd)
 
-dmiss &lt;- genMiss(dd, dm, id = &quot;id&quot;)
-dobs &lt;- genObs(dd, dmiss, id = &quot;id&quot;)
-
-dd[, .(.N, mean(y2)), keyby = .(a)]</code></pre>
-<pre><code>##    a   N V2
-## 1: 0 250  6
-## 2: 1 250  9</code></pre>
-<pre class="r"><code>dobs[!is.na(y2), .(avg = mean(y2)), keyby = a]</code></pre>
-<pre><code>##    a avg
-## 1: 0 5.9
-## 2: 1 8.4</code></pre>
+dmiss &lt;- genMiss(dd, defm, id = &quot;id&quot;)
+dobs &lt;- genObs(dd, dmiss, id = &quot;id&quot;)</code></pre>
+<p>The estimate of the effect size using the difference in averages from the complete data set is 2.9:</p>
 <pre class="r"><code>dd[, .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
 <pre><code>## [1] 2.9</code></pre>
-<pre class="r"><code>dobs[!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
+<p>Unlike the simplified case, the estimate of the effect size using the difference in averages is attenuated, and is possibly biased, coming in slightly lower at 2.6:</p>
+<pre class="r"><code>dobs[!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]</code></pre>
 <pre><code>## [1] 2.6</code></pre>
-<pre class="r"><code>tidy(lm(y2 ~ a, data = dd))</code></pre>
-<pre><code>## # A tibble: 2 x 5
-##   term        estimate std.error statistic   p.value
-##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;
-## 1 (Intercept)     6.02     0.152      39.5 1.09e-155
-## 2 a               2.94     0.215      13.7 2.28e- 36</code></pre>
+<p>If we suspect that the bias is due to the fact that first period measurement is a predictor of missingness in the second period, we might be tempted to use a regression model that adjusts for the first period measurement to estimate the treatment effect. However, controlling for <span class="math inline">\(Y_1\)</span>, which is a collider, only induces additional bias, and indeed, the estimate is even further away from the truth.</p>
 <pre class="r"><code>tidy(lm(y2 ~ y1 + a, data = dobs))</code></pre>
 <pre><code>## # A tibble: 3 x 5
 ##   term        estimate std.error statistic  p.value
@@ -132,6 +121,7 @@ dd[, .(.N, mean(y2)), keyby = .(a)]</code></pre>
 ## 1 (Intercept)    2.96     0.228      13.0  6.57e-32
 ## 2 y1             0.631    0.0413     15.3  5.50e-41
 ## 3 a              1.38     0.205       6.74 6.19e-11</code></pre>
+<p>So, in this case, where missingness is a function of a variable that</p>
 <pre class="r"><code>library(mice)
 imp &lt;- mice(dobs[,-&quot;id&quot;], m=20, maxit=5, print=FALSE)
 
@@ -140,4 +130,53 @@ summary(pool(fit))</code></pre>
 <pre><code>##          term estimate std.error statistic  df p.value
 ## 1 (Intercept)      6.1      0.16        39 370       0
 ## 2           a      2.8      0.23        12 263       0</code></pre>
+<p><img src="img/full.png" style="width:70.0%" /></p>
+<p><img src="img/impute.png" style="width:40.0%" /></p>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+<p>In case you’d like to play around with other scenarios, I’m including the code that will allow you to repeatedly sample data sets:</p>
+<pre class="r"><code>#--- Data definitions
+
+d1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
+
+d2 &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;5 + a*2 + u*2&quot;, variance = 2)
+d2 &lt;- defDataAdd(d2, &quot;y2&quot;, formula = &quot;6 + a*3 + u*2&quot;, variance = 2)
+
+dm &lt;- defMiss(varname = &quot;y2&quot;, formula = &quot;-3.5 + 0.4*y1&quot;, logit.link = TRUE)
+
+#--- 
+
+s_generate &lt;- function(n) {
+  
+  dd &lt;- genData(n, d1)
+  dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)
+  dd &lt;- addColumns(d2, dd)
+  
+  dmiss &lt;- genMiss(dd, dm, id = &quot;id&quot;)
+  dobs &lt;- genObs(dd, dmiss, id = &quot;id&quot;)
+  
+  return(list(dd, dobs))
+  
+}
+
+s_replicate &lt;- function(n) {
+  
+  dsets &lt;- s_generate(n)
+  est.complete &lt;- coef(lm(y2 ~ a, data = dsets[[1]]))[&quot;a&quot;]
+  est.obs &lt;- coef(lm(y2 ~ y1 + a, data = dsets[[2]]))[&quot;a&quot;]
+  
+  imp &lt;- mice(dsets[[2]][,-&quot;id&quot;], m=20, maxit=5, print=FALSE)
+  
+  fit &lt;- with(imp, lm(y2 ~ a))
+  pooled.ests &lt;- summary(pool(fit))
+  est.impute &lt;- pooled.ests$estimate[2]
+  
+  diff.complete &lt;- dsets[[1]][, .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    
+  diff.obs&lt;- dsets[[2]][!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2] 
+  
+  return(data.table(est.complete, diff.complete, est.obs, diff.obs, est.impute))
+}
+
+results &lt;- rbindlist(mclapply(1:2500, function(x) s_replicate(300), mc.cores = 4))</code></pre>
 </div>

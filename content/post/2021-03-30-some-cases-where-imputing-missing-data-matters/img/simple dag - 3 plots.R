@@ -37,31 +37,43 @@ s_replicate <- function(n) {
   return(results)
 }
 
+RNGkind("L'Ecuyer-CMRG")
 set.seed(18271)
 
-results <- rbindlist(mclapply(1:1000, function(x) s_replicate(300), mc.cores = 4))
+results_sim <- rbindlist(mclapply(1:2500, function(x) s_replicate(300), mc.cores = 4))
 
 results[, .(mean(diff.complete), mean(diff.obs), mean(avg0_c), mean(avg0_o), mean(avg1_c), mean(avg1_o)) ]
 results[, .(sd(diff.complete), sd(diff.obs)) ]
 
-p1 <- ggplot(data = results, aes(x = diff.complete, y=diff.obs)) +
+mu_c <- results_sim[, mean(diff.complete)]
+mu_o <- results_sim[, mean(diff.obs)]
+
+p1 <- ggplot(data = results_sim, aes(x = diff.complete, y=diff.obs)) +
+  geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
+  geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
   scale_x_continuous(limits = c(2, 4), breaks = c(2.5, 3, 3.5), name = "Complete data") +
   scale_y_continuous(limits = c(2, 4), breaks = c(2.5, 3, 3.5), name = "Observed data") +
   ggtitle("Effect size")
 
+mu_c <- results_sim[, mean(avg0_c)]
+mu_o <- results_sim[, mean(avg0_o)]
 
-p2 <- ggplot(data = results, aes(x = avg0_c, y=avg0_o)) +
+p2 <- ggplot(data = results_sim, aes(x = avg0_c, y=avg0_o)) +
+  geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
+  geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
   scale_x_continuous(limits = c(5.2, 6.7), breaks = c(5.5, 6, 6.5), name = "Complete data") +
   scale_y_continuous(limits = c(5.2, 6.7), breaks = c(5.5, 6, 6.5), name = "Observed data") +
   ggtitle("Average Y (control arm)")
 
-p3 <- ggplot(data = results, aes(x = avg1_c, y=avg1_o)) +
+mu_c <- results_sim[, mean(avg1_c)]
+mu_o <- results_sim[, mean(avg1_o)]
+
+p3 <- ggplot(data = results_sim, aes(x = avg1_c, y=avg1_o)) +
+  geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
+  geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +  
   geom_point(size = .5) +
-  geom_abline(slope = 1, intercept = 0, color = "red") +
   scale_x_continuous(limits = c(8.2, 9.7), breaks = c(8.5, 9, 9.5), name = "Complete data") +
   scale_y_continuous(limits = c(8.2, 9.7), breaks = c(8.5, 9, 9.5), name = "Observed data") +
   ggtitle("Average Y (treatment arm)")

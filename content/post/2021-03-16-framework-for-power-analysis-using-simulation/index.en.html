@@ -12,7 +12,6 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: TRUE
 ---
 
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
@@ -22,7 +21,7 @@ draft: TRUE
 <p>What I have here is another attempt to document and organize a process that I find myself doing quite often - repeated data generation and model fitting. Whether I am conducting a power analysis using simulation or exploring operating characteristics of different models, I take a pretty similar approach. I refer to this structure when I am starting a new project, so I thought it would be nice to have it easily accessible online - and that way others might be able to refer to it as well.</p>
 <div id="the-framework" class="section level3">
 <h3>The framework</h3>
-<p>I will provide a simple application below, but first I am just showing the general structure. The basic idea is that we want to generate data under a variety of assumptions - for example, a power analysis will assume different sample sizes, effects, and/or levels of variation - and for <em>each set of assumptions</em>, we want to generate a large number of replications to mimic repeated sampling from a population. The key elements of the process include (1) <em>defining</em> the data, (2) <em>generating</em> a data set, (3) <em>fitting a model</em> to the data, and (4) <em>providing summary statistics</em>.</p>
+<p>I will provide a simple application below, but first I’ll show the general structure. The basic idea is that we want to generate data under a variety of assumptions - for example, a power analysis will assume different sample sizes, effects, and/or levels of variation - and for <em>each set of assumptions</em>, we want to generate a large number of replications to mimic repeated sampling from a population. The key elements of the process include (1) <em>defining</em> the data, (2) <em>generating</em> a data set, (3) <em>fitting a model</em> to the data, and (4) <em>providing summary statistics</em>.</p>
 <p>If you have familiarity with <code>simstudy</code>, I’d say the code is pretty self-explanatory. In the function <code>s_generate</code>, there is a call to base R function <code>list2env</code>, which makes all elements of a list available as variables in the function’s environment. The replication process is managed by the <code>mclapply</code> function from the <code>parallel</code> package. (Alternative approaches include using function <code>lapply</code> in base R or using a <em>for</em> loop.)</p>
 <pre class="r"><code>s_define &lt;- function() {
   
@@ -73,7 +72,7 @@ s_replicate &lt;- function(argsvec, nsim) {
 }</code></pre>
 <div id="specifying-scenarios" class="section level4">
 <h4>Specifying scenarios</h4>
-<p>The possible values of each data generating parameter are specified as a vector. Different data generating parameters are specified in different vectors. The function <code>scenario_list</code> creates all possible combinations of the values of the various parameters, so that there will be <span class="math inline">\(n_1 \times n_2 \times n_3 \times ...\)</span> scenarios, where <span class="math inline">\(n_i\)</span> is the number of possible values for parameter <span class="math inline">\(i\)</span>. Examples of parameters might be sample size, effect size, variance, etc. - or any value that can be used in the data generation process.</p>
+<p>The possible values of each data generating parameter are specified as a vector. The function <code>scenario_list</code> creates all possible combinations of the values of the various parameters, so that there will be <span class="math inline">\(n_1 \times n_2 \times n_3 \times ...\)</span> scenarios, where <span class="math inline">\(n_i\)</span> is the number of possible values for parameter <span class="math inline">\(i\)</span>. Examples of parameters might be sample size, effect size, variance, etc, really any value that can be used in the data generation process.</p>
 <p>The process of data generation and model fitting is executed for each combination of <span class="math inline">\(n_1 \times n_2 \times n_3 \times ...\)</span> scenarios. This can be done locally using function <code>lapply</code> or using a high performance computing environment using something like <code>Slurm_lapply</code> in the <code>slurmR</code> package. (I won’t provide an example of that here - let me know if you’d like to see that.)</p>
 <pre class="r"><code>#---- specify varying power-related parameters ---#
 
@@ -185,18 +184,18 @@ summary_stats &lt;- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim 
 <p>The overall results (in this case, the power estimate) can be reported for each scenario.</p>
 <pre class="r"><code>summary_stats</code></pre>
 <pre><code>##     delta svar npat power
-##  1:  0.50 0.25    8 0.536
-##  2:  0.75 0.25    8 0.724
-##  3:  1.00 0.25    8 0.972
-##  4:  0.50 0.50    8 0.348
-##  5:  0.75 0.50    8 0.696
-##  6:  1.00 0.50    8 0.900
-##  7:  0.50 0.25   16 0.628
+##  1:  0.50 0.25    8 0.480
+##  2:  0.75 0.25    8 0.844
+##  3:  1.00 0.25    8 0.960
+##  4:  0.50 0.50    8 0.368
+##  5:  0.75 0.50    8 0.684
+##  6:  1.00 0.50    8 0.904
+##  7:  0.50 0.25   16 0.660
 ##  8:  0.75 0.25   16 0.940
 ##  9:  1.00 0.25   16 1.000
-## 10:  0.50 0.50   16 0.420
-## 11:  0.75 0.50   16 0.772
-## 12:  1.00 0.50   16 0.964</code></pre>
+## 10:  0.50 0.50   16 0.464
+## 11:  0.75 0.50   16 0.792
+## 12:  1.00 0.50   16 0.956</code></pre>
 <p>We can also plot the results easily to get a clearer picture. Higher between-site variation clearly reduces power, as do smaller effect sizes and smaller sizes. None of this is surprising, but is always nice to see things working out as expected:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/powerplot-1.png" width="768" /></p>
 </div>
