@@ -1,6 +1,6 @@
 ---
 title: 
-  "The case of three MAR mechanisms: when does imputing missing data matter?"
+  "The case of three MAR mechanisms: is multiple imputation ever imperative?"
 author: 
 date: '2021-03-30'
 slug: []
@@ -132,73 +132,52 @@ This time around, if we go ahead and naïvely estimate $\delta^* = \bar{Y}_{a=1}
 
 ![](img/MAR_2_diff.png){width=40%}
 
-The reason for this bias is that higher values of $Y$ are more likely to be missing:  the presence of of $X$ both drives $Y$ higher *and* increases the likelihood of missingness. Even though the rate of missingness is the same across the arms, the missing values in the treatment arm are on average higher ...
+The reason for this bias is that the mix of $X$ in the sample has changed. In the complete data set $P(X=1) = 0.50$, but in an observed data set with missing values $P^*(X=1) = 0.44$ (this can be confirmed using the assumptions from the data generation process, but I'll let you do that as an exercise if you'd like.) The population average treatment effect is $P(X=0) \times 1 + P(X=1) \times 4 = 2.5$. And in the data set with missing data $P^*(X=0) \times 1 + P^*(X=1) \times 4 = 0.56 \times 1 + 0.44 \times 4 = 2.3$.
+
+We can still estimate the treatment effect if we adjust for $X$ in a regression model, or just take the difference in means within each level of $X$. These estimates are unbiased:
 
 ![](img/MAR_2_adj.png){width=70%}
 
+If we want to recover the population average treatment effect, we can reweight the group-level treatment effects by the distribution of $X$ in complete sample (since $X$ is fully observed). No imputation is needed.
+
 ### Case #3
 
-The original scenario that motivated this post with an added missing data mechanism is depicted in the next DAG. Those with higher scores in the first period are more likely to have missing values in the second time period, perhaps because they have improved sufficiently and no longer feel like participating in the study.
-
-There could be a scenario where there is an arrow between $Y_1$ and $Y_2$, but not in this case. Its absence doesn't really change the discussion. Our primary interest is estimating the strength of the effect that $A$ has directly on $Y_2$, so we wouldn't want to adjust for $Y_1$, as will introduce bias. (See [here](https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/){target="_blank"} for a discussion of what happens when you control for a collider such as $Y_1$.)
+Now we are back to the original motivating scenario. The missing data mechanism is depicted in the next DAG. Those with higher scores in the first period are more likely to have missing values in the second time period, perhaps because they have improved sufficiently and no longer feel like participating in the study.
 
 ![](img/MAR_3_DAG.png){width=40%}
 
 The DAG is implemented with these definitions:
 
 ```{r}
-def1 <- defData(varname = "u", formula=0, variance = 1, dist = "normal")
+def1 <- defData(varname = "x", formula=0.5, dist = "binary")
 
-def2 <- defDataAdd(varname = "y1", formula = "5 + 2*a + 2*u", variance = 2)
-def2 <- defDataAdd(def2, "y2", formula = "6 + 3*a + 2*u", variance = 2)
+def2 <- defDataAdd(varname = "y1", formula = "5 + a*2.5 + 5*x", variance = 2)
+def2 <- defDataAdd(def2, "y2", formula = "1 + y1 + 5*x", variance = 2)
 
-defm <- defMiss(varname = "y2", formula = "-3.5 + 0.4*y1", logit.link = TRUE)
+defm <- defMiss(varname = "y2", formula = "-4.5 + 0.3*y1", logit.link = TRUE)
 ```
 
-And we can go ahead a generate a complete data set, a missing data matrix, and an observed data set with missing values.
-
-```{r}
-set.seed(67124)
-
-dd <- genData(500, def1)
-dd <- trtAssign(dd, grpName = "a")
-dd <- addColumns(def2, dd)
-
-dmiss <- genMiss(dd, defm, id = "id")
-dobs <- genObs(dd, dmiss, id = "id")
-```
-
-The estimate of the effect size using the difference in averages from the complete data set is 2.9:
-
-```{r}
-dd[, .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    
-```
-
-Unlike the simplified case, the estimate of the effect size using the difference in averages is attenuated, and is possibly biased, coming in slightly lower at 2.6:
-
-```{r}
-dobs[!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]
-```
-
-If we suspect that the bias is due to the fact that first period measurement is a predictor of missingness in the second period, we might be tempted to use a regression model that adjusts for the first period measurement to estimate the treatment effect. However, controlling for $Y_1$, which is a collider, only induces additional bias, and indeed, the estimate is even further away from the truth.
-
-```{r}
-tidy(lm(y2 ~ y1 + a, data = dobs))
-```
-
-So, in this case, where missingness is a function of a variable that
-
-```{r}
-library(mice)
-imp <- mice(dobs[,-"id"], m=20, maxit=5, print=FALSE)
-
-fit <- with(imp, lm(y2 ~ a))
-summary(pool(fit))
-```
+In this case, simply comparing the means in the data sets with missing data provides an biased estimate - we can see this on the left; the argument is similar to the one I made in the previous scenario. If we opt to control for $Y_1$, we introduce all sorts of biases, as $Y_1$ is a mediator between $A$ and $Y_2$, as well as a collider. (I've written about the dangers of controlling for post-intervention variables [here](https://www.rdatagen.net/post/be-careful/){target="_blank"} and the need to be careful with colliders [here](https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/){target="_blank"}.)
 
 ![](img/MAR_3_trt.png){width=70%}
 
+Since neither a simple comparison of means nor an adjusted model will suffice here, our only option is to use multiple imputation, which in `R` can be can be implemented with the package [mice](https://amices.org/mice/){target="_blank"}. Below, I am showing code that generates 20 imputed data sets, fits models for each of them, and pools the results to provide a single estimate and measure of uncertainty.
+
+```{r, eval=FALSE}
+library(mice)
+
+imp <- mice(ddobs[,-"id"], m=20, maxit=5, print=FALSE)
+fit <- with(imp, lm(y2 ~ a))
+results <- summary(pool(fit))
+```
+
+Multiple imputation has been applied to the same 2500 data sets with missing data that are represented in the biased estimate plots. The plot below shows a pretty strong correlation with the estimates from the full data mode, and both are centered at the true population effect of 2.5.
+
 ![](img/MAR_3_imp.png){width=40%}
+
+The takeaway from all this is that while multiple imputation is not always necessary, if you think there are potentially unmeasured confounders or post-intervention measures that are conceivably in the mix, a multiple imputation approach might be wiser than trying to adjust your way out of the problem.
+
+I plan on implementing a Bayesian model that treats the missing data as parameters. If I can get that working, I will share it here, of course.
 
 <br />
 
@@ -225,19 +204,19 @@ s_generate <- function(n) {
 s_replicate <- function(n) {
   
   dsets <- s_generate(n)
-  est.complete <- coef(lm(y2 ~ a, data = dsets[[1]]))["a"]
-  est.obs <- coef(lm(y2 ~ y1 + a, data = dsets[[2]]))["a"]
-  
-  imp <- mice(dsets[[2]][,-"id"], m=20, maxit=5, print=FALSE)
-  
-  fit <- with(imp, lm(y2 ~ a))
-  pooled.ests <- summary(pool(fit))
-  est.impute <- pooled.ests$estimate[2]
   
   diff.complete <- dsets[[1]][, .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2]    
   diff.obs<- dsets[[2]][!is.na(y2), .(avg = mean(y2)), keyby = a][ , avg - shift(avg)][2] 
   
-  return(data.table(est.complete, diff.complete, est.obs, diff.obs, est.impute))
+  est.complete <- coef(lm(y2 ~ a, data = dsets[[1]]))["a"]
+  est.obs <- coef(lm(y2 ~ y1 + a, data = dsets[[2]]))["a"]
+  
+  imp <- mice(dsets[[2]][,-"id"], m=20, maxit=5, print=FALSE)
+  fit <- with(imp, lm(y2 ~ a))
+  pooled.ests <- summary(pool(fit))
+  est.impute <- pooled.ests$estimate[2]
+  
+  return(data.table(diff.complete, est.complete, diff.obs, est.obs, est.impute))
 }
 
 results <- rbindlist(mclapply(1:2500, function(x) s_replicate(300), mc.cores = 4))
