@@ -5,13 +5,12 @@ library(parallel)
 theme_update(panel.grid = element_blank(),
              plot.title = element_text(size = 10, face = "bold"))
 
+d1 <- defData(varname = "x", formula=0.5, dist = "binary")
 
-d1 <- defData(varname = "u", formula=0, variance = 1, dist = "normal")
+d2 <- defDataAdd(varname = "y1", formula = "5 + a*2.5 + 5*x", variance = 2)
+d2 <- defDataAdd(d2, "y2", formula = "1 + y1 + 5*x", variance = 2)
 
-d2 <- defDataAdd(varname = "y1", formula = "5 + a*2 + u*2", variance = 2)
-d2 <- defDataAdd(d2, "y2", formula = "6 + a*3 + u*2", variance = 2)
-
-dm <- defMiss(varname = "y2", formula = "-3.5 + 0.4*y1", logit.link = TRUE)
+dm <- defMiss(varname = "y2", formula = "-4.5 + 0.3*y1", logit.link = TRUE)
 
 
 #--- 
@@ -55,8 +54,8 @@ p1 <- ggplot(data = results, aes(x = diff.complete, y=diff.obs)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(.7, 4.2), name = "Complete data") +
-  scale_y_continuous(limits = c(.7, 4.2), name = "Observed data") +
+  scale_x_continuous(limits = c(-.3, 4.7), breaks = seq(0, 4.5, .5), name = "Complete data") +
+  scale_y_continuous(limits = c(-.3, 4.7), breaks = seq(0, 4.5, .5), name = "Observed data") +
   ggtitle("Difference in means")
 
 mu_c <- results[, mean(est.complete)]
@@ -66,8 +65,8 @@ p2 <- ggplot(data = results, aes(x = est.complete, y=est.obs)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(.7, 4.2), name = "Complete data") +
-  scale_y_continuous(limits = c(.7, 4.2), name = "Observed data") +
+  scale_x_continuous(limits = c(-.3, 4.7),  breaks = seq(0, 4.5, .5), name = "Complete data") +
+  scale_y_continuous(limits = c(-3, -1),  breaks = seq(-3, -1, .5), name = "Observed data") +
   ggtitle("Linear regression with adjustment")
 
 mu_c <- results[, mean(est.complete)]
@@ -77,15 +76,15 @@ p3 <- ggplot(data = results, aes(x = est.complete, y=est.impute)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_i,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(1.8, 4.2), name = "Complete data") +
-  scale_y_continuous(limits = c(1.8, 4.2), name = "Imputed data") +
-  ggtitle("Linear regression with adjustment")
+  scale_x_continuous(limits = c(-.3, 4.7), breaks = seq(0, 4.5, .5), name = "Complete data") +
+  scale_y_continuous(limits = c(-.3, 4.7), breaks = seq(0, 4.5, .5), name = "Imputed data") +
+  ggtitle("Simple linear regression")
 
 ggsave(
-  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/full.png",
+  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/MAR_3_trt.png",
   gridExtra::grid.arrange(p1, p2, nrow = 1), width = 4, height = 2, scale = 1.7)
 
 ggsave(
-  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/impute.png",
+  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/MAR_3_imp.png",
   gridExtra::grid.arrange(p3, nrow = 1), width = 2, height = 2, scale = 2)
 

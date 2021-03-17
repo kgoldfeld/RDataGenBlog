@@ -1,5 +1,6 @@
 ---
-title: Some cases where imputing missing data matters
+title: 
+  "The case of three MAR mechanisms: when does imputing missing data matter?"
 author: 
 date: '2021-03-30'
 slug: []
@@ -19,34 +20,33 @@ draft: TRUE
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>I thought I’d written about this before, but I searched through my posts and I couldn’t find what I was looking for. So, if I am repeating myself, my apologies. I actually explored <a href="https://www.rdatagen.net/post/musings-on-missing-data/" target="_blank">missing data</a> a couple of years ago, using directed acyclic graphs (DAGs) to help understand the various missing data mechanisms (MAR, MCAR, and MNAR). The DAGs provided insight into when we can use observed data to provide us with unbiased estimates of population quantities even though some of the observations are missing some information.</p>
-<p>In that original post, I mentioned that I might have more to say at some point in the future. Well, two years later I am thinking about missing data in the context of an ongoing randomized controlled trial, and the research team has been discussing various ways to address the potential biases that this missing information might be introducing into the analysis. The analytic framework for this trial is Bayesian, so I need to incorporate a missing data analysis into this specific context. The group has decided that we need to use some form of imputation of the missing data, but I wanted to be clear why imputation might actually be necessary. After all, it is quite well known that imputation may not be necessary (see this <a href="https://statisticalhorizons.com/ml-is-better-than-mi" target="_blank">post</a>, for example.) So, I had to convince myself that it was necessary in this case before implementing the analysis.</p>
-<div id="the-study-design-and-data-collection" class="section level3">
-<h3>The study design and data collection</h3>
-<p>The actual RCT is a considerably more complicated than I am describing here, but I want to keep it as simple as possible to highlight a key point or two. In this simplified study, individuals are randomized to one of two study arms <span class="math inline">\(A\)</span>, where <span class="math inline">\(A_i=1\)</span> if patient <span class="math inline">\(i\)</span> is in the treatment arm, and <span class="math inline">\(A_i = 0\)</span> if the the patient is in the control arm. We measure the outcome <span class="math inline">\(Y\)</span> at two time points, so we have <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>; our primary interest, however, is <span class="math inline">\(Y_2\)</span>. We are unable to measure a key covariate <span class="math inline">\(U\)</span> that influences both <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>. This is the true underlying DAG:</p>
-<p><img src="img/Study_DAG.png" style="width:40.0%" /></p>
-<p>There could be a scenario where there is an arrow between <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>, but not in this case. Its absence doesn’t really change the discussion. Our primary interest is estimating the strength of the effect that <span class="math inline">\(A\)</span> has directly on <span class="math inline">\(Y_2\)</span>, so we wouldn’t want to adjust for <span class="math inline">\(Y_1\)</span>, as will introduce bias. (See <a href="https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/" target="_blank">here</a> for a discussion of what happens when you control for a collider such as <span class="math inline">\(Y_1\)</span>.)</p>
+<p>I thought I’d written about this before, but I searched through my posts and I couldn’t find what I was looking for. So, if I am repeating myself, my apologies. I <a href="https://www.rdatagen.net/post/musings-on-missing-data/" target="_blank">explored</a> missing data two years ago, using directed acyclic graphs (DAGs) to help understand the various missing data mechanisms (MAR, MCAR, and MNAR). The DAGs provided insight into when it is appropriate to use observed data to provide us with unbiased estimates of population quantities even though some of the observations are missing some information.</p>
+<p>In that original post, I mentioned I might have more to say at some point in the future. Well, two years later I am again thinking about missing data, this time in the context of an ongoing randomized controlled trial. The research team has been discussing various ways to address potential biases that missing information might be introducing into the analysis. The group has decided that we need to use imputation to fill in the missing data, but I wanted to be clear why this added step is called for. After all, it is quite well known that imputation may not be necessary in light of missing data (see this <a href="https://statisticalhorizons.com/ml-is-better-than-mi" target="_blank">post</a>, for example.)</p>
+<p>I’ve created three scenarios with data missing at random (MAR); MAR means that the probability of missingess is a function of observed data. In the first case, surprisingly, the treatment effect can be estimated simply by comparing the means. In the second case, comparing the means is not appropriate, but adjustment for the predictor of missingness sufficient, no imputation needed. And in the third case, neither a simple comparison nor a modeling adjustment do the trick; imputation is necessary.</p>
+<div id="a-little-background-for-context" class="section level3">
+<h3>A little background for context</h3>
+<p>The actual RCT is considerably more complicated than I am describing here, but this is the general idea. Individuals are randomized to one of two study arms <span class="math inline">\(A\)</span>, where <span class="math inline">\(A_i=1\)</span> if patient <span class="math inline">\(i\)</span> is in the treatment arm, and <span class="math inline">\(A_i = 0\)</span> if the the patient is in the control arm. We measure the outcome <span class="math inline">\(Y\)</span> at two time points, so we have <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>; our primary interest, however, is <span class="math inline">\(Y_2\)</span>. We measure a key covariate <span class="math inline">\(X\)</span> that influences both <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>. This is the true underlying DAG:</p>
+<p><img src="img/study_DAG.png" style="width:40.0%" /></p>
+<p>The challenge is that, for some patients, the second measurement <span class="math inline">\(Y_2\)</span> is missing, and we believe that <span class="math inline">\(Y_1\)</span> is a good predictor of the missingness pattern. But before getting into this (which is Case #3), I’ll start with a simpler scenario.</p>
 </div>
-<div id="simulation-of-a-somewhat-simplified-scenario" class="section level3">
-<h3>Simulation of a somewhat simplified scenario</h3>
-<p>Ultimately, I want to describe how we estimate the causal effect in the event that <span class="math inline">\(Y_2\)</span> is not measured for all subjects. But before we do that, let’s simplify things even further. In this second scenario, there is only a single outcome measurement <span class="math inline">\(Y\)</span>, though we have managed to measure the key baseline covariate, which is <span class="math inline">\(X\)</span>:</p>
-<p><img src="img/Study_simple_DAG.png" style="width:40.0%" /></p>
-<p>It turns out we have been able to collect the outcome measurement <span class="math inline">\(Y\)</span> for only a subset of the sample, so that we observe <span class="math inline">\(Y^*\)</span> that includes missing values for some of the subjects. In this case, the missing data mechanism is missing at random (MAR), where the level of the observed baseline covariate <span class="math inline">\(X\)</span> determines the probability of observing <span class="math inline">\(Y\)</span>. The indicator <span class="math inline">\(R_y = 1\)</span> when we do observe <span class="math inline">\(Y\)</span> and <span class="math inline">\(R_y = 0\)</span> when we do not.</p>
-<p><img src="img/MAR.png" style="width:40.0%" /></p>
-<p>Here are the libraries necessary for the simulations:</p>
+<div id="case-1" class="section level3">
+<h3>Case #1</h3>
+<p>In the first scenario, there is only a single outcome measurement <span class="math inline">\(Y\)</span>, and we have measured <span class="math inline">\(X\)</span>. The simplified DAG looks like this:</p>
+<p><img src="img/study_simple_DAG.png" style="width:30.0%" /></p>
+<p>Unfortunately, we’ve only been able to collect the outcome measurement <span class="math inline">\(Y\)</span> for a subset of the sample, so that the observed <span class="math inline">\(Y^*\)</span> includes missing values for some subjects. The missing data mechanism is MAR, because the level of the observed baseline covariate <span class="math inline">\(X\)</span> determines the probability of observing <span class="math inline">\(Y\)</span>. The indicator <span class="math inline">\(R_y = 1\)</span> when we do observe <span class="math inline">\(Y\)</span> and <span class="math inline">\(R_y = 0\)</span> when we do not.</p>
+<p><img src="img/MAR_1_DAG.png" style="width:35.0%" /></p>
+<p>I’ll go ahead and simulate data based on this first DAG. In case you’d like to replicate, here are the libraries necessary for the simulations:</p>
 <pre class="r"><code>library(simstudy)
 library(ggplot2)
 library(broom)
 library(data.table)
 library(mice)</code></pre>
-<p>The data definitions establish the relationship between <span class="math inline">\(A\)</span>, <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> (the treatment effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span> is 3.0), as well as create a missingness mechanism for <span class="math inline">\(Y\)</span> that is a function <span class="math inline">\(X\)</span>.</p>
-<pre class="r"><code>def1 &lt;- defData(varname = &quot;x&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
-
-def2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;6 + 3*a + 1*x&quot;, variance = 3)
-
-defm &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-3.2 + 2*x&quot;, logit.link = TRUE)</code></pre>
-<p>To generate the observed data, we first generate a complete data set (based on the data definitions), a missing data matrix, and then the observed data set which includes <span class="math inline">\(\text{NA}\)</span>’s for about 12% of the <span class="math inline">\(Y\)</span>’s.</p>
-<pre class="r"><code>set.seed(98723)
+<p>The data definitions establish the relationship between <span class="math inline">\(A\)</span>, <span class="math inline">\(X\)</span> and <span class="math inline">\(Y\)</span> (the treatment effect of <span class="math inline">\(A\)</span> on <span class="math inline">\(Y\)</span> is 2.5) as well as create a missingness mechanism for <span class="math inline">\(Y\)</span> that is a function <span class="math inline">\(X\)</span>.</p>
+<pre class="r"><code>def1 &lt;- defData(varname = &quot;x&quot;, formula=0.5, dist = &quot;binary&quot;)
+def2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;5 + 5*x + 2.5*a&quot;, variance = 2)
+defm &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-3.5 + 2.3*x&quot;, logit.link = TRUE)</code></pre>
+<p>To generate the observed data with missing data, we first generate a complete data set (based on the data definitions), and then we generate a missing data matrix, which finally gives us the observed data set which includes <span class="math inline">\(\text{NA}\)</span>’s for about 13% of the <span class="math inline">\(Y\)</span>’s.</p>
+<pre class="r"><code>set.seed(17236)
 
 dd &lt;- genData(500, def1)
 dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)
@@ -56,41 +56,61 @@ ddmiss &lt;- genMiss(dd, defm, id = &quot;id&quot;)
 ddobs &lt;- genObs(dd, ddmiss, id = &quot;id&quot;)
 
 ddobs</code></pre>
-<pre><code>##       id     x a    y
-##   1:   1 -0.85 1   NA
-##   2:   2  0.59 0  9.1
-##   3:   3  0.55 1 12.5
-##   4:   4 -1.06 1  8.1
-##   5:   5  0.21 0  5.0
-##  ---                 
-## 496: 496 -2.63 1 10.2
-## 497: 497 -0.12 0  5.5
-## 498: 498  0.24 0  5.1
-## 499: 499 -1.68 0  6.3
-## 500: 500  0.13 0  5.6</code></pre>
-<p>The full data set <code>dd</code> (without any missing data), we can get a point estimate of the treatment effect merely by calculating <span class="math inline">\(\bar{Y}_{a=1} - \bar{Y}_{a=0}\)</span>:</p>
+<pre><code>##       id x a    y
+##   1:   1 0 0  6.1
+##   2:   2 1 0  9.2
+##   3:   3 1 1 11.6
+##   4:   4 0 0  4.5
+##   5:   5 1 1   NA
+##  ---             
+## 496: 496 0 0  5.8
+## 497: 497 0 1  7.3
+## 498: 498 0 1  6.9
+## 499: 499 1 1 11.1
+## 500: 500 1 0 10.0</code></pre>
+<p>Using the full data set <code>dd</code> (without any missing data), we can get a point estimate of the treatment effect <span class="math inline">\(\delta\)</span> merely by calculating</p>
+<p><span class="math display">\[\hat{\delta} = \bar{Y}_{a=1} - \bar{Y}_{a=0}\]</span></p>
 <pre class="r"><code>dd[, .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]</code></pre>
 <pre><code>## [1] 2.5</code></pre>
-<p>There is no reason to believe that <span class="math inline">\(\bar{Y^*}_{a=1}\)</span> = <span class="math inline">\(\bar{Y}_{a=1}\)</span> or <span class="math inline">\(\bar{Y^*}_{a=0}\)</span> = <span class="math inline">\(\bar{Y}_{a=0}\)</span>. Observations with higher values of <span class="math inline">\(X\)</span> (and thus higher values of <span class="math inline">\(Y\)</span>) are more likely to have missing <span class="math inline">\(Y\)</span>’s, so the average observed values in both treatment groups should be lower. And this seems to be the case with this data set:</p>
+<p>There is no reason to believe that the observed data means are the same as the complete data set means. That is, it is not likely that <span class="math inline">\(\bar{Y^*}_{a=1}\)</span> = <span class="math inline">\(\bar{Y}_{a=1}\)</span> or <span class="math inline">\(\bar{Y^*}_{a=0}\)</span> = <span class="math inline">\(\bar{Y}_{a=0}\)</span>. Observations with higher values of <span class="math inline">\(X\)</span> (and thus higher values of <span class="math inline">\(Y\)</span>) are more likely to have missing <span class="math inline">\(Y\)</span>’s, so the average observed values in both treatment groups should be lower. This seems to be the case here:</p>
 <pre class="r"><code>dd[, .(avg = mean(y)), keyby = a]</code></pre>
-<pre><code>##    a avg
-## 1: 0 6.3
-## 2: 1 8.8</code></pre>
+<pre><code>##    a  avg
+## 1: 0  7.5
+## 2: 1 10.0</code></pre>
 <pre class="r"><code>ddobs[, (avg = mean(y, na.rm = TRUE)), keyby = a]</code></pre>
 <pre><code>##    a  V1
-## 1: 0 6.1
-## 2: 1 8.6</code></pre>
-<p>But, it looks like, in this case at least, the bias in estimates of the means just using the observed values are offsetting, so that the estimate of the <em>difference</em> is unbiased:</p>
+## 1: 0 7.2
+## 2: 1 9.7</code></pre>
+<p>In the real world, we can only estimate the treatment effect <span class="math inline">\(\delta^*\)</span> with the data that we have:
+<span class="math display">\[\hat{\delta}^* = \bar{Y}_{a=1}^* - \bar{Y}_{a=0}^*\]</span></p>
+<p>It looks like, in this case at least, the bias in estimates of the means are in the same direction, so that the estimate of the treatment effect based on the <em>difference</em> of means in the observed data is unbiased:</p>
 <pre class="r"><code>ddobs[!is.na(y), .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]    </code></pre>
 <pre><code>## [1] 2.5</code></pre>
-<p>If this is the case more generally for data sets generated using this mechanism, it may turn out we don’t need to worry at all about the missing data; even though we know it is MAR, we might be able to treat it as MCAR, and just use the complete observations only without any adjustment or imputation.</p>
-<p>Simulating 2500 data sets using steps outlined above provides insight into the nature of the bias. The plot shows the estimate for each data set, and it is clear that the estimates of the average outcome in each arm are biased when we do not take into consideration the missingness. However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data.</p>
-<p><img src="img/comp_obs.png" /></p>
+<p>If this is the case more generally for data sets generated using this mechanism, we may not need to worry at all about the missing data mechanism; even though we know it is MAR, we might be able to treat it as MCAR, and just use the observed measurements only, without any adjustment or imputation.</p>
+<p>Simulating 2500 data sets using steps outlined above provides insight into the nature of the bias. (I’ve provided generic for generating repeated data sets in the <a href="#addendum">addendum</a>.) The estimates based on the complete data set are shown on the <span class="math inline">\(x\)</span> axis, and the observed data estimates are on the <span class="math inline">\(y\)</span> axis. The dotted lines show the average of the estimates for the complete and observed data sets, respectively.</p>
+<p>The plot shows the estimate for each data set. For both treatment arms, the average estimate is centered around the true value (used in the data generation process). The average estimate for each arm is biased downwards when we do not take into consideration the missingness.</p>
+<p><img src="img/MAR_1_y.png" style="width:70.0%" /></p>
+<p>However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data. Both estimates are centered around 2.5, the true value.</p>
+<p><img src="img/MAR_1_diff.png" style="width:40.0%" /></p>
 </div>
-<div id="scenario-with-repeated-measurements" class="section level3">
-<h3>Scenario with repeated measurements</h3>
+<div id="case-2" class="section level3">
+<h3>Case #2</h3>
+<p>The second example differs from the first only in one respect: the size of the intervention effect depends on the baseline covariate <span class="math inline">\(X\)</span> (the line drawn from <span class="math inline">\(X\)</span> to the arrow connecting <span class="math inline">\(A\)</span> and <span class="math inline">\(Y\)</span> represents this effect modification).</p>
+<p><img src="img/MAR_2_DAG.png" style="width:35.0%" /></p>
+<p>In the example, <span class="math inline">\(\delta_0 = 1\)</span> for the sub-population with <span class="math inline">\(X = 0\)</span>, and <span class="math inline">\(\delta_1 = 4\)</span> for the sub-population with <span class="math inline">\(X = 1\)</span>. If the population is evenly distributed between <span class="math inline">\(X=0\)</span> and <span class="math inline">\(X=1\)</span>, then we would observe an overall effect <span class="math inline">\(\delta = 2.5\)</span>.</p>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;x&quot;, formula=0.5, dist = &quot;binary&quot;)
+d2 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;6 + 1*a + 2*x + 3*a*x&quot;, variance = 2)
+dm &lt;- defMiss(varname = &quot;y&quot;, formula = &quot;-3.5 + 2.3*x&quot;, logit.link = TRUE)</code></pre>
+<p>This time around, if we go ahead and naïvely estimate <span class="math inline">\(\delta^* = \bar{Y}_{a=1}^* - \bar{Y}_{a=0}^*\)</span>, the estimate will be biased.</p>
+<p><img src="img/MAR_2_diff.png" style="width:40.0%" /></p>
+<p>The reason for this bias is that higher values of <span class="math inline">\(Y\)</span> are more likely to be missing: the presence of of <span class="math inline">\(X\)</span> both drives <span class="math inline">\(Y\)</span> higher <em>and</em> increases the likelihood of missingness. Even though the rate of missingness is the same across the arms, the missing values in the treatment arm are on average higher …</p>
+<p><img src="img/MAR_2_adj.png" style="width:70.0%" /></p>
+</div>
+<div id="case-3" class="section level3">
+<h3>Case #3</h3>
 <p>The original scenario that motivated this post with an added missing data mechanism is depicted in the next DAG. Those with higher scores in the first period are more likely to have missing values in the second time period, perhaps because they have improved sufficiently and no longer feel like participating in the study.</p>
-<p><img src="img/MAR_collide.png" style="width:40.0%" /></p>
+<p>There could be a scenario where there is an arrow between <span class="math inline">\(Y_1\)</span> and <span class="math inline">\(Y_2\)</span>, but not in this case. Its absence doesn’t really change the discussion. Our primary interest is estimating the strength of the effect that <span class="math inline">\(A\)</span> has directly on <span class="math inline">\(Y_2\)</span>, so we wouldn’t want to adjust for <span class="math inline">\(Y_1\)</span>, as will introduce bias. (See <a href="https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/" target="_blank">here</a> for a discussion of what happens when you control for a collider such as <span class="math inline">\(Y_1\)</span>.)</p>
+<p><img src="img/MAR_3_DAG.png" style="width:40.0%" /></p>
 <p>The DAG is implemented with these definitions:</p>
 <pre class="r"><code>def1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
 
@@ -130,24 +150,15 @@ summary(pool(fit))</code></pre>
 <pre><code>##          term estimate std.error statistic  df p.value
 ## 1 (Intercept)      6.1      0.16        39 370       0
 ## 2           a      2.8      0.23        12 263       0</code></pre>
-<p><img src="img/full.png" style="width:70.0%" /></p>
-<p><img src="img/impute.png" style="width:40.0%" /></p>
+<p><img src="img/MAR_3_trt.png" style="width:70.0%" /></p>
+<p><img src="img/MAR_3_imp.png" style="width:40.0%" /></p>
+<p><br /></p>
+<p><a name="addendum"></a></p>
 </div>
-<div id="addendum" class="section level2">
-<h2>Addendum</h2>
-<p>In case you’d like to play around with other scenarios, I’m including the code that will allow you to repeatedly sample data sets:</p>
-<pre class="r"><code>#--- Data definitions
-
-d1 &lt;- defData(varname = &quot;u&quot;, formula=0, variance = 1, dist = &quot;normal&quot;)
-
-d2 &lt;- defDataAdd(varname = &quot;y1&quot;, formula = &quot;5 + a*2 + u*2&quot;, variance = 2)
-d2 &lt;- defDataAdd(d2, &quot;y2&quot;, formula = &quot;6 + a*3 + u*2&quot;, variance = 2)
-
-dm &lt;- defMiss(varname = &quot;y2&quot;, formula = &quot;-3.5 + 0.4*y1&quot;, logit.link = TRUE)
-
-#--- 
-
-s_generate &lt;- function(n) {
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>In case you’d like to play around with other scenarios, I’m including the code that will allow you to repeatedly sample data sets. Just provide you our data definitions.</p>
+<pre class="r"><code>s_generate &lt;- function(n) {
   
   dd &lt;- genData(n, d1)
   dd &lt;- trtAssign(dd, grpName = &quot;a&quot;)

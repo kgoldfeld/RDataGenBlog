@@ -6,11 +6,9 @@ theme_update(panel.grid = element_blank(),
 
 #---
 
-d1 <- defData(varname = "x", formula=0, variance = 1, dist = "normal")
-
-d2 <- defDataAdd(varname = "y", formula = "6 + 3*a + 1*x", variance = 3)
-
-dm <- defMiss(varname = "y", formula = "-3.2 + 2*x", logit.link = TRUE)
+d1 <- defData(varname = "x", formula=0.5, dist = "binary")
+d2 <- defDataAdd(varname = "y", formula = "5 + 2.5*a + 5*x", variance = 2)
+dm <- defMiss(varname = "y", formula = "-3.5 + 2.3*x", logit.link = TRUE)
 
 s_generate <- function(n) {
   dd <- genData(n, d1)
@@ -42,9 +40,6 @@ set.seed(18271)
 
 results_sim <- rbindlist(mclapply(1:2500, function(x) s_replicate(300), mc.cores = 4))
 
-results[, .(mean(diff.complete), mean(diff.obs), mean(avg0_c), mean(avg0_o), mean(avg1_c), mean(avg1_o)) ]
-results[, .(sd(diff.complete), sd(diff.obs)) ]
-
 mu_c <- results_sim[, mean(diff.complete)]
 mu_o <- results_sim[, mean(diff.obs)]
 
@@ -52,9 +47,9 @@ p1 <- ggplot(data = results_sim, aes(x = diff.complete, y=diff.obs)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(2, 4), breaks = c(2.5, 3, 3.5), name = "Complete data") +
-  scale_y_continuous(limits = c(2, 4), breaks = c(2.5, 3, 3.5), name = "Observed data") +
-  ggtitle("Effect size")
+  scale_x_continuous(limits = c(1.2, 3.7), breaks = seq(1.5, 3.5, by = .5), name = "Complete data") +
+  scale_y_continuous(limits = c(1.2, 3.7), breaks = seq(1.5, 3.5, by = .5), name = "Observed data") +
+  ggtitle("Difference in means: unadjusted")
 
 mu_c <- results_sim[, mean(avg0_c)]
 mu_o <- results_sim[, mean(avg0_o)]
@@ -63,8 +58,8 @@ p2 <- ggplot(data = results_sim, aes(x = avg0_c, y=avg0_o)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(5.2, 6.7), breaks = c(5.5, 6, 6.5), name = "Complete data") +
-  scale_y_continuous(limits = c(5.2, 6.7), breaks = c(5.5, 6, 6.5), name = "Observed data") +
+  scale_x_continuous(limits = c(6.2, 8.4), breaks = seq(6.5, 8, by = .5), name = "Complete data") +
+  scale_y_continuous(limits = c(6.2, 8.4), breaks = seq(6.5, 8, by = .5), name = "Observed data") +
   ggtitle("Average Y (control arm)")
 
 mu_c <- results_sim[, mean(avg1_c)]
@@ -74,10 +69,14 @@ p3 <- ggplot(data = results_sim, aes(x = avg1_c, y=avg1_o)) +
   geom_vline(xintercept = mu_c,color = "#b38f00", lty = 3) +
   geom_hline(yintercept = mu_o,color = "#b38f00", lty = 3) +  
   geom_point(size = .5) +
-  scale_x_continuous(limits = c(8.2, 9.7), breaks = c(8.5, 9, 9.5), name = "Complete data") +
-  scale_y_continuous(limits = c(8.2, 9.7), breaks = c(8.5, 9, 9.5), name = "Observed data") +
+  scale_x_continuous(limits = c(8.8, 10.9), breaks = seq(9, 10.5, .5), name = "Complete data") +
+  scale_y_continuous(limits = c(8.8, 10.9), breaks = seq(9, 10.5, .5), name = "Observed data") +
   ggtitle("Average Y (treatment arm)")
 
 ggsave(
-  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/comp_obs.png",
-  gridExtra::grid.arrange(p2, p3, p1, nrow = 1), width = 6.5, height = 2, scale = 1.5)
+  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/MAR_1_diff.png",
+  p1, width = 2, height = 2, scale = 2)
+
+ggsave(
+  filename = "content/post/2021-03-30-some-cases-where-imputing-missing-data-matters/img/MAR_1_y.png",
+  gridExtra::grid.arrange(p2, p3, nrow = 1), width = 4, height = 2, scale = 1.5)
