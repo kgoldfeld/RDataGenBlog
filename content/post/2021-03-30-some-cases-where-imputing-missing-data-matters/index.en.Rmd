@@ -1,6 +1,6 @@
 ---
 title: 
-  "The case of three MAR mechanisms: is multiple imputation ever imperative?"
+  "The case of three MAR mechanisms: when is multiple imputation mandatory?"
 author: 
 date: '2021-03-30'
 slug: []
@@ -21,11 +21,11 @@ draft: TRUE
 options(digits = 2)
 ```
 
-I thought I'd written about this before, but I searched through my posts and I couldn't find what I was looking for. So, if I am repeating myself, my apologies. I [explored](https://www.rdatagen.net/post/musings-on-missing-data/){target="_blank"} missing data two years ago, using directed acyclic graphs (DAGs) to help understand the various missing data mechanisms (MAR, MCAR, and MNAR). The DAGs provided insight into when it is appropriate to use observed data to provide us with unbiased estimates of population quantities even though some of the observations are missing some information.
+I thought I'd written about this before, but I searched through my posts and I couldn't find what I was looking for. If I am repeating myself, my apologies. I [explored](https://www.rdatagen.net/post/musings-on-missing-data/){target="_blank"} missing data two years ago, using directed acyclic graphs (DAGs) to help understand the various missing data mechanisms (MAR, MCAR, and MNAR). The DAGs provide insight into when it is appropriate to use observed data to get unbiased estimates of population quantities even though some of the observations are missing information.
 
 In that original post, I mentioned I might have more to say at some point in the future. Well, two years later I am again thinking about missing data, this time in the context of an ongoing randomized controlled trial. The research team has been discussing various ways to address potential biases that missing information might be introducing into the analysis. The group has decided that we need to use imputation to fill in the missing data, but I wanted to be clear why this added step is called for. After all, it is quite well known that imputation may not be necessary in light of missing data (see this [post](https://statisticalhorizons.com/ml-is-better-than-mi){target="_blank"}, for example.)
 
-I've created three scenarios with data missing at random (MAR); MAR means that the probability of missingess is a function of observed data. In the first case, surprisingly, the treatment effect can be estimated simply by comparing the means. In the second case, comparing the means is not appropriate, but adjustment for the predictor of missingness sufficient, no imputation needed. And in the third case, neither a simple comparison nor a modeling adjustment do the trick; imputation is necessary.
+I've created three scenarios with data missing at random (MAR),  where the probability of missingness is a function of observed data. In the first scenario, the treatment effect can surprisingly be estimated simply by comparing the means, no adjustment or imputation needed. In the second case, comparing the means directly is not appropriate, but adjustment for the predictor of missingness is sufficient; again, no imputation needed. And in the third case, neither a simple comparison nor a modeling adjustment do the trick; imputation is mandatory.
 
 ### A little background for context
 
@@ -55,7 +55,7 @@ library(data.table)
 library(mice)
 ```
 
-The data definitions establish the relationship between $A$, $X$ and $Y$ (the treatment effect of $A$ on $Y$ is 2.5) as well as create a missingness mechanism for $Y$ that is a function $X$. 
+The data definitions establish the relationship between $A$, $X$ and $Y$ (the treatment effect of $A$ on $Y$ is 2.5) as well as create a missingness mechanism for $Y$ that is a function $X$; subjects with higher values of $X$ are more likely to have missing outcome measurements.
 
 ```{r}
 def1 <- defData(varname = "x", formula=0.5, dist = "binary")
@@ -104,13 +104,13 @@ ddobs[!is.na(y), .(avg = mean(y)), keyby = a][ , avg - shift(avg)][2]
 
 If this is the case more generally for data sets generated using this mechanism, we may not need to worry at all about the missing data mechanism; even though we know it is MAR, we might be able to treat it as MCAR, and just use the observed measurements only, without any adjustment or imputation.
 
-Simulating 2500 data sets using steps outlined above provides insight into the nature of the bias. (I've provided generic for generating repeated data sets in the <a href="#addendum">addendum</a>.) The estimates based on the complete data set are shown on the $x$ axis, and the observed data estimates are on the $y$ axis. The dotted lines show the average of the estimates for the complete and observed data sets, respectively.
+Simulating 2500 data sets using steps outlined above provides insight into the nature of the bias. (I've provided generic code for generating repeated data sets in the <a href="#addendum">addendum</a>.) The estimates based on the complete data set are shown on the $x$ axis, and the observed data estimates are on the $y$ axis. The dotted lines show the average of the estimates for the complete and observed data sets, respectively.
 
-The plot shows the estimate for each data set. For both treatment arms, the average estimate is centered around the true value (used in the data generation process).  The average estimate for each arm is biased downwards when we do not take into consideration the missingness. 
+For both treatment arms, the average estimate from the complete data sets is centered around the true value (used in the data generation process).  As expected (since higher values of Y are likely to be missing), the average estimate for each arm is biased downwards when we do not take into consideration the missingness. 
 
 ![](img/MAR_1_y.png){width=70%}
 
-However, the bias is removed when we are considering the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data. Both estimates are centered around 2.5, the true value.
+However, the bias is removed when we consider the treatment effect, which is our primary interest. In this (perhaps overly) simplistic scenario, there is no price to pay when ignoring the missing data. Both estimates are centered around 2.5, the true value.
 
 ![](img/MAR_1_diff.png){width=40%}
 
@@ -120,7 +120,7 @@ The second example differs from the first only in one respect: the size of the i
 
 ![](img/MAR_2_DAG.png){width=35%}
 
-In the example, $\delta_0 = 1$ for the sub-population with $X = 0$, and $\delta_1 = 4$ for the sub-population with $X = 1$. If the population is evenly distributed between $X=0$ and $X=1$, then we would observe an overall effect $\delta = 2.5$.
+In the example, $\delta_0 = 1$ for the sub-population with $X = 0$, and $\delta_1 = 4$ for the sub-population with $X = 1$. If the population were evenly distributed between $X=0$ and $X=1$, then we would observe an overall effect $\delta = 2.5$.
 
 ```{r}
 d1 <- defData(varname = "x", formula=0.5, dist = "binary")
@@ -128,7 +128,7 @@ d2 <- defDataAdd(varname = "y", formula = "6 + 1*a + 2*x + 3*a*x", variance = 2)
 dm <- defMiss(varname = "y", formula = "-3.5 + 2.3*x", logit.link = TRUE)
 ```
 
-This time around, if we go ahead and naïvely estimate $\delta^* = \bar{Y}_{a=1}^* - \bar{Y}_{a=0}^*$, the estimate will be biased.
+But this time around, if we go ahead and naïvely estimate $\delta^* = \bar{Y}_{a=1}^* - \bar{Y}_{a=0}^*$, the estimate will be biased.
 
 ![](img/MAR_2_diff.png){width=40%}
 
@@ -157,7 +157,7 @@ def2 <- defDataAdd(def2, "y2", formula = "1 + y1 + 5*x", variance = 2)
 defm <- defMiss(varname = "y2", formula = "-4.5 + 0.3*y1", logit.link = TRUE)
 ```
 
-In this case, simply comparing the means in the data sets with missing data provides an biased estimate - we can see this on the left; the argument is similar to the one I made in the previous scenario. If we opt to control for $Y_1$, we introduce all sorts of biases, as $Y_1$ is a mediator between $A$ and $Y_2$, as well as a collider. (I've written about the dangers of controlling for post-intervention variables [here](https://www.rdatagen.net/post/be-careful/){target="_blank"} and the need to be careful with colliders [here](https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/){target="_blank"}.)
+In this case, simply comparing the means in the data sets with missing data provides a biased estimate - we can see this on the left; the argument is similar to the one I made in the previous scenario. If we opt to control for $Y_1$, we introduce all sorts of biases, as $Y_1$ is a mediator between $A$ and $Y_2$, as well as a collider. (I've written about the dangers of controlling for post-intervention variables [here](https://www.rdatagen.net/post/be-careful/){target="_blank"} and the need to be careful with colliders [here](https://www.rdatagen.net/post/another-reason-to-be-careful-about-what-you-control-for/){target="_blank"}.)
 
 ![](img/MAR_3_trt.png){width=70%}
 
