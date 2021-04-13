@@ -11,16 +11,17 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: true
 ---
 
-Health data systems are not always perfect. This was painfully obvious when a study I am involved with tried to match a list of nursing home residents taken from one system with a list of results from PCR tests for COVID-19 drawn from another. Name spellings for the same person from the second list were not always consistent across different PCR tests, nor were they always consistent with the cohort we were interested in studying defined by the first list. My research associate, Yifan Xu, and I were asked to help out and see what we could do to help out.
+Health data systems are not always perfect. This was made painfully obvious when a study I am involved with required a matched list of nursing home residents taken from one system with set results from PCR tests for COVID-19 drawn from another. Name spellings for the same person from the second list were not always consistent across different PCR tests, nor were they always consistent with the cohort we were interested in studying defined by the first list. My research associate, Yifan Xu, and I were asked to help out and see what we could do to help out.
 
-I've never thought about fuzzy word-matching before, so I certainly qualify as a novice. But this didn't stop us from coming up with simple solution to match the names on the two lists based on the `R` function `adist` that I think will allow the research team to finalize a matched list with minimal manual effort. In order to test our proposed approach, we developed a way to generate random lists of names with errors. This post presents both the code for random list generation with errors as well as the simple matching algorithm.
+This was my first foray into fuzzy word-matching. We came up with simple solution to match the names on the two lists based on the `R` function `adist` that should allow the research team to finalize a matched list with minimal manual effort. 
+
+In order to test our proposed approach, we developed a way to generate random lists of names with errors. This post presents both the code for random list generation with errors as well as the simple matching algorithm.
 
 ### Distance between strings
 
-Fuzzy word matching can be approached using the concept of *string distance*. Quite simply, this can be measured by counting the number of transformations required to move from the original to the target word. A transformation is one of three moves: (1) a substitution, (2) an insertion, or (3) a deletion. The figure below illustrates the 5 "moves" that are required to get from **CAT** to **KITTEN**: two letter substitutions and three letter insertions.
+Fuzzy word matching can be approached using the concept of *string distance*. Quite simply, this can be measured by counting the number of transformations required to move from the original to the target word. A transformation is one of three moves: (1) a substitution, (2) an insertion, or (3) a deletion. The figure below illustrates the 5 "moves" that are required to get from **CAT** to **KITTEN**: two substitutions and three insertions.
 
 ![](img/cat_to_kitten.png){width=80%}
 
@@ -30,26 +31,27 @@ The `adist` function can calculate this string distance, and if you set `counts 
 adist("CAT", "KITTEN", counts = TRUE)
 ```
 
-Assessing whether a distance is meaningful or no longer fuzzy certainly depends on the nature of the problem and the length of a strings. The distance from **CAT** to **DOG** is 3 (with 3 substitutions), and so is the distance from **DERE, STEPHEN** to **DEERE, STEVEN** (1 insertion, 1 deletion, and 1 substitution); however, we might be willing to declare the names a match while declining to pair the two different animals.
+Assessing whether a distance is meaningful or no longer fuzzy certainly depends on the nature of the problem and the length of a strings. The distance from **CAT** to **DOG** is 3 (with 3 substitutions), and so is the distance from **DERE, STEPHEN** to **DEERE, STEVEN** (1 insertion, 1 deletion, and 1 substitution); we might be willing to declare the individual's name a match while declining to pair the two different animals.
 
-### Random lists of names with errors
+### Simulating lists of names with errors
 
-To test out our fuzzy matching process, we need to be able to create a master list of names from which we can create two sub-lists: (1) a cohort list of nursing home residents with correct name spellings, and (2) a list of PCR records that includes multiple records (test results) per individual, with possible inconsistent name spellings across the different tests for a specific person.
+To test out our fuzzy matching process, we need to be able to create a master list of names from which we can create two sub-lists: (1) the cohort list of nursing home residents with correct name spellings, and (2) the list of PCR records that includes multiple records (test results) per individual, with possible inconsistent name spellings across the different tests for a specific person.
 
 #### Generating names
 
-The master list can easily be generated using an the `randomNames` function in the R package [randomNames](https://centerforassessment.github.io/randomNames/){target="_blank"}. A call to this function provides samples of names from a large scale database. (It provides gender and ethnic variation if you need it.)
+The master list can easily be generated using the `randomNames` function in the R package [randomNames](https://centerforassessment.github.io/randomNames/){target="_blank"}. A call to this function provides samples of names from a large scale database. (It provides gender and ethnic variation if you need it.)
 
 ```{r}
-set.seed(6251)
-
+library(data.table)
 library(randomNames)
+
+set.seed(6251)
 randomNames(4)
 ```
 
 #### Generating errors
 
-To facilitate the generation of spelling errors, I've created a function that takes a string a specified number of substitutions, a number of insertions (if negative then these are deletions), and an indicator that flips the order of the names (typically "Last Name, First Name"):
+To facilitate the generation of spelling errors, I've created a function that takes a string, a specified number of substitutions, a number of insertions (if negative then these are deletions), and an indicator that flips the order of the names (typically "Last Name, First Name"):
 
 ```{r}
 mis_string <- function(name, subs = 1, ins = 0, flip = FALSE) {
@@ -96,7 +98,7 @@ mis_string("Vazquez Topete, Deyanira", subs = 1, ins = -2, flip = TRUE)
 
 #### Master list definitions
 
-I am using `simstudy` to help generate the data. First, I provide definitions of information for the master list of names: an indicator `pcr` identifying whether the person has at least one test (70% will have a test), an indicator `resident` identifying whether the person is part of our resident cohort (20% of those on the master list will be residents), and a variable for the number of tests an individual has (conditional on having at least 1 test). There will be names on the master list that do not have any tests nor are they a resident; these patients are removed from the master list.
+To generate the master list we define (using `simstudy`) a set of key parameters: an indicator `pcr` identifying whether the person has at least one test (70% will have a test), an indicator `resident` identifying whether the person is part of our resident cohort (20% of those on the master list will be residents), and a variable for the number of tests an individual has (conditional on having at least 1 test). There will be names on the master list that do not have any tests nor are they a resident; these patients are removed from the master list.
 
 ```{r}
 library(simstudy)
@@ -156,12 +158,14 @@ d_pcr[, obs_name := mapply(mis_string, name, subs, ins, flip)]
 d_pcr[, .(pcr_id, id, name, obs_name, subs, ins, flip)]
 ```
 
-Finally, we end up with two lists - one with just residents only and one with a list of PCR tests. This is mimicking the actual data we might get from our flawed health data systems.
+We end up with two lists - one with just residents only and one with a list of PCR tests. This is mimicking the actual data we might get from our flawed health data systems.
 
 ```{r}
 d_res <- d_master[resident == 1, .(id, name)]
 d_pcr <- d_pcr[, .(pcr_id, id, name = obs_name, pcr)]
 ```
+
+#### The truth
 
 Before proceeding to the matching, here is a PCR test records for the residents. This is the correct match that we hope to recover.
 
@@ -169,7 +173,7 @@ Before proceeding to the matching, here is a PCR test records for the residents.
 d_pcr[ id %in% d_res$id]
 ```
 
-### Fuzzy matching
+### Fuzzy matching of simulated data
 
 The fuzzy matching is quite simple (and I've simplified even more by ignoring the possibility that the data have been flipped). The first step is to merge each PCR row with each resident name, which in this case will result in $7 \times 110 = 770$ rows. The idea is that we will be comparing each of the names from the PCR tests with each of the resident names. In the merged data table `dd`, `x` is the resident name, and `name` is the PCR test list name.
 
@@ -195,6 +199,6 @@ dd[, score := 100 - 5*dist]
 dd[, .(staff_name = x, pcr_name = name, pcr_id, pcr, pid, score)]
 ```
 
-We see that we did pretty well, identifying 12 of the 14 resident records in the PCR data. The two we missed were the result of flipped names. We have actually implemented this check as well by reversing the order of the first and last names, and re-calculating the distance for each pair. I've omitted that here just to simplify a bit.
+We did pretty well, identifying 12 of the 14 resident records in the PCR data. The two we missed were the result of flipped names.
 
 In practice, a relatively close distance is not necessarily a good match. For example **SMITH, MARY** and **SMITH, JANE** are only separated by three letter substitutions, but they are most likely not the same person. We could minimize this problem if we have additional fields to match on, such as date of birth. This would even allow us to *increase* the string distance we are willing to accept for a possible match without increasing the amount of manual inspection required.

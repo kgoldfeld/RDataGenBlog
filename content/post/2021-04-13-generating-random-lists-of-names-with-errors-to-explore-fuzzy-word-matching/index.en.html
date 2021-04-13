@@ -11,17 +11,17 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: true
 ---
 
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>Health data systems are not always perfect. This was painfully obvious when a study I am involved with tried to match a list of nursing home residents taken from one system with a list of results from PCR tests for COVID-19 drawn from another. Name spellings for the same person from the second list were not always consistent across different PCR tests, nor were they always consistent with the cohort we were interested in studying defined by the first list. My research associate, Yifan Xu, and I were asked to help out and see what we could do to help out.</p>
-<p>I’ve never thought about fuzzy word-matching before, so I certainly qualify as a novice. But this didn’t stop us from coming up with simple solution to match the names on the two lists based on the <code>R</code> function <code>adist</code> that I think will allow the research team to finalize a matched list with minimal manual effort. In order to test our proposed approach, we developed a way to generate random lists of names with errors. This post presents both the code for random list generation with errors as well as the simple matching algorithm.</p>
+<p>Health data systems are not always perfect. This was made painfully obvious when a study I am involved with required a matched list of nursing home residents taken from one system with set results from PCR tests for COVID-19 drawn from another. Name spellings for the same person from the second list were not always consistent across different PCR tests, nor were they always consistent with the cohort we were interested in studying defined by the first list. My research associate, Yifan Xu, and I were asked to help out and see what we could do to help out.</p>
+<p>This was my first foray into fuzzy word-matching. We came up with simple solution to match the names on the two lists based on the <code>R</code> function <code>adist</code> that should allow the research team to finalize a matched list with minimal manual effort.</p>
+<p>In order to test our proposed approach, we developed a way to generate random lists of names with errors. This post presents both the code for random list generation with errors as well as the simple matching algorithm.</p>
 <div id="distance-between-strings" class="section level3">
 <h3>Distance between strings</h3>
-<p>Fuzzy word matching can be approached using the concept of <em>string distance</em>. Quite simply, this can be measured by counting the number of transformations required to move from the original to the target word. A transformation is one of three moves: (1) a substitution, (2) an insertion, or (3) a deletion. The figure below illustrates the 5 “moves” that are required to get from <strong>CAT</strong> to <strong>KITTEN</strong>: two letter substitutions and three letter insertions.</p>
+<p>Fuzzy word matching can be approached using the concept of <em>string distance</em>. Quite simply, this can be measured by counting the number of transformations required to move from the original to the target word. A transformation is one of three moves: (1) a substitution, (2) an insertion, or (3) a deletion. The figure below illustrates the 5 “moves” that are required to get from <strong>CAT</strong> to <strong>KITTEN</strong>: two substitutions and three insertions.</p>
 <p><img src="img/cat_to_kitten.png" style="width:80.0%" /></p>
 <p>The <code>adist</code> function can calculate this string distance, and if you set <code>counts = TRUE</code>, the function will provide the number of substitutions, insertions, and deletions. Here are the results for our example:</p>
 <pre class="r"><code>adist(&quot;CAT&quot;, &quot;KITTEN&quot;, counts = TRUE)</code></pre>
@@ -46,23 +46,24 @@ draft: true
 ## attr(,&quot;trafos&quot;)
 ##      [,1]    
 ## [1,] &quot;SSIMII&quot;</code></pre>
-<p>Assessing whether a distance is meaningful or no longer fuzzy certainly depends on the nature of the problem and the length of a strings. The distance from <strong>CAT</strong> to <strong>DOG</strong> is 3 (with 3 substitutions), and so is the distance from <strong>DERE, STEPHEN</strong> to <strong>DEERE, STEVEN</strong> (1 insertion, 1 deletion, and 1 substitution); however, we might be willing to declare the names a match while declining to pair the two different animals.</p>
+<p>Assessing whether a distance is meaningful or no longer fuzzy certainly depends on the nature of the problem and the length of a strings. The distance from <strong>CAT</strong> to <strong>DOG</strong> is 3 (with 3 substitutions), and so is the distance from <strong>DERE, STEPHEN</strong> to <strong>DEERE, STEVEN</strong> (1 insertion, 1 deletion, and 1 substitution); we might be willing to declare the individual’s name a match while declining to pair the two different animals.</p>
 </div>
-<div id="random-lists-of-names-with-errors" class="section level3">
-<h3>Random lists of names with errors</h3>
-<p>To test out our fuzzy matching process, we need to be able to create a master list of names from which we can create two sub-lists: (1) a cohort list of nursing home residents with correct name spellings, and (2) a list of PCR records that includes multiple records (test results) per individual, with possible inconsistent name spellings across the different tests for a specific person.</p>
+<div id="simulating-lists-of-names-with-errors" class="section level3">
+<h3>Simulating lists of names with errors</h3>
+<p>To test out our fuzzy matching process, we need to be able to create a master list of names from which we can create two sub-lists: (1) the cohort list of nursing home residents with correct name spellings, and (2) the list of PCR records that includes multiple records (test results) per individual, with possible inconsistent name spellings across the different tests for a specific person.</p>
 <div id="generating-names" class="section level4">
 <h4>Generating names</h4>
-<p>The master list can easily be generated using an the <code>randomNames</code> function in the R package <a href="https://centerforassessment.github.io/randomNames/" target="_blank">randomNames</a>. A call to this function provides samples of names from a large scale database. (It provides gender and ethnic variation if you need it.)</p>
-<pre class="r"><code>set.seed(6251)
-
+<p>The master list can easily be generated using the <code>randomNames</code> function in the R package <a href="https://centerforassessment.github.io/randomNames/" target="_blank">randomNames</a>. A call to this function provides samples of names from a large scale database. (It provides gender and ethnic variation if you need it.)</p>
+<pre class="r"><code>library(data.table)
 library(randomNames)
+
+set.seed(6251)
 randomNames(4)</code></pre>
 <pre><code>## [1] &quot;Hale, James&quot;      &quot;el-Qazi, Najeema&quot; &quot;Sourn, Raj&quot;       &quot;Jensen, Tia&quot;</code></pre>
 </div>
 <div id="generating-errors" class="section level4">
 <h4>Generating errors</h4>
-<p>To facilitate the generation of spelling errors, I’ve created a function that takes a string a specified number of substitutions, a number of insertions (if negative then these are deletions), and an indicator that flips the order of the names (typically “Last Name, First Name”):</p>
+<p>To facilitate the generation of spelling errors, I’ve created a function that takes a string, a specified number of substitutions, a number of insertions (if negative then these are deletions), and an indicator that flips the order of the names (typically “Last Name, First Name”):</p>
 <pre class="r"><code>mis_string &lt;- function(name, subs = 1, ins = 0, flip = FALSE) {
   
   names &lt;- trimws(unlist(strsplit(name, split = &quot;,&quot;)))
@@ -104,7 +105,7 @@ randomNames(4)</code></pre>
 </div>
 <div id="master-list-definitions" class="section level4">
 <h4>Master list definitions</h4>
-<p>I am using <code>simstudy</code> to help generate the data. First, I provide definitions of information for the master list of names: an indicator <code>pcr</code> identifying whether the person has at least one test (70% will have a test), an indicator <code>resident</code> identifying whether the person is part of our resident cohort (20% of those on the master list will be residents), and a variable for the number of tests an individual has (conditional on having at least 1 test). There will be names on the master list that do not have any tests nor are they a resident; these patients are removed from the master list.</p>
+<p>To generate the master list we define (using <code>simstudy</code>) a set of key parameters: an indicator <code>pcr</code> identifying whether the person has at least one test (70% will have a test), an indicator <code>resident</code> identifying whether the person is part of our resident cohort (20% of those on the master list will be residents), and a variable for the number of tests an individual has (conditional on having at least 1 test). There will be names on the master list that do not have any tests nor are they a resident; these patients are removed from the master list.</p>
 <pre class="r"><code>library(simstudy)
 
 def_n &lt;- defDataAdd(varname = &quot;pcr&quot;, formula = 0.7, dist=&quot;binary&quot;)
@@ -167,9 +168,12 @@ d_pcr[, .(pcr_id, id, name, obs_name, subs, ins, flip)]</code></pre>
 ## 108:    108 48 Wall, Sebastian  wall, Sebastian    1   0    0
 ## 109:    109 49   Tafoya, April    Tafoya, April    0   0    0
 ## 110:    110 49   Tafoya, April    Tafoya, April    0   0    0</code></pre>
-<p>Finally, we end up with two lists - one with just residents only and one with a list of PCR tests. This is mimicking the actual data we might get from our flawed health data systems.</p>
+<p>We end up with two lists - one with just residents only and one with a list of PCR tests. This is mimicking the actual data we might get from our flawed health data systems.</p>
 <pre class="r"><code>d_res &lt;- d_master[resident == 1, .(id, name)]
 d_pcr &lt;- d_pcr[, .(pcr_id, id, name = obs_name, pcr)]</code></pre>
+</div>
+<div id="the-truth" class="section level4">
+<h4>The truth</h4>
 <p>Before proceeding to the matching, here is a PCR test records for the residents. This is the correct match that we hope to recover.</p>
 <pre class="r"><code>d_pcr[ id %in% d_res$id]</code></pre>
 <pre><code>##     pcr_id id               name pcr
@@ -189,8 +193,8 @@ d_pcr &lt;- d_pcr[, .(pcr_id, id, name = obs_name, pcr)]</code></pre>
 ## 14:    105 47 Sanandres, Brandon   1</code></pre>
 </div>
 </div>
-<div id="fuzzy-matching" class="section level3">
-<h3>Fuzzy matching</h3>
+<div id="fuzzy-matching-of-simulated-data" class="section level3">
+<h3>Fuzzy matching of simulated data</h3>
 <p>The fuzzy matching is quite simple (and I’ve simplified even more by ignoring the possibility that the data have been flipped). The first step is to merge each PCR row with each resident name, which in this case will result in <span class="math inline">\(7 \times 110 = 770\)</span> rows. The idea is that we will be comparing each of the names from the PCR tests with each of the resident names. In the merged data table <code>dd</code>, <code>x</code> is the resident name, and <code>name</code> is the PCR test list name.</p>
 <pre class="r"><code>dd &lt;- data.table(merge(d_res$name, d_pcr))
 dd</code></pre>
@@ -240,6 +244,6 @@ dd[, .(staff_name = x, pcr_name = name, pcr_id, pcr, pid, score)]</code></pre>
 ## 10: Sanandres, Brandon Sananores, Brandon    103   1 721    95
 ## 11: Sanandres, Brandon Sanandues, Brandon    104   1 728    95
 ## 12: Sanandres, Brandon Sanandres, Brandon    105   1 735   100</code></pre>
-<p>We see that we did pretty well, identifying 12 of the 14 resident records in the PCR data. The two we missed were the result of flipped names. We have actually implemented this check as well by reversing the order of the first and last names, and re-calculating the distance for each pair. I’ve omitted that here just to simplify a bit.</p>
+<p>We did pretty well, identifying 12 of the 14 resident records in the PCR data. The two we missed were the result of flipped names.</p>
 <p>In practice, a relatively close distance is not necessarily a good match. For example <strong>SMITH, MARY</strong> and <strong>SMITH, JANE</strong> are only separated by three letter substitutions, but they are most likely not the same person. We could minimize this problem if we have additional fields to match on, such as date of birth. This would even allow us to <em>increase</em> the string distance we are willing to accept for a possible match without increasing the amount of manual inspection required.</p>
 </div>
