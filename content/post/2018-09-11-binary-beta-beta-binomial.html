@@ -9,6 +9,7 @@ tags:
 subtitle: ''
 ---
 
+<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
 <p>I’ve been working on updates for the <a href="http://www.rdatagen.net/page/simstudy/"><code>simstudy</code></a> package. In the past few weeks, a couple of folks independently reached out to me about generating correlated binary data. One user was not impressed by the copula algorithm that is already implemented. I’ve added an option to use an algorithm developed by <a href="https://www.tandfonline.com/doi/abs/10.1080/00031305.1991.10475828">Emrich and Piedmonte</a> in 1991, and will be incorporating that option soon in the functions <code>genCorGen</code> and <code>addCorGen</code>. I’ll write about that change some point soon.</p>
@@ -16,7 +17,7 @@ subtitle: ''
 <p>One simple solution is using a <em>beta-binomial</em> mixture data generating process. The <a href="https://en.wikipedia.org/wiki/Beta_distribution"><em>beta</em> distribution</a> is a continuous probability distribution that is defined on the interval from 0 to 1, so it is not too unreasonable as model for probabilities. If we assume that cluster-level probabilities have a beta distribution, and that within each cluster the individual outcomes have a <em>binomial</em> distribution defined by the cluster-specific probability, we will get the data generation process we are looking for.</p>
 <div id="generating-the-clustered-data" class="section level3">
 <h3>Generating the clustered data</h3>
-<p>In these examples, I am using 500 clusters, each with cluster size of 40 individuals. There is a cluster-level covariate <code>x</code> that takes on integer values between 1 and 3. The beta distribution is typically defined using two shape parameters usually referenced as <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta\)</span>, where <span class="math inline">\(E(Y) = \alpha / (\alpha + \beta)\)</span>, and <span class="math inline">\(Var(Y) = (\alpha\beta)/[(\alpha + \beta)^2(\alpha + \beta + 1)]\)</span>. In <code>simstudy</code>, the distribution is specified using the mean probability (<span class="math inline">\(p_m\)</span>) and a <em>precision</em> parameter (<span class="math inline">\(\phi_\beta &gt; 0\)</span>) (that is specified using the variance argument). Under this specification, <span class="math inline">\(Var(Y) = p_m(1 - p_m)/(1 + \phi_\beta)\)</span>. Precision is inversely related to variability: lower precision is higher variability.</p>
+<p>In these examples, I am using 500 clusters, each with cluster size of 40 individuals. There is a cluster-level covariate <code>x</code> that takes on integer values between 1 and 3. The beta distribution is typically defined using two shape parameters usually referenced as <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta,\)</span> where <span class="math inline">\(E(Y) = \alpha / (\alpha + \beta),\)</span> and <span class="math inline">\(Var(Y) = (\alpha\beta)/[(\alpha + \beta)^2(\alpha + \beta + 1)].\)</span> In <code>simstudy</code>, the distribution is specified using the mean probability (<span class="math inline">\(p_m\)</span>) and a <em>precision</em> parameter (<span class="math inline">\(\phi_\beta &gt; 0\)</span>) (that is specified using the variance argument). Under this specification, <span class="math inline">\(Var(Y) = p_m(1 - p_m)/(1 + \phi_\beta)\)</span>. Precision is inversely related to variability: lower precision is higher variability.</p>
 <p>In this simple simulation, the cluster probabilities are a function of the cluster-level covariate and precision parameter <span class="math inline">\(\phi_\beta\)</span>. Specifically</p>
 <p><span class="math display">\[logodds(p_{clust}) = -2.0 + 0.65x.\]</span>
 The binomial variable of interest <span class="math inline">\(b\)</span> is a function of <span class="math inline">\(p_{clust}\)</span> only, and represents a count of individuals in the cluster with a “success”:</p>
@@ -51,7 +52,7 @@ dc</code></pre>
 ## 499: 499 40 2 0.005143594  1
 ## 500: 500 40 2 0.481283809 16</code></pre>
 <p>The generated data with <span class="math inline">\(\phi_\beta = 3\)</span> is shown on the left below. Data sets with increasing precision (less variability) are shown to the right:</p>
-<p><img src="/post/2018-09-11-binary-beta-beta-binomial_files/figure-html/unnamed-chunk-2-1.png" width="1056" /></p>
+<p><img src="/post/2018-09-11-binary-beta-beta-binomial_files/figure-html/unnamed-chunk-3-1.png" width="1056" /></p>
 <p>The relationship of <span class="math inline">\(\phi_\beta\)</span> and variance is made clear by evaluating the variance of the cluster probabilities at each level of <span class="math inline">\(x\)</span> and comparing these variance estimates with the theoretical values suggested by parameters specified in the data generation process:</p>
 <pre class="r"><code>p.clust = 1/(1 + exp(2 - 0.65*(1:3)))
 
@@ -145,9 +146,9 @@ di</code></pre>
 ##     2:   1 40 2 0.1016969  4     2 0
 ##     3:   1 40 2 0.1016969  4     3 0
 ##     4:   1 40 2 0.1016969  4     4 0
-##     5:   1 40 2 0.1016969  4     5 1
+##     5:   1 40 2 0.1016969  4     5 0
 ##    ---                              
-## 19996: 500 40 2 0.4812838 16 19996 0
+## 19996: 500 40 2 0.4812838 16 19996 1
 ## 19997: 500 40 2 0.4812838 16 19997 0
 ## 19998: 500 40 2 0.4812838 16 19998 1
 ## 19999: 500 40 2 0.4812838 16 19999 1
@@ -165,21 +166,22 @@ summary(geefit)</code></pre>
 ## 
 ##  Coefficients:
 ##             Estimate  Std.err  Wald Pr(&gt;|W|)    
-## (Intercept) -2.07376  0.14980 191.6   &lt;2e-16 ***
-## x            0.68734  0.06566 109.6   &lt;2e-16 ***
+## (Intercept) -2.05407  0.14854 191.2   &lt;2e-16 ***
+## x            0.68965  0.06496 112.7   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
+## Correlation structure = exchangeable 
 ## Estimated Scale Parameters:
-##             Estimate Std.err
-## (Intercept)        1 0.03235
 ## 
-## Correlation: Structure = exchangeable  Link = identity 
+##             Estimate Std.err
+## (Intercept)    1.001 0.03192
+##   Link = identity 
 ## 
 ## Estimated Correlation Parameters:
 ##       Estimate Std.err
-## alpha    0.256 0.01746
-## Number of clusters:   500   Maximum cluster size: 40</code></pre>
+## alpha   0.2493 0.01747
+## Number of clusters:   500  Maximum cluster size: 40</code></pre>
 <p>In this case, <em>alpha</em> (<span class="math inline">\(\alpha\)</span>) is estimated at 0.25, which is quite close to the previous estimate of <span class="math inline">\(\phi_{overdisp}\)</span>, 0.24. So, it appears to be the case that if we have a target correlation <span class="math inline">\(\alpha\)</span>, we know the corresponding <span class="math inline">\(\phi_\beta\)</span> to use in the beta-binomial data generation process. That is, <span class="math inline">\(\phi_\beta = (1 - \alpha)/\alpha\)</span>.</p>
 <p>While this is certainly not a proof of anything, let’s give it a go with a target <span class="math inline">\(\alpha = 0.44\)</span>:</p>
 <pre class="r"><code>phi.beta.new &lt;- (1-0.44)/0.44
@@ -198,26 +200,27 @@ summary(geefit)</code></pre>
 ##     corstr = &quot;exchangeable&quot;)
 ## 
 ##  Coefficients:
-##             Estimate Std.err Wald Pr(&gt;|W|)    
-## (Intercept)  -1.7101  0.1800 90.3  &lt; 2e-16 ***
-## x             0.5685  0.0806 49.8  1.7e-12 ***
+##             Estimate Std.err  Wald Pr(&gt;|W|)    
+## (Intercept)  -2.0472  0.1844 123.2   &lt;2e-16 ***
+## x             0.6994  0.0804  75.6   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
+## Correlation structure = exchangeable 
 ## Estimated Scale Parameters:
-##             Estimate Std.err
-## (Intercept)        1  0.0307
 ## 
-## Correlation: Structure = exchangeable  Link = identity 
+##             Estimate Std.err
+## (Intercept)        1  0.0417
+##   Link = identity 
 ## 
 ## Estimated Correlation Parameters:
 ##       Estimate Std.err
-## alpha    0.444  0.0242
-## Number of clusters:   500   Maximum cluster size: 40</code></pre>
+## alpha     0.44  0.0276
+## Number of clusters:   500  Maximum cluster size: 40</code></pre>
 </div>
 <div id="addendum" class="section level3">
 <h3>Addendum</h3>
-<p>Above, I suggested that the estimator of the effect of <code>x</code> based on the beta model will have less variation than the estimator based on the beta-binomial model. I drew 5000 samples from the data generating process and estimated the models each time. Below is a density distribution of the estimates of each of the models from all 5000 iterations. As expected, the beta-binomial process has more variability, as do the related estimates; we can see this in the relative “peakedness”&quot; of the beta density:</p>
+<p>Above, I suggested that the estimator of the effect of <code>x</code> based on the beta model will have less variation than the estimator based on the beta-binomial model. I drew 5000 samples from the data generating process and estimated the models each time. Below is a density distribution of the estimates of each of the models from all 5000 iterations. As expected, the beta-binomial process has more variability, as do the related estimates; we can see this in the relative “peakedness”" of the beta density:</p>
 <p><img src="/img/post-betabin/betabetabin.png" /></p>
 <p>Also based on these 5000 iterations, the GEE model estimation appears to be less efficient than the beta-binomial model. This is not surprising since the beta-binomial model was the actual process that generated the data (so it is truly the correct model). The GEE model is robust to mis-specification of the correlation structure, but the price we pay for that robustness is a slightly less precise estimate (even if we happen to get the correlation structure right):</p>
 <p><img src="/img/post-betabin/betabingee.png" /></p>
