@@ -1,0 +1,148 @@
+---
+title: Sample size determination in the context of Bayesian analysis
+author: 
+date: '2021-05-25'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - Stan
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Given my recent involvement with the design of a somewhat complex <a href="https://www.rdatagen.net/post/2021-01-19-should-we-continue-recruiting-patients-an-application-of-bayesian-predictive-probabilities/" target="_blank">trial</a> centered around a Bayesian data analysis, I am appreciating more and more that Bayesian approaches are a very real option for clinical trial design. A key element of any study design is sample size. While some would argue that sample size considerations are not critical to the Bayesian design (since Bayesian inference is agnostic to any pre-specified sample size and is not really affected by how frequently you look at the data along the way), it might be a bit of a challenge to submit a grant without telling the potential funders how many subjects you plan on recruiting (since that could have a rather big effect on the level of resources - financial and time - required.)</p>
+<p>In trying to better understand sample size considerations in this context, I’ve been found this book by <a href="https://onlinelibrary.wiley.com/doi/book/10.1002/0470092602" target="_blank">Spiegelhalter et al</a> to be very helpful, and I’ve particularly liked these two papers, one by <a href="https://projecteuclid.org/journals/statistical-science/volume-17/issue-2/A-simulation-based-approach-to-Bayesian-sample-size-determination-for/10.1214/ss/1030550861.full" target="_blank">Wang &amp; Gelfand</a> and another by <a href="https://www.mdpi.com/1660-4601/18/2/595" target="_blank">De Santis &amp; Gubbiotti</a></p>
+<p><a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">Earlier</a>, I touched a bit on these issues while discussing the frequentist properties of Bayesian models, but I didn’t really get directly into sample size considerations. I’ve been doing some more exploring and simulating, so I am sharing some of that here.</p>
+<div id="bayesian-inference" class="section level3">
+<h3>Bayesian inference</h3>
+<p>In the Bayesian framework, all statistical inference is based on the estimated posterior probability distribution for the parameter(s) of interest (say <span class="math inline">\(\theta\)</span>) once we have observed the data: <span class="math inline">\(P(\theta | \text{data})\)</span>. In addition to extracting the mean or median of the distribution as a point estimate, we can get a measure of uncertainty by extracting quantiles from the distribution (a 95% interval comes to mind, though there is no reason to be limited by that convention).</p>
+<p>Alternatively, we can make a probability statement about the parameter being above or below a threshold of effectiveness. For example if we are estimating a log-odds ratio for an intervention that prevents a bad outcome, we might be interested in <span class="math inline">\(P(log(OR) &lt; 0).\)</span> We may even pre-specify that the trial will be considered a success if <span class="math inline">\(P(log(OR) &lt; 0) &gt; 0.95.\)</span></p>
+<p>As in the frequentist context, an increase in sample size will reduce the variance of the posterior distribution estimated in a Bayesian model. And as the sample size increases, the distribution collapses towards the mean or median, which has a direct impact on how confident we are in drawing conclusions from the data.</p>
+<!-- ### Statistical power and sample size -->
+<!--  This, of course, is in contrast with frequentist inference that is usually based on something like $P(\text{data} | \theta = 0)$.  -->
+<!-- The traditional notion of *statistical power* is the probability of rejecting the null hypothesis (i.e. $\theta=0$) given that the true underlying parameter is some $\theta = \myne{\theta_1}{0}$. This probability can be written as $P(D_1 | \theta = \theta_1)$, where $D_1$ is any set of observed data that satisfies $P(D_1 | \theta = 0) < \alpha$, typically with $\alpha = 0.05$. Sample size comes into play because $P(\text{data} | \theta = 0)$ is a function of the number of observations. -->
+<!-- This concept of power doesn't translate very well to a Bayesian framework, because here the null hypothesis $\theta = 0$ is not particularly meaningful. However, there is a Bayesian analog of power -->
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)</code></pre>
+</div>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>To investigate, I will use a simple binary outcome <span class="math inline">\(Y\)</span> that is changed by exposure or intervention <span class="math inline">\(A\)</span>. In this first case, I will randomly select a log-odds ratio from <span class="math inline">\(N(\mu = -1, \sigma = 0.5).\)</span></p>
+<pre class="r"><code>defB &lt;- defDataAdd(varname = &quot;Y&quot;, formula = &quot;-2 + ..lor * A&quot;, 
+  dist = &quot;binary&quot;, link=&quot;logit&quot;)
+
+set.seed(21)
+lor &lt;- rnorm(1, -1, 0.5)
+
+dT &lt;- genData(200)
+dT &lt;- trtAssign(dT, grpName = &quot;A&quot;)
+dT &lt;- addColumns(defB, dT)</code></pre>
+</div>
+<div id="model-fitting" class="section level3">
+<h3>Model fitting</h3>
+<p>I am primarily interested in recovering the log-odds ratio use to generate the data using a simple Bayesian model, written here in <code>Stan</code>. The parameter of interest in the <code>Stan</code> model is <span class="math inline">\(\beta\)</span>, log-odds ratio. The prior distribution is <span class="math inline">\(t_{student}(df=3, \mu=0, \sigma=5).\)</span></p>
+<pre class="stan"><code>data {
+  int&lt;lower=0&gt; N;
+  int&lt;lower=0,upper=1&gt; y[N];
+  vector[N] x;
+  real mu;
+  real s;
+}
+
+parameters {
+  real alpha;
+  real beta;
+}
+
+model {
+  beta ~ student_t(3, mu, s);
+  y ~ bernoulli_logit(alpha + beta * x);
+}</code></pre>
+<p>To estimate the posterior distribution, I am using the <code>R</code> package <code>cmdstanr</code>:</p>
+<pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/bayes_logistic.stan&quot;)
+
+fit &lt;- mod$sample(
+  data =  list(N=nrow(dT), y=dT$Y, x=dT$A, mu=0, s=5),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  step_size = 0.1,
+  show_messages = FALSE
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 1 finished in 0.2 seconds.
+## Chain 2 finished in 0.3 seconds.
+## Chain 3 finished in 0.3 seconds.
+## Chain 4 finished in 0.3 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.3 seconds.
+## Total execution time: 0.3 seconds.</code></pre>
+<p>(If you’re impressed at how fast that model ran, it is because it is on my new MacBook Pro with the new Apple M1 chip - 4 or 5 times faster than my previous MacBook Pro with an Intel chip. It took me a while to get <code>R</code>, <code>RStudio</code>, and particularly, <code>cmdstan</code> up and running, but once I did, it has been totally worth it.)</p>
+<p>First thing to check, of course, is whether the sampling from the posterior distribution was well-behaved. Here is a trace plot for the parameter <span class="math inline">\(\beta\)</span>:</p>
+<pre class="r"><code>draws_array &lt;- as_draws_array(fit$draws())
+mcmc_trace(draws_array, pars = &quot;beta&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="384" /></p>
+<p>Here are the sumary statistics of the posterior distribution. Based on these data, the median log-odds ratio is <span class="math inline">\(-0.61\)</span> and <span class="math inline">\(P(lor &lt; 0) = 89\%\)</span>:</p>
+<pre class="r"><code>res &lt;- data.table(fit$summary(variables = &quot;beta&quot;))[, 
+          .(median, sd, q95, len = q95-q5)]
+
+betas &lt;- data.table(beta = as.matrix(draws_array[,,&quot;beta&quot;]))
+res$p0 &lt;- mean(betas$beta.V1 &lt; 0)
+
+res</code></pre>
+<pre><code>##        median       sd       q95      len      p0
+## 1: -0.6050845 0.511862 0.2103548 1.673138 0.88875</code></pre>
+<p>A plot of the posterior distribution is the best way to fully assess the state of knowledge about the parameter having observed this data set. The density plot includes a vertical dashed line at the median, and the dark shading indicates lowest <span class="math inline">\(95\%\)</span> of the density. The fact that the cutoff point <span class="math inline">\(0\)</span> lies within the bottom <span class="math inline">\(95\%\)</span> makes it clear that the threshold was not met.</p>
+<pre class="r"><code>d &lt;- density(draws_array[,,&quot;beta&quot;], n = 1024)
+plot_points &lt;- as.data.table(d[c(&quot;x&quot;, &quot;y&quot;)])
+median_xy &lt;- plot_points[findInterval(res$median, plot_points$x)]
+
+ggplot(data = plot_points, aes(x = x, y = y)) +
+  geom_area(aes(fill = (x &lt; res$q95))) +
+  geom_segment(x = median_xy$x, xend=median_xy$x, y=0, yend = median_xy$y,
+               size = 0.2, color = &quot;white&quot;, lty=3) +
+  scale_fill_manual(values = c(&quot;#adc3f2&quot;, &quot;#5886e5&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.position = &quot;none&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+</div>
+<div id="bayesian-power" class="section level3">
+<h3>Bayesian power</h3>
+<p>If we want to assess what kind of sample sizes we might want to target in study based on this relatively simple design (binary outcome, two-armed trial), we can conduct a Bayesian power analysis that has a somewhat different flavor from the more typical frequentist Bayesian that I typically do with simulation.</p>
+<p>When I conduct a power analysis with a frequentist, it is based on a set of fixed effect sizes and hypothesis tests centered around the frequentist p-value at a specified level of <span class="math inline">\(\alpha\)</span>. The Bayesian power analysis differs with respect to these two key elements: a distribution of effect sizes replaces the single fixed effect size to accomodate, and the posterior distribution probability threshold (or other criteria such as the variance of the posterior distribution or the length of the 95% credible interval) replaces the frequentist hypothesis test.</p>
+<p>We have a prior distribution of effect sizes. De Santis and Gubbiotti suggest it is not necessary (and perhaps less desirable) to use the same prior used in the model fitting. That means you could use a skeptical (conservative) prior centered around 0, in the analysis, but use a prior for data generation that is consistent with a clinically meaningful effect size. In the example above the <em>analysis prior</em> was</p>
+<p><span class="math display">\[ \beta \sim t_{student}(df = 3, \mu = 0, \sigma = 5) \]</span></p>
+<p>and the <em>data generation prior</em> was</p>
+<p><span class="math display">\[ \beta \sim N(\mu = -1, \sigma = 0.5).\]</span></p>
+<p>To conduct the Bayesian power analysis, I replicated the simulation and model fitting shown above 1000 times for each of seven different sample sizes ranging from 100 to 400. (Even though my laptop is quite speedy, I used the NYU Langone Health high performance cluster Big Purple to do this, because I wanted to save a few hours.) I’m not showing the code in this post, but take a look <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">here</a> for an example similar to this. (I’m happy to share with anyone if you’d like to have the code.)</p>
+<p>The plots below show just a sample of 20 posterior distributions taken from the 1000 generated at three sample sizes. It is apparent that as sample size increases, the proportion of posterior distributions meet the 95% threshold increases.</p>
+<p><img src="img/p95.png" /></p>
+<p>Here is a curve that summarizes the probability of a posterior distribution meeting the 95% threshold at each sample size level. At a size of 400, 80% of the posterior distributions (which are themselves based on data generated from varying effect sizes specified by the <em>data generation prior</em> and the <em>analysis prior</em>) would lead us to conclude that the trial is success.</p>
+<p><img src="img/power_curve.png" /></p>
+<p>
+<p><small><font color="darkkhaki"></p>
+<p>References:</p>
+<p>Wang, Fei, and Alan E. Gelfand. “A simulation-based approach to Bayesian sample size determination for performance under a given model and for separating models.” <em>Statistical Science</em> 17, no. 2 (2002): 193-208.</p>
+<p>Spiegelhalter, David J., Keith R. Abrams, and Jonathan P. Myles. <em>Bayesian approaches to clinical trials and health-care evaluation</em>. Vol. 13. John Wiley &amp; Sons, 2004.</p>
+<p>De Santis, Fulvio, and Stefania Gubbiotti. “Sample Size Requirements for Calibrated Approximate Credible Intervals for Proportions in Clinical Trials.” <em>International Journal of Environmental Research and Public Health</em> 18, no. 2 (2021): 595.</p>
+</font></small>
+</p>
+</div>
