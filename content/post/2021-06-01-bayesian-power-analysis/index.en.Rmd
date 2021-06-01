@@ -1,7 +1,7 @@
 ---
 title: Sample size determination in the context of Bayesian analysis
 author: 
-date: '2021-05-25'
+date: '2021-06-01'
 slug: []
 categories: []
 tags:
@@ -22,8 +22,6 @@ draft: true
 
 Given my recent involvement with the design of a somewhat complex [trial](https://www.rdatagen.net/post/2021-01-19-should-we-continue-recruiting-patients-an-application-of-bayesian-predictive-probabilities/){target="_blank"} centered around a Bayesian data analysis, I am appreciating more and more that Bayesian approaches are a very real option for clinical trial design. A key element of any study design is sample size. While some would argue that sample size considerations are not critical to the Bayesian design (since Bayesian inference is agnostic to any pre-specified sample size and is not really affected by how frequently you look at the data along the way), it might be a bit of a challenge to submit a grant without telling the potential funders how many subjects you plan on recruiting (since that could have a rather big effect on the level of resources - financial and time - required.)
 
-In trying to better understand sample size considerations in this context, I've been found this book by [Spiegelhalter et al](https://onlinelibrary.wiley.com/doi/book/10.1002/0470092602){target="_blank"} to be very helpful, and I've particularly liked these two papers, one by [Wang & Gelfand](https://projecteuclid.org/journals/statistical-science/volume-17/issue-2/A-simulation-based-approach-to-Bayesian-sample-size-determination-for/10.1214/ss/1030550861.full){target="_blank"} and another by [De Santis & Gubbiotti](https://www.mdpi.com/1660-4601/18/2/595){target="_blank"}
-
 [Earlier](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"}, I touched a bit on these issues while discussing the frequentist properties of Bayesian models, but I didn't really get directly into sample size considerations. I've been doing some more exploring and simulating, so I am sharing some of that here.
 
 ### Bayesian inference
@@ -31,8 +29,6 @@ In trying to better understand sample size considerations in this context, I've 
 In the Bayesian framework, all statistical inference is based on the estimated posterior probability distribution for the parameter(s) of interest (say $\theta$) once we have observed the data: $P(\theta | \text{data})$. In addition to extracting the mean or median of the distribution as a point estimate, we can get a measure of uncertainty by extracting quantiles from the distribution (a 95\% interval comes to mind, though there is no reason to be limited by that convention).
 
 Alternatively, we can make a probability statement about the parameter being above or below a threshold of effectiveness. For example if we are estimating a log-odds ratio for an intervention that prevents a bad outcome, we might be interested in $P(log(OR) < 0).$ We may even pre-specify that the trial will be considered a success if $P(log(OR) < 0) > 0.95.$
-
-As in the frequentist context, an increase in sample size will reduce the variance of the posterior distribution estimated in a Bayesian model. And as the sample size increases, the distribution collapses towards the mean or median, which has a direct impact on how confident we are in drawing conclusions from the data.
 
 <!-- ### Statistical power and sample size -->
 
@@ -118,7 +114,7 @@ draws_array <- as_draws_array(fit$draws())
 mcmc_trace(draws_array, pars = "beta")
 ```
 
-Here are the sumary statistics of the posterior distribution. Based on these data, the median log-odds ratio is $-0.61$ and $P(lor < 0) = 89\%$:
+Here are the summary statistics of the posterior distribution. Based on these data, the median log-odds ratio is $-0.61$ and $P(lor < 0) = 89\%$:
 
 ```{r}
 res <- data.table(fit$summary(variables = "beta"))[, 
@@ -149,9 +145,9 @@ ggplot(data = plot_points, aes(x = x, y = y)) +
 
 ### Bayesian power
 
-If we want to assess what kind of sample sizes we might want to target in study based on this relatively simple design (binary outcome, two-armed trial), we can conduct a Bayesian power analysis that has a somewhat different flavor from the more typical frequentist Bayesian that I typically do with simulation.
+If we want to assess what kind of sample sizes we might want to target in study based on this relatively simple design (binary outcome, two-armed trial), we can conduct a Bayesian power analysis that has a somewhat different flavor from the more typical frequentist Bayesian that I typically do with simulation. There are a few resources I've found very useful here: this book by [Spiegelhalter et al](https://onlinelibrary.wiley.com/doi/book/10.1002/0470092602){target="_blank"} and these two papers, one by [Wang & Gelfand](https://projecteuclid.org/journals/statistical-science/volume-17/issue-2/A-simulation-based-approach-to-Bayesian-sample-size-determination-for/10.1214/ss/1030550861.full){target="_blank"} and another by [De Santis & Gubbiotti](https://www.mdpi.com/1660-4601/18/2/595){target="_blank"}
 
-When I conduct a power analysis with a frequentist, it is based on a set of fixed effect sizes and hypothesis tests centered around the frequentist p-value at a specified level of $\alpha$. The Bayesian power analysis differs with respect to these two key elements: a distribution of effect sizes replaces the single fixed effect size to accomodate, and the posterior distribution probability threshold (or other criteria such as the variance of the posterior distribution or the length of the 95\% credible interval) replaces the frequentist hypothesis test.
+When I conduct a power analysis within a frequentist framework, I usually assume set of *fixed/known* effect sizes, and the hypothesis tests are centered around the frequentist p-value at a specified level of $\alpha$. The Bayesian power analysis differs with respect to these two key elements: a distribution of effect sizes replaces the single fixed effect size to accommodate uncertainty, and the posterior distribution probability threshold (or another criteria such as the variance of the posterior distribution or the length of the 95\% credible interval) replaces the frequentist hypothesis test.
 
 We have a prior distribution of effect sizes. De Santis and Gubbiotti suggest it is not necessary (and perhaps less desirable) to use the same prior used in the model fitting. That means you could use a skeptical (conservative) prior centered around 0, in the analysis, but use a prior for data generation that is consistent with a clinically meaningful effect size. In the example above the *analysis prior* was 
 
@@ -161,9 +157,9 @@ and the *data generation prior* was
 
 $$ \beta \sim N(\mu = -1, \sigma = 0.5).$$
 
-To conduct the Bayesian power analysis, I replicated the simulation and model fitting shown above 1000 times for each of seven different sample sizes ranging from 100 to 400. (Even though my laptop is quite speedy, I used the NYU Langone Health high performance cluster Big Purple to do this, because I wanted to save a few hours.) I'm not showing the code in this post, but take a look [here](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} for an example similar to this. (I'm happy to share with anyone if you'd like to have the code.)
+To conduct the Bayesian power analysis, I replicated the simulation and model fitting shown above 1000 times for each of seven different sample sizes ranging from 100 to 400. (Even though my laptop is quite speedy, I used the NYU Langone Health high performance cluster Big Purple to do this, because I wanted to save a few hours.) I'm not showing the parallelized code in this post, but take a look [here](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} for an example similar to this. (I'm happy to share with anyone if you'd like to have the code.)
 
-The plots below show just a sample of 20 posterior distributions taken from the 1000 generated at three sample sizes. It is apparent that as sample size increases, the proportion of posterior distributions meet the 95% threshold increases.
+The plots below show a sample of 20 posterior distributions taken from the 1000 generated for each of three sample sizes. As in the frequentist context, an increase in sample size appears to reduce the variance of the posterior distribution estimated in a Bayesian model. We can see visually that as the sample size increases, the distribution collapses towards the mean or median, which has a direct impact on how confident we are in drawing conclusions from the data; in this case, it is apparent that as sample size increases, the proportion of posterior distributions meet the 95% threshold increases.
 
 ![](img/p95.png)
 
