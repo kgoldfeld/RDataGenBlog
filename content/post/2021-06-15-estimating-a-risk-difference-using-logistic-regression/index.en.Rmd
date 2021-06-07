@@ -1,0 +1,234 @@
+---
+title: Estimating a risk difference using logistic regression
+author: ''
+date: '2021-06-15'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+The odds ratio (OR), the effect size parameter estimated in logistic regression, is notoriously difficult to interpret. It is a ratio of two quantities (odds, under different conditions) that are themselves ratios of probabilities. I think people understand well that a very large or small OR implies a strong treatment effect, but translating that effect into a clinical context can be challenging, particularly since ORs are not unique to probabilities. 
+
+I'm working on a study evaluating an intervention designed to increase COVID-19 vaccination rates for staff and long-term residents in nursing facilities. A collaborator on that project suggested we report a risk difference (i.e. a difference in probabilities between two groups) in addition to the confusing odds ratio. He suggested that reviewers and readers might find the results more compelling if they could see the underlying probabilities.
+
+I agree that risk differences are so much more intuitive - we certainly don't think in terms of odds ratios. My only hesitation is that the risk difference estimates are *marginal*, whereas odds ratios are *conditional*. (I've written about this distinction [before](https://www.rdatagen.net/post/marginal-v-conditional/){target="_blank"}.) The marginal risk difference estimate is a function of the distribution of patient characteristics in the study that influence the outcome, so the results might not be generalizable to other populations. The odds ratio is more generalizable, as long as there are no clustering or group specific effects in the data set you have. However, my collaborators seemed to believe that the benefits of improved communication outweigh the potential loss of generalizability. (It is true there is a newer set of methods, developed by [Richardson, Robins, & Wang](https://amstat.tandfonline.com/doi/full/10.1080/01621459.2016.1192546?casa_token=EspaMRhG3OIAAAAA%3AHCGnpIqZnUoAroQuWUCwKv5ANjH5mapba9vCUMrY-pkEmOMVmUuKZjDL-pZu2gC_9eKirj8j7CBk){target="_blank"}, that allow analysts to model the risk difference directly, but I'm not exploring those in this post.)
+
+My goal here is to demonstrate the relative simplicity of estimating the marginal risk difference that is described in a paper by [Austin](https://www.sciencedirect.com/science/article/pii/S0895435608003168?casa_token=uEXf8L5G2_EAAAAA:MkWX5XPuSQBLTzLmtpOlDJgAO5cQ7dmLD6S3mWParxfttvWyiYPok_87_ur9MCmUtpvzGJM){target="_blank"}. I will not be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.
+
+### Quickly defining the parameters of interest
+
+In the study that motivated this, we were interested in increasing the probability of of individuals getting vaccinated. We had two study arms - one an intervention arm and the other a control arm where no special outreach was done. So, there are two probabilities: $p_1 \equiv P(\text{vaccinated} | \text{intervention})$ and $p_0 \equiv P(\text{vaccinated} | \text{control}).$
+
+The risk difference comparing the two groups is simply
+
+$$\text{RD} = p_1 - p_0$$
+The odds for each group is
+
+$$\text{odds}_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},$$
+and the odds ratio comparing the intervention arm to the control arm is 
+
+$$\text{OR} = \frac{\text{odds}_1}{\text{odds}_0}.$$
+
+The logistic regression model models the log odds as a linear function of the intervention status and any other covariates that are being adjusted. In the examples below, there is one continuous covariate $x$ that ranges from -0.5 to 0.5:
+
+$$\text{log}(\text{odds}_A) = \alpha + \beta A + \gamma X.$$
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(fig.width = 6, fig.height=3)
+```
+
+```{r}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(ggthemes)
+library(parallel)
+```
+
+```{r}
+def <- defDataAdd(varname = "x1", formula = "..mu_x", variance = 8, dist = "beta")
+def <- defDataAdd(def, varname = "x", formula = "x1 - 0.5", dist = "nonrandom")
+def <- defDataAdd(def, varname = "y", 
+  formula = "-2 + log(2.5) * rx + 1.5 * x",
+  dist = "binary", link="logit")
+
+generate <- function(n, mu_x) {
+  
+  dx <- genData(n)
+  dx <- trtAssign(dx, grpName = "rx")
+  dx <- addColumns(def, dx)
+  dx[]
+  
+}
+
+estimate <- function(dx) {
+  
+  glmfit <- glm(y ~ rx + x, data = dx, family = "binomial")
+
+  newdata <- dx[, .(rx=1, x)]
+  p1 <- mean(predict(glmfit, newdata, type = "response"))
+
+  newdata <- dx[, .(rx=0, x)]
+  p0 <- mean(predict(glmfit, newdata, type = "response"))
+
+  risk_diff <- p1 - p0
+  odds_ratio <- exp(coef(glmfit)["rx"])
+  
+  data.table(risk_diff, odds_ratio)
+  
+}
+
+plot_hist <- function(dx) {
+  
+  ggplot(data = dx, aes(x = x)) +
+    geom_histogram(fill="#9ec785", binwidth = 0.05, boundary = 0) +
+    scale_x_continuous(limits = c(-.55, .55), breaks = seq(-.5, .5, by = .25)) +
+    theme(panel.grid = element_blank())
+  
+}
+```
+
+```{r}
+set.seed(726152)
+
+dd <- generate(500, 0.2)
+plot_hist(dd)
+estimate(dd)
+```
+
+```{r}
+dd <- generate(500, 0.8)
+plot_hist(dd)
+estimate(dd)
+```
+
+```{r}
+s_define <- function() {
+  
+  def <- defDataAdd(varname = "x1", formula = "..mu_x", variance = 8, dist = "beta")
+  def <- defDataAdd(def, varname = "x", formula = "x1 - 0.5", dist = "nonrandom")
+  def <- defDataAdd(def, varname = "y", 
+    formula = "-2 + 1 * rx + 1.5 * x",
+    dist = "binary", link="logit")
+  
+  return(list(def = def)) # list_of_defs is a list of simstudy data definitions
+}
+
+s_generate <- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  dx <- genData(n)
+  dx <- trtAssign(dx, grpName = "rx")
+  dx <- addColumns(def, dx)
+  
+  return(dx) #  generated data is a data.table
+}
+
+s_model <- function(dx) {
+  
+  glmfit <- glm(y ~ rx + x, data = dx, family = "binomial")
+  
+  newdata <- dx[, .(rx=1, x)]
+  p1 <- mean(predict(glmfit, newdata, type = "response"))
+  
+  newdata <- dx[, .(rx=0, x)]
+  p0 <- mean(predict(glmfit, newdata, type = "response"))
+  
+  risk_diff <- p1 - p0
+  odds_ratio <- exp(coef(glmfit)["rx"])
+  
+  model_results <- data.table(risk_diff, odds_ratio)
+  
+  return(model_results) # model_results is a data.table
+}
+
+s_single_rep <- function(list_of_defs, argsvec) {
+  
+  generated_data <- s_generate(list_of_defs, argsvec)
+  model_results <- s_model(generated_data)
+  
+  return(model_results)
+}
+
+
+s_replicate <- function(argsvec, nsim) {
+  
+  list_of_defs <- s_define()
+  
+  model_results <- rbindlist(
+    parallel::mclapply(
+      X = 1 : nsim, 
+      FUN = function(x) s_single_rep(list_of_defs, argsvec), 
+      mc.cores = 4)
+  )
+  
+  model_results <- cbind(t(argsvec), model_results)
+  
+  return(model_results) # summary_stats is a data.table
+}
+
+### Scenarios
+
+scenario_list <- function(...) {
+  argmat <- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+n <- 500
+mu_x <- c(0.2, 0.4, 0.6, 0.8)
+
+scenarios <- scenario_list(n = n, mu_x = mu_x)
+
+#--- run locally ---#
+
+summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 5000)))
+
+ggplot(data = summary_stats, aes(x = risk_diff, group = mu_x)) +
+  geom_density(aes(fill = factor(mu_x)), alpha = .7) +
+  scale_fill_canva(palette = "Simple but bold", name = "mu_x") +
+  theme(panel.grid = element_blank()) +
+  xlab("estimated risk difference")
+
+ggplot(data = summary_stats, aes(x = odds_ratio, group = mu_x)) +
+  geom_density(aes(fill = factor(mu_x)), alpha = .7) +
+  scale_fill_canva(palette = "Simple but bold", name = "mu_x") +
+  theme(panel.grid = element_blank()) +
+  xlab("estimated odds ratio")
+```
+
+```{r}
+bootdif <- function(dd) {
+  
+  db <- dd[, .(id = sample(id, replace = TRUE)), keyby = rx]
+  db <- merge(db[, id, rx], dd, by = c("id", "rx"))
+  
+  bootfit <- estimate(db)
+}
+
+dd <- generate(500, 0.2)
+estimate(dd)
+
+bootest <- rbindlist(mclapply(1:999, function(x) bootdif(dd), mc.cores = 4))
+bootest[, quantile(risk_diff, c(0.025, 0.975))]
+```
+
+
+<p><small><font color="darkkhaki">
+
+References:
+
+Richardson, Thomas S., James M. Robins, and Linbo Wang. "On modeling and estimation for the relative risk and risk difference." *Journal of the American Statistical Association* 112, no. 519 (2017): 1121-1130.
+
+Austin, Peter C. "Absolute risk reductions, relative risks, relative risk reductions, and numbers needed to treat can be obtained from a logistic regression model." *Journal of clinical epidemiology* 63, no. 1 (2010): 2-6.
+
+</font></small></p>

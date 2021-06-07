@@ -1,0 +1,212 @@
+---
+title: Estimating a risk difference using logistic regression
+author: ''
+date: '2021-06-15'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+output:
+  blogdown::html_page:
+    anchor_sections: no
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>The odds ratio (OR), the effect size parameter estimated in logistic regression, is notoriously difficult to interpret. It is a ratio of two quantities (odds, under different conditions) that are themselves ratios of probabilities. I think people understand well that a very large or small OR implies a strong treatment effect, but translating that effect into a clinical context can be challenging, particularly since ORs are not unique to probabilities.</p>
+<p>I’m working on a study evaluating an intervention designed to increase COVID-19 vaccination rates for staff and long-term residents in nursing facilities. A collaborator on that project suggested we report a risk difference (i.e. a difference in probabilities between two groups) in addition to the confusing odds ratio. He suggested that reviewers and readers might find the results more compelling if they could see the underlying probabilities.</p>
+<p>I agree that risk differences are so much more intuitive - we certainly don’t think in terms of odds ratios. My only hesitation is that the risk difference estimates are <em>marginal</em>, whereas odds ratios are <em>conditional</em>. (I’ve written about this distinction <a href="https://www.rdatagen.net/post/marginal-v-conditional/" target="_blank">before</a>.) The marginal risk difference estimate is a function of the distribution of patient characteristics in the study that influence the outcome, so the results might not be generalizable to other populations. The odds ratio is more generalizable, as long as there are no clustering or group specific effects in the data set you have. However, my collaborators seemed to believe that the benefits of improved communication outweigh the potential loss of generalizability. (It is true there is a newer set of methods, developed by <a href="https://amstat.tandfonline.com/doi/full/10.1080/01621459.2016.1192546?casa_token=EspaMRhG3OIAAAAA%3AHCGnpIqZnUoAroQuWUCwKv5ANjH5mapba9vCUMrY-pkEmOMVmUuKZjDL-pZu2gC_9eKirj8j7CBk" target="_blank">Richardson, Robins, &amp; Wang</a>, that allow analysts to model the risk difference directly, but I’m not exploring those in this post.)</p>
+<p>My goal here is to demonstrate the relative simplicity of estimating the marginal risk difference that is described in a paper by <a href="https://www.sciencedirect.com/science/article/pii/S0895435608003168?casa_token=uEXf8L5G2_EAAAAA:MkWX5XPuSQBLTzLmtpOlDJgAO5cQ7dmLD6S3mWParxfttvWyiYPok_87_ur9MCmUtpvzGJM" target="_blank">Austin</a>. I will not be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.</p>
+<div id="quickly-defining-the-parameters-of-interest" class="section level3">
+<h3>Quickly defining the parameters of interest</h3>
+<p>In the study that motivated this, we were interested in increasing the probability of of individuals getting vaccinated. We had two study arms - one an intervention arm and the other a control arm where no special outreach was done. So, there are two probabilities: <span class="math inline">\(p_1 \equiv P(\text{vaccinated} | \text{intervention})\)</span> and <span class="math inline">\(p_0 \equiv P(\text{vaccinated} | \text{control}).\)</span></p>
+<p>The risk difference comparing the two groups is simply</p>
+<p><span class="math display">\[\text{RD} = p_1 - p_0\]</span>
+The odds for each group is</p>
+<p><span class="math display">\[\text{odds}_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},\]</span>
+and the odds ratio comparing the intervention arm to the control arm is</p>
+<p><span class="math display">\[\text{OR} = \frac{\text{odds}_1}{\text{odds}_0}.\]</span></p>
+<p>The logistic regression model models the log odds as a linear function of the intervention status and any other covariates that are being adjusted. In the examples below, there is one continuous covariate <span class="math inline">\(x\)</span> that ranges from -0.5 to 0.5:</p>
+<p><span class="math display">\[\text{log}(\text{odds}_A) = \alpha + \beta A + \gamma X.\]</span></p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(ggthemes)
+library(parallel)</code></pre>
+<pre class="r"><code>def &lt;- defDataAdd(varname = &quot;x1&quot;, formula = &quot;..mu_x&quot;, variance = 8, dist = &quot;beta&quot;)
+def &lt;- defDataAdd(def, varname = &quot;x&quot;, formula = &quot;x1 - 0.5&quot;, dist = &quot;nonrandom&quot;)
+def &lt;- defDataAdd(def, varname = &quot;y&quot;, 
+  formula = &quot;-2 + log(2.5) * rx + 1.5 * x&quot;,
+  dist = &quot;binary&quot;, link=&quot;logit&quot;)
+
+generate &lt;- function(n, mu_x) {
+  
+  dx &lt;- genData(n)
+  dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+  dx &lt;- addColumns(def, dx)
+  dx[]
+  
+}
+
+estimate &lt;- function(dx) {
+  
+  glmfit &lt;- glm(y ~ rx + x, data = dx, family = &quot;binomial&quot;)
+
+  newdata &lt;- dx[, .(rx=1, x)]
+  p1 &lt;- mean(predict(glmfit, newdata, type = &quot;response&quot;))
+
+  newdata &lt;- dx[, .(rx=0, x)]
+  p0 &lt;- mean(predict(glmfit, newdata, type = &quot;response&quot;))
+
+  risk_diff &lt;- p1 - p0
+  odds_ratio &lt;- exp(coef(glmfit)[&quot;rx&quot;])
+  
+  data.table(risk_diff, odds_ratio)
+  
+}
+
+plot_hist &lt;- function(dx) {
+  
+  ggplot(data = dx, aes(x = x)) +
+    geom_histogram(fill=&quot;#9ec785&quot;, binwidth = 0.05, boundary = 0) +
+    scale_x_continuous(limits = c(-.55, .55), breaks = seq(-.5, .5, by = .25)) +
+    theme(panel.grid = element_blank())
+  
+}</code></pre>
+<pre class="r"><code>set.seed(726152)
+
+dd &lt;- generate(500, 0.2)
+plot_hist(dd)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="576" /></p>
+<pre class="r"><code>estimate(dd)</code></pre>
+<pre><code>##    risk_diff odds_ratio
+## 1: 0.1190142   2.670604</code></pre>
+<pre class="r"><code>dd &lt;- generate(500, 0.8)
+plot_hist(dd)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="576" /></p>
+<pre class="r"><code>estimate(dd)</code></pre>
+<pre><code>##    risk_diff odds_ratio
+## 1: 0.2095438   2.970157</code></pre>
+<pre class="r"><code>s_define &lt;- function() {
+  
+  def &lt;- defDataAdd(varname = &quot;x1&quot;, formula = &quot;..mu_x&quot;, variance = 8, dist = &quot;beta&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;x&quot;, formula = &quot;x1 - 0.5&quot;, dist = &quot;nonrandom&quot;)
+  def &lt;- defDataAdd(def, varname = &quot;y&quot;, 
+    formula = &quot;-2 + 1 * rx + 1.5 * x&quot;,
+    dist = &quot;binary&quot;, link=&quot;logit&quot;)
+  
+  return(list(def = def)) # list_of_defs is a list of simstudy data definitions
+}
+
+s_generate &lt;- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  dx &lt;- genData(n)
+  dx &lt;- trtAssign(dx, grpName = &quot;rx&quot;)
+  dx &lt;- addColumns(def, dx)
+  
+  return(dx) #  generated data is a data.table
+}
+
+s_model &lt;- function(dx) {
+  
+  glmfit &lt;- glm(y ~ rx + x, data = dx, family = &quot;binomial&quot;)
+  
+  newdata &lt;- dx[, .(rx=1, x)]
+  p1 &lt;- mean(predict(glmfit, newdata, type = &quot;response&quot;))
+  
+  newdata &lt;- dx[, .(rx=0, x)]
+  p0 &lt;- mean(predict(glmfit, newdata, type = &quot;response&quot;))
+  
+  risk_diff &lt;- p1 - p0
+  odds_ratio &lt;- exp(coef(glmfit)[&quot;rx&quot;])
+  
+  model_results &lt;- data.table(risk_diff, odds_ratio)
+  
+  return(model_results) # model_results is a data.table
+}
+
+s_single_rep &lt;- function(list_of_defs, argsvec) {
+  
+  generated_data &lt;- s_generate(list_of_defs, argsvec)
+  model_results &lt;- s_model(generated_data)
+  
+  return(model_results)
+}
+
+
+s_replicate &lt;- function(argsvec, nsim) {
+  
+  list_of_defs &lt;- s_define()
+  
+  model_results &lt;- rbindlist(
+    parallel::mclapply(
+      X = 1 : nsim, 
+      FUN = function(x) s_single_rep(list_of_defs, argsvec), 
+      mc.cores = 4)
+  )
+  
+  model_results &lt;- cbind(t(argsvec), model_results)
+  
+  return(model_results) # summary_stats is a data.table
+}
+
+### Scenarios
+
+scenario_list &lt;- function(...) {
+  argmat &lt;- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+n &lt;- 500
+mu_x &lt;- c(0.2, 0.4, 0.6, 0.8)
+
+scenarios &lt;- scenario_list(n = n, mu_x = mu_x)
+
+#--- run locally ---#
+
+summary_stats &lt;- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 5000)))
+
+ggplot(data = summary_stats, aes(x = risk_diff, group = mu_x)) +
+  geom_density(aes(fill = factor(mu_x)), alpha = .7) +
+  scale_fill_canva(palette = &quot;Simple but bold&quot;, name = &quot;mu_x&quot;) +
+  theme(panel.grid = element_blank()) +
+  xlab(&quot;estimated risk difference&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="576" /></p>
+<pre class="r"><code>ggplot(data = summary_stats, aes(x = odds_ratio, group = mu_x)) +
+  geom_density(aes(fill = factor(mu_x)), alpha = .7) +
+  scale_fill_canva(palette = &quot;Simple but bold&quot;, name = &quot;mu_x&quot;) +
+  theme(panel.grid = element_blank()) +
+  xlab(&quot;estimated odds ratio&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-2.png" width="576" /></p>
+<pre class="r"><code>bootdif &lt;- function(dd) {
+  
+  db &lt;- dd[, .(id = sample(id, replace = TRUE)), keyby = rx]
+  db &lt;- merge(db[, id, rx], dd, by = c(&quot;id&quot;, &quot;rx&quot;))
+  
+  bootfit &lt;- estimate(db)
+}
+
+dd &lt;- generate(500, 0.2)
+estimate(dd)</code></pre>
+<pre><code>##     risk_diff odds_ratio
+## 1: 0.03501923   1.390749</code></pre>
+<pre class="r"><code>bootest &lt;- rbindlist(mclapply(1:999, function(x) bootdif(dd), mc.cores = 4))
+bootest[, quantile(risk_diff, c(0.025, 0.975))]</code></pre>
+<pre><code>##        2.5%       97.5% 
+## -0.02259934  0.09222954</code></pre>
+<p>
+<p><small><font color="darkkhaki"></p>
+<p>References:</p>
+<p>Richardson, Thomas S., James M. Robins, and Linbo Wang. “On modeling and estimation for the relative risk and risk difference.” <em>Journal of the American Statistical Association</em> 112, no. 519 (2017): 1121-1130.</p>
+<p>Austin, Peter C. “Absolute risk reductions, relative risks, relative risk reductions, and numbers needed to treat can be obtained from a logistic regression model.” <em>Journal of clinical epidemiology</em> 63, no. 1 (2010): 2-6.</p>
+</font></small>
+</p>
+</div>
