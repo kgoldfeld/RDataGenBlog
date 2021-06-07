@@ -27,12 +27,44 @@ draft: true
 <p>In the study that motivated this, we were interested in increasing the probability of of individuals getting vaccinated. We had two study arms - one an intervention arm and the other a control arm where no special outreach was done. So, there are two probabilities: <span class="math inline">\(p_1 \equiv P(\text{vaccinated} | \text{intervention})\)</span> and <span class="math inline">\(p_0 \equiv P(\text{vaccinated} | \text{control}).\)</span></p>
 <p>The risk difference comparing the two groups is simply</p>
 <p><span class="math display">\[\text{RD} = p_1 - p_0\]</span>
-The odds for each group is</p>
-<p><span class="math display">\[\text{odds}_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},\]</span>
+The odds <span class="math inline">\(w\)</span> for each treatment group is</p>
+<p><span class="math display">\[w_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},\]</span>
 and the odds ratio comparing the intervention arm to the control arm is</p>
-<p><span class="math display">\[\text{OR} = \frac{\text{odds}_1}{\text{odds}_0}.\]</span></p>
+<p><span class="math display">\[\text{OR} = \frac{w_1}{w_0}.\]</span></p>
 <p>The logistic regression model models the log odds as a linear function of the intervention status and any other covariates that are being adjusted. In the examples below, there is one continuous covariate <span class="math inline">\(x\)</span> that ranges from -0.5 to 0.5:</p>
-<p><span class="math display">\[\text{log}(\text{odds}_A) = \alpha + \beta A + \gamma X.\]</span></p>
+<p><span class="math display">\[\text{log}(w_A) = \alpha + \beta A + \gamma X.\]</span>
+<span class="math inline">\(\beta\)</span> represents the log(OR) conditional on a particular value of <span class="math inline">\(X\)</span>:</p>
+<p><span class="math display">\[\text{log}(w_1) = \alpha + \beta + \gamma X \\
+\text{log}(w_0) = \alpha + \gamma X,
+\]</span>
+and</p>
+<p><span class="math display">\[\text{log(OR)} = \text{log}\left(\frac{w_1}{w_0}\right) =\text{log}(w_1) - \text{log}(w_0) = \beta\]</span></p>
+<p>But more importantly, we can move from odds to probability relatively easily:</p>
+<span class="math display">\[\begin{aligned}
+\frac{p_a}{1-p_a} &amp;= w_a \\
+p_a &amp;= w_a(1- p_a) \\
+p_a &amp;= w_a - w_ap_a \\
+p_a + w_ap_a &amp;= w_a \\
+p_a (w_a +1) &amp;= w_a \\
+p_a &amp;= \frac{w_a}{(w_a + 1)}
+\end{aligned}\]</span>
+</div>
+<div id="estimate-the-marginal-probability-using-model-estimates" class="section level3">
+<h3>Estimate the marginal probability using model estimates</h3>
+<p>Once we fit the model, we have estimates <span class="math inline">\(\hat{\alpha}\)</span>, <span class="math inline">\(\hat{\beta}\)</span>, and <span class="math inline">\(\hat{\gamma}\)</span>. And we can generate two sets of odds for each individual <span class="math inline">\(i\)</span> (<span class="math inline">\(w_{i1}\)</span> and <span class="math inline">\(w_{i0}\)</span>) using their observed <span class="math inline">\(x_i\)</span> and the estimated parameters. All we need to do is set <span class="math inline">\(a=1\)</span> and <span class="math inline">\(a=0\)</span> to generate a predicted <span class="math inline">\(\hat{w}_{i1}\)</span> <span class="math inline">\(\hat{w}_{i0}\)</span> for each individual. Note, we do not pay attention to the actual treatment arm that the individiual was randomized to:</p>
+<p><span class="math display">\[ \text{log}(\hat{w}_{i1}) = \hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i \]</span></p>
+<p>or</p>
+<p><span class="math display">\[ \hat{w}_{i1} = \text{exp}(\hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i) \]</span></p>
+<p>Likewise,</p>
+<p><span class="math display">\[ \hat{w}_{i0} = \text{exp}(\hat{\alpha} + \hat{\gamma}x_i) \]</span>
+We get <span class="math inline">\(\hat{p}_{ia}\)</span> for <span class="math inline">\(a \in \{0,1\}\)</span> as</p>
+<p><span class="math display">\[ \hat{p}_{ia} = \frac{\hat{w}_{ia}}{(\hat{w}_{ia} + 1)}\]</span></p>
+<p>Finally, the marginal risk difference <span class="math inline">\(\widehat{\text{RD}}\)</span> can be estimated as</p>
+<p><span class="math display">\[ \widehat{\text{RD}} = \frac{1}{n}\sum_{i=1}^n \hat{p}_{i1} - \frac{1}{n}\sum_{i=1}^n \hat{p}_{i0} \]</span></p>
+<p>from <strong>all</strong> <span class="math inline">\(n\)</span> study participants regardless of actual treatment assignment. Fortunately, in <code>R</code> we don’t need to do any of these calculations as predictions on the probability scale can be extracted from the model fit. And standard errors of this risk difference can be esimated using bootstrap methods. And now onto the simulations …</p>
+</div>
+<div id="simulation" class="section level3">
+<h3>Simulation</h3>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(ggplot2)
@@ -160,7 +192,7 @@ s_replicate &lt;- function(argsvec, nsim) {
 
 ### Scenarios
 
-scenario_list &lt;- function(...) {
+scenariw_list &lt;- function(...) {
   argmat &lt;- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
 }
@@ -168,7 +200,7 @@ scenario_list &lt;- function(...) {
 n &lt;- 500
 mu_x &lt;- c(0.2, 0.4, 0.6, 0.8)
 
-scenarios &lt;- scenario_list(n = n, mu_x = mu_x)
+scenarios &lt;- scenariw_list(n = n, mu_x = mu_x)
 
 #--- run locally ---#
 
@@ -201,7 +233,7 @@ estimate(dd)</code></pre>
 <pre class="r"><code>bootest &lt;- rbindlist(mclapply(1:999, function(x) bootdif(dd), mc.cores = 4))
 bootest[, quantile(risk_diff, c(0.025, 0.975))]</code></pre>
 <pre><code>##        2.5%       97.5% 
-## -0.02259934  0.09222954</code></pre>
+## -0.02076934  0.09018720</code></pre>
 <p>
 <p><small><font color="darkkhaki"></p>
 <p>References:</p>

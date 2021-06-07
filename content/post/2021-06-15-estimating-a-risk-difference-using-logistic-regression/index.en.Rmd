@@ -30,16 +30,65 @@ In the study that motivated this, we were interested in increasing the probabili
 The risk difference comparing the two groups is simply
 
 $$\text{RD} = p_1 - p_0$$
-The odds for each group is
+The odds $w$ for each treatment group is
 
-$$\text{odds}_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},$$
+$$w_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},$$
 and the odds ratio comparing the intervention arm to the control arm is 
 
-$$\text{OR} = \frac{\text{odds}_1}{\text{odds}_0}.$$
+$$\text{OR} = \frac{w_1}{w_0}.$$
 
 The logistic regression model models the log odds as a linear function of the intervention status and any other covariates that are being adjusted. In the examples below, there is one continuous covariate $x$ that ranges from -0.5 to 0.5:
 
-$$\text{log}(\text{odds}_A) = \alpha + \beta A + \gamma X.$$
+$$\text{log}(w_A) = \alpha + \beta A + \gamma X.$$
+$\beta$ represents the log(OR) conditional on a particular value of $X$: 
+
+$$\text{log}(w_1) = \alpha + \beta + \gamma X \\
+\text{log}(w_0) = \alpha + \gamma X,
+$$
+and 
+
+$$\text{log(OR)} = \text{log}\left(\frac{w_1}{w_0}\right) =\text{log}(w_1) - \text{log}(w_0) = \beta$$
+
+But more importantly, we can move from odds to probability relatively easily:
+
+
+\begin{aligned}
+\frac{p_a}{1-p_a} &= w_a \\
+p_a &= w_a(1- p_a) \\
+p_a &= w_a - w_ap_a \\
+p_a + w_ap_a &= w_a \\
+p_a (w_a +1) &= w_a \\
+p_a &= \frac{w_a}{(w_a + 1)}
+\end{aligned}
+
+
+### Estimate the marginal probability using model estimates
+
+Once we fit the model, we have estimates $\hat{\alpha}$, $\hat{\beta}$, and $\hat{\gamma}$. And we can generate two sets of odds for each individual $i$ ($w_{i1}$ and $w_{i0}$) using their observed $x_i$ and the estimated parameters. All we need to do is set $a=1$ and $a=0$ to generate a predicted $\hat{w}_{i1}$ $\hat{w}_{i0}$ for each individual. Note, we do not pay attention to the actual treatment arm that the individiual was randomized to:
+
+$$ \text{log}(\hat{w}_{i1}) = \hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i $$
+
+or
+
+$$ \hat{w}_{i1} = \text{exp}(\hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i) $$
+
+Likewise, 
+
+$$ \hat{w}_{i0} = \text{exp}(\hat{\alpha} + \hat{\gamma}x_i) $$
+We get $\hat{p}_{ia}$ for $a \in \{0,1\}$ as 
+
+$$ \hat{p}_{ia} = \frac{\hat{w}_{ia}}{(\hat{w}_{ia} + 1)}$$
+
+Finally, the marginal risk difference $\widehat{\text{RD}}$ can be estimated as
+
+$$ \widehat{\text{RD}} = \frac{1}{n}\sum_{i=1}^n \hat{p}_{i1} - \frac{1}{n}\sum_{i=1}^n \hat{p}_{i0} $$
+
+from **all** $n$ study participants regardless of actual treatment assignment. Fortunately, in `R` we don't need to do any of these calculations as predictions on the probability scale can be extracted from the model fit. And standard errors of this risk difference can be esimated using bootstrap methods. And now onto the simulations ...
+
+### Simulation
+
+
+
 
 ```{r, include=FALSE}
 knitr::opts_chunk$set(fig.width = 6, fig.height=3)
@@ -179,7 +228,7 @@ s_replicate <- function(argsvec, nsim) {
 
 ### Scenarios
 
-scenario_list <- function(...) {
+scenariw_list <- function(...) {
   argmat <- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
 }
@@ -187,7 +236,7 @@ scenario_list <- function(...) {
 n <- 500
 mu_x <- c(0.2, 0.4, 0.6, 0.8)
 
-scenarios <- scenario_list(n = n, mu_x = mu_x)
+scenarios <- scenariw_list(n = n, mu_x = mu_x)
 
 #--- run locally ---#
 
