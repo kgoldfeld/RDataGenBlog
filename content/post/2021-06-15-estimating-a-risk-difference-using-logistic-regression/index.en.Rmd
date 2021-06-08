@@ -21,16 +21,16 @@ I'm working on a study evaluating an intervention designed to increase COVID-19 
 
 I agree that risk differences are so much more intuitive - we certainly don't think in terms of odds ratios. My only hesitation is that the risk difference estimates are *marginal*, whereas odds ratios are *conditional*. (I've written about this distinction [before](https://www.rdatagen.net/post/marginal-v-conditional/){target="_blank"}.) The marginal risk difference estimate is a function of the distribution of patient characteristics in the study that influence the outcome, so the results might not be generalizable to other populations. The odds ratio is more generalizable, as long as there are no clustering or group specific effects in the data set you have. However, my collaborators seemed to believe that the benefits of improved communication outweigh the potential loss of generalizability. (It is true there is a newer set of methods, developed by [Richardson, Robins, & Wang](https://amstat.tandfonline.com/doi/full/10.1080/01621459.2016.1192546?casa_token=EspaMRhG3OIAAAAA%3AHCGnpIqZnUoAroQuWUCwKv5ANjH5mapba9vCUMrY-pkEmOMVmUuKZjDL-pZu2gC_9eKirj8j7CBk){target="_blank"}, that allow analysts to model the risk difference directly, but I'm not exploring those in this post.)
 
-My goal here is to demonstrate the relative simplicity of estimating the marginal risk difference that is described in a paper by [Austin](https://www.sciencedirect.com/science/article/pii/S0895435608003168?casa_token=uEXf8L5G2_EAAAAA:MkWX5XPuSQBLTzLmtpOlDJgAO5cQ7dmLD6S3mWParxfttvWyiYPok_87_ur9MCmUtpvzGJM){target="_blank"}. I will not be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.
+My goal here is to demonstrate the relative simplicity of estimating the marginal risk difference that is described in a paper by [Peter Austin](https://www.sciencedirect.com/science/article/pii/S0895435608003168?casa_token=uEXf8L5G2_EAAAAA:MkWX5XPuSQBLTzLmtpOlDJgAO5cQ7dmLD6S3mWParxfttvWyiYPok_87_ur9MCmUtpvzGJM){target="_blank"}. I will not be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.
 
 ### Quickly defining the parameters of interest
 
-In the study that motivated this, we were interested in increasing the probability of of individuals getting vaccinated. We had two study arms - one an intervention arm and the other a control arm where no special outreach was done. So, there are two probabilities: $p_1 \equiv P(\text{vaccinated} | \text{intervention})$ and $p_0 \equiv P(\text{vaccinated} | \text{control}).$
+In the study that motivated this, we were interested in increasing the probability of individuals getting vaccinated. We had two study arms - one an intervention arm which involved extensive outreach and promotion and the other a control arm where nothing special was done. So, there are two probabilities that we are interested in: $p_1 \equiv P(\text{vaccinated} | \text{intervention})$ and $p_0 \equiv P(\text{vaccinated} | \text{control}).$
 
 The risk difference comparing the two groups is simply
 
-$$\text{RD} = p_1 - p_0$$
-The odds $w$ for each treatment group is
+$$\text{RD} = p_1 - p_0,$$
+the odds $w_a$ for each treatment group is
 
 $$w_a = \frac{p_a}{1-p_a}, \ \ a \in \{0,1\},$$
 and the odds ratio comparing the intervention arm to the control arm is 
@@ -49,32 +49,30 @@ and
 
 $$\text{log(OR)} = \text{log}\left(\frac{w_1}{w_0}\right) =\text{log}(w_1) - \text{log}(w_0) = \beta$$
 
-But more importantly, we can move from odds to probability relatively easily:
-
+More importantly, we can move between odds and probability relatively easily:
 
 \begin{aligned}
 \frac{p_a}{1-p_a} &= w_a \\
 p_a &= w_a(1- p_a) \\
-p_a &= w_a - w_ap_a \\
 p_a + w_ap_a &= w_a \\
-p_a (w_a +1) &= w_a \\
-p_a &= \frac{w_a}{(w_a + 1)}
+p_a (1 + w_a) &= w_a \\
+p_a &= \frac{w_a}{(1 + w_a)}
 \end{aligned}
 
 
-### Estimate the marginal probability using model estimates
+### Estimating the marginal probability using model estimates
 
-Once we fit the model, we have estimates $\hat{\alpha}$, $\hat{\beta}$, and $\hat{\gamma}$. And we can generate two sets of odds for each individual $i$ ($w_{i1}$ and $w_{i0}$) using their observed $x_i$ and the estimated parameters. All we need to do is set $a=1$ and $a=0$ to generate a predicted $\hat{w}_{i1}$ $\hat{w}_{i0}$ for each individual. Note, we do not pay attention to the actual treatment arm that the individiual was randomized to:
+After fitting the model, we have estimates $\hat{\alpha}$, $\hat{\beta}$, and $\hat{\gamma}$. We can generate a pair of odds for each individual $i$ ($w_{i1}$ and $w_{i0}$) using their observed $x_i$ and the estimated parameters. All we need to do is set $a=1$ and $a=0$ to generate a predicted $\hat{w}_{i1}$ and $\hat{w}_{i0}$, respectively, for each individual. Note we do not pay attention to the actual treatment arm that the individual was randomized to:
 
-$$ \text{log}(\hat{w}_{i1}) = \hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i $$
+$$ \text{log}(\hat{w}_{i1}) = \hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i, $$
 
 or
 
-$$ \hat{w}_{i1} = \text{exp}(\hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i) $$
+$$ \hat{w}_{i1} = \text{exp}(\hat{\alpha} + \hat{\beta} + \hat{\gamma}x_i). $$
 
 Likewise, 
 
-$$ \hat{w}_{i0} = \text{exp}(\hat{\alpha} + \hat{\gamma}x_i) $$
+$$ \hat{w}_{i0} = \text{exp}(\hat{\alpha} + \hat{\gamma}x_i). $$
 We get $\hat{p}_{ia}$ for $a \in \{0,1\}$ as 
 
 $$ \hat{p}_{ia} = \frac{\hat{w}_{ia}}{(\hat{w}_{ia} + 1)}$$
@@ -83,11 +81,11 @@ Finally, the marginal risk difference $\widehat{\text{RD}}$ can be estimated as
 
 $$ \widehat{\text{RD}} = \frac{1}{n}\sum_{i=1}^n \hat{p}_{i1} - \frac{1}{n}\sum_{i=1}^n \hat{p}_{i0} $$
 
-from **all** $n$ study participants regardless of actual treatment assignment. Fortunately, in `R` we don't need to do any of these calculations as predictions on the probability scale can be extracted from the model fit. And standard errors of this risk difference can be esimated using bootstrap methods. And now onto the simulations ...
+from all $n$ study participants regardless of actual treatment assignment. 
+
+Fortunately, in `R` we don't need to do any of these calculations as predictions on the probability scale can be extracted from the model fit. Standard errors of this risk difference can be estimated using bootstrap methods. 
 
 ### Simulation
-
-
 
 
 ```{r, include=FALSE}
@@ -109,55 +107,61 @@ def <- defDataAdd(def, varname = "y",
   formula = "-2 + log(2.5) * rx + 1.5 * x",
   dist = "binary", link="logit")
 
-generate <- function(n, mu_x) {
+mu_x = 0.2
   
-  dx <- genData(n)
-  dx <- trtAssign(dx, grpName = "rx")
-  dx <- addColumns(def, dx)
-  dx[]
-  
-}
+dd_2 <- genData(500)
+dd_2 <- trtAssign(dd_2, grpName = "rx")
+dd_2 <- addColumns(def, dd_2)
 
-estimate <- function(dx) {
-  
-  glmfit <- glm(y ~ rx + x, data = dx, family = "binomial")
+glmfit <- glm(y ~ rx + x, data = dd_2, family = "binomial")
 
-  newdata <- dx[, .(rx=1, x)]
-  p1 <- mean(predict(glmfit, newdata, type = "response"))
+newdata <- dd_2[, .(rx=1, x)]
+p1 <- mean(predict(glmfit, newdata, type = "response"))
 
-  newdata <- dx[, .(rx=0, x)]
-  p0 <- mean(predict(glmfit, newdata, type = "response"))
+newdata <- dd_2[, .(rx=0, x)]
+p0 <- mean(predict(glmfit, newdata, type = "response"))
 
-  risk_diff <- p1 - p0
-  odds_ratio <- exp(coef(glmfit)["rx"])
+risk_diff <- p1 - p0
+odds_ratio <- exp(coef(glmfit)["rx"])
   
-  data.table(risk_diff, odds_ratio)
-  
-}
+c(risk_diff, odds_ratio)
 
-plot_hist <- function(dx) {
+ggplot(data = dd_2, aes(x = x)) +
+  geom_histogram(fill="#9ec785", binwidth = 0.05, boundary = 0) +
+  scale_x_continuous(limits = c(-.55, .55), breaks = seq(-.5, .5, by = .25)) +
+  theme(panel.grid = element_blank())
   
-  ggplot(data = dx, aes(x = x)) +
-    geom_histogram(fill="#9ec785", binwidth = 0.05, boundary = 0) +
-    scale_x_continuous(limits = c(-.55, .55), breaks = seq(-.5, .5, by = .25)) +
-    theme(panel.grid = element_blank())
-  
-}
 ```
 
-```{r}
+```{r, echo=FALSE}
 set.seed(726152)
 
-dd <- generate(500, 0.2)
-plot_hist(dd)
-estimate(dd)
+mu_x = 0.8
+
+dd_8 <- genData(500)
+dd_8 <- trtAssign(dd_8, grpName = "rx")
+dd_8 <- addColumns(def, dd_8)
+
+glmfit <- glm(y ~ rx + x, data = dd_8, family = "binomial")
+
+newdata <- dd_8[, .(rx=1, x)]
+p1 <- mean(predict(glmfit, newdata, type = "response"))
+
+newdata <- dd_8[, .(rx=0, x)]
+p0 <- mean(predict(glmfit, newdata, type = "response"))
+
+risk_diff <- p1 - p0
+odds_ratio <- exp(coef(glmfit)["rx"])
+  
+c(risk_diff, odds_ratio)
+
+
+ggplot(data = dd_8, aes(x = x)) +
+  geom_histogram(fill="#9ec785", binwidth = 0.05, boundary = 0) +
+  scale_x_continuous(limits = c(-.55, .55), breaks = seq(-.5, .5, by = .25)) +
+  theme(panel.grid = element_blank())
 ```
 
-```{r}
-dd <- generate(500, 0.8)
-plot_hist(dd)
-estimate(dd)
-```
 
 ```{r}
 s_define <- function() {
@@ -240,7 +244,7 @@ scenarios <- scenariw_list(n = n, mu_x = mu_x)
 
 #--- run locally ---#
 
-summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 5000)))
+summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 500)))
 
 ggplot(data = summary_stats, aes(x = risk_diff, group = mu_x)) +
   geom_density(aes(fill = factor(mu_x)), alpha = .7) +
@@ -261,14 +265,19 @@ bootdif <- function(dd) {
   db <- dd[, .(id = sample(id, replace = TRUE)), keyby = rx]
   db <- merge(db[, id, rx], dd, by = c("id", "rx"))
   
-  bootfit <- estimate(db)
+  glmfit <- glm(y ~ rx + x, data = db, family = "binomial")
+
+  newdata <- db[, .(rx=1, x)]
+  p1 <- mean(predict(glmfit, newdata, type = "response"))
+
+  newdata <- db[, .(rx=0, x)]
+  p0 <- mean(predict(glmfit, newdata, type = "response"))
+
+  return(p1 - p0)
 }
 
-dd <- generate(500, 0.2)
-estimate(dd)
-
-bootest <- rbindlist(mclapply(1:999, function(x) bootdif(dd), mc.cores = 4))
-bootest[, quantile(risk_diff, c(0.025, 0.975))]
+bootest <- unlist(mclapply(1:999, function(x) bootdif(dd_2), mc.cores = 4))
+quantile(bootest, c(0.025, 0.975))
 ```
 
 
