@@ -12,7 +12,6 @@ image: ''
 output:
   blogdown::html_page:
     anchor_sections: no
-draft: true
 ---
 
 
@@ -21,17 +20,17 @@ knitr::opts_chunk$set(fig.width = 6, fig.height=3)
 options(digits = 2)
 ```
 
-The odds ratio (OR) -- the effect size parameter estimated in logistic regression -- is notoriously difficult to interpret. It is a ratio of two quantities (odds, under different conditions) that are themselves ratios of probabilities. I think people understand well that a very large or small OR implies a strong treatment effect, but translating that effect into a clinical context can be challenging, particularly since ORs cannot be mapped to unique probabilities. 
+The *odds ratio* (OR) -- the effect size parameter estimated in logistic regression -- is notoriously difficult to interpret. It is a ratio of two quantities (odds, under different conditions) that are themselves ratios of probabilities. I think it is pretty clear that a very large or small OR implies a strong treatment effect, but translating that effect into a clinical context can be challenging, particularly since ORs cannot be mapped to unique probabilities. 
 
-An alternative measure of effect is the risk difference. I'm working on a study evaluating an intervention designed to increase COVID-19 vaccination rates for staff and long-term residents in nursing facilities. A collaborator suggested we report the difference in vaccination rates rather than the odds ratio, arguing that reviewers and readers might find the results more compelling if they could see the underlying probabilities. 
+One alternative measure of effect is the *risk difference*, which is certainly much more intuitive. Although a difference is very easy to calculate when measured non-parametrically (you just calculate the proportion for each arm and take the difference), things get a little less obvious when there are covariates that need adjusting. (There is a method developed by [Richardson, Robins, & Wang](https://amstat.tandfonline.com/doi/full/10.1080/01621459.2016.1192546?casa_token=EspaMRhG3OIAAAAA%3AHCGnpIqZnUoAroQuWUCwKv5ANjH5mapba9vCUMrY-pkEmOMVmUuKZjDL-pZu2gC_9eKirj8j7CBk){target="_blank"}, that allow analysts to model the risk difference, but I won't get into that here.)
 
-I certainly agree that risk differences are so much more intuitive - we certainly don't think in terms of odds ratios. My only hesitation is that the risk difference estimates are *marginal*, whereas odds ratios are *conditional*. (I've written about this distinction [before](https://www.rdatagen.net/post/marginal-v-conditional/){target="_blank"}.) The marginal risk difference estimate is a function of the distribution of patient characteristics in the study that influence the outcome, so the reported estimate might not be generalizable to other populations. The odds ratio, on the other hand, is not dependent on the covariates. 
+Currently, I'm working on a study evaluating an intervention designed to increase COVID-19 vaccination rates for staff and long-term residents in nursing facilities. A collaborator suggested we report the difference in vaccination rates rather than the odds ratio, arguing in favor of the more intuitive measure. From my perspective, the only possible downside in using a risk difference instead of an OR is that risk difference estimates are *marginal*, whereas odds ratios are *conditional*. (I've written about this distinction [before](https://www.rdatagen.net/post/marginal-v-conditional/){target="_blank"}.) The marginal risk difference estimate is a function of the distribution of patient characteristics in the study that influence the outcome, so the reported estimate might not be generalizable to other populations. The odds ratio, on the other hand, is not dependent on the covariates. The ultimate consensus on our research team is that the benefits of improved communication outweigh the potential loss of generalizability.  
 
-The ultimate consensus on our research team is that the benefits of improved communication outweigh the potential loss of generalizability. There is in fact an alternative approach, based on a newer set of methods developed by [Richardson, Robins, & Wang](https://amstat.tandfonline.com/doi/full/10.1080/01621459.2016.1192546?casa_token=EspaMRhG3OIAAAAA%3AHCGnpIqZnUoAroQuWUCwKv5ANjH5mapba9vCUMrY-pkEmOMVmUuKZjDL-pZu2gC_9eKirj8j7CBk){target="_blank"}, that allow analysts to model the risk difference directly, but I won't explore this here. My goal is to demonstrate the relative simplicity of estimating the marginal risk difference that is described in these papers by [Kleinman & Norton](https://onlinelibrary.wiley.com/doi/full/10.1111/j.1475-6773.2008.00900.x){target="_blank"} and [Peter Austin](https://www.sciencedirect.com/science/article/pii/S0895435608003168){target="_blank"}. I will not be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.
+My goal here is to demonstrate the relative simplicity of estimating the marginal risk difference described in these papers by [Kleinman & Norton](https://onlinelibrary.wiley.com/doi/full/10.1111/j.1475-6773.2008.00900.x){target="_blank"} and [Peter Austin](https://www.sciencedirect.com/science/article/pii/S0895435608003168){target="_blank"}. I won't be using real data from the study that motivated this, but will generate simulated data so that I can illustrate the contrast between marginal and conditional estimates.
 
 ### Quickly defining the parameters of interest
 
-In the study that motivated this, we were interested in increasing the probability of individuals getting vaccinated. We had two study arms - one an intervention arm which involved extensive outreach and promotion and the other a control arm where nothing special was done. So, there are two probabilities that we are interested in: $p_1 \equiv P(\text{vaccinated} | \text{intervention})$ and $p_0 \equiv P(\text{vaccinated} | \text{control}).$
+In the study that motivated this, we had two study arms - an intervention arm which involved extensive outreach and vaccination promotion and the other a control arm where nothing special was done. So, there are two probabilities that we are interested in: $p_1 \equiv P(\text{vaccinated} | \text{intervention})$ and $p_0 \equiv P(\text{vaccinated} | \text{control}).$
 
 The risk difference comparing the two groups is simply
 
@@ -105,7 +104,7 @@ library(ggthemes)
 library(parallel)
 ```
 
-I am generating a binary outcome $y$ that is a function of a continuous covariate $x$ that ranges from -0.5 to 0.5. I use the *beta* distribution to generate $x1$ which is transformed into $x$. The advanatage of this distribution is the flexibility we have in defining the shape. The OR used to generate the outcome is 2.5:
+I am generating a binary outcome $y$ that is a function of a continuous covariate $x$ that ranges from -0.5 to 0.5. I use the *beta* distribution to generate $x1$ which is transformed into $x$. The advantage of this distribution is the flexibility we have in defining the shape. The OR used to generate the outcome is 2.5:
 
 ```{r}
 def <- defDataAdd(varname = "x1", formula = "..mu_x", variance = 8, dist = "beta")
