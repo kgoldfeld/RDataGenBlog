@@ -91,7 +91,7 @@ fit &lt;- mod$sample(
 ## 
 ## All 4 chains finished successfully.
 ## Mean chain execution time: 0.2 seconds.
-## Total execution time: 0.3 seconds.</code></pre>
+## Total execution time: 0.4 seconds.</code></pre>
 <p>(If you’re impressed at how fast that model ran, it is because it is on my new MacBook Pro with the new Apple M1 chip - 4 or 5 times faster than my previous MacBook Pro with an Intel chip. It took me a while to get <code>R</code>, <code>RStudio</code>, and particularly, <code>cmdstan</code> up and running, but once I did, it has been totally worth it.)</p>
 <p>First thing to check, of course, is whether the sampling from the posterior distribution was well-behaved. Here is a trace plot for the parameter <span class="math inline">\(\beta\)</span>:</p>
 <pre class="r"><code>draws_array &lt;- as_draws_array(fit$draws())
@@ -129,7 +129,7 @@ ggplot(data = plot_points, aes(x = x, y = y)) +
 <p><span class="math display">\[ \beta \sim t_{student}(df = 3, \mu = 0, \sigma = 5) \]</span></p>
 <p>and the <em>data generation prior</em> was</p>
 <p><span class="math display">\[ \beta \sim N(\mu = -1, \sigma = 0.5).\]</span></p>
-<p>To conduct the Bayesian power analysis, I replicated the simulation and model fitting shown above 1000 times for each of seven different sample sizes ranging from 100 to 400. (Even though my laptop is quite speedy, I used the NYU Langone Health high performance cluster Big Purple to do this, because I wanted to save a few hours.) I’m not showing the parallelized code in this post, but take a look <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">here</a> for an example similar to this. (I’m happy to share with anyone if you’d like to have the code.)</p>
+<p>To conduct the Bayesian power analysis, I replicated the simulation and model fitting shown above 1000 times for each of seven different sample sizes ranging from 100 to 400. (Even though my laptop is quite speedy, I used the NYU Langone Health high performance cluster Big Purple to do this, because I wanted to save a few hours.) I’m not showing the parallelized code in this post, but take a look <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">here</a> for an example similar to this. (I’m happy to share with anyone if you’d like to have the code. Updated 7/1/2021: code has been added in the Addendum below.)</p>
 <p>The plots below show a sample of 20 posterior distributions taken from the 1000 generated for each of three sample sizes. As in the frequentist context, an increase in sample size appears to reduce the variance of the posterior distribution estimated in a Bayesian model. We can see visually that as the sample size increases, the distribution collapses towards the mean or median, which has a direct impact on how confident we are in drawing conclusions from the data; in this case, it is apparent that as sample size increases, the proportion of posterior distributions meet the 95% threshold increases.</p>
 <p><img src="img/p95.png" /></p>
 <p>Here is a curve that summarizes the probability of a posterior distribution meeting the 95% threshold at each sample size level. At a size of 400, 80% of the posterior distributions (which are themselves based on data generated from varying effect sizes specified by the <em>data generation prior</em> and the <em>analysis prior</em>) would lead us to conclude that the trial is success.</p>
@@ -142,4 +142,154 @@ ggplot(data = plot_points, aes(x = x, y = y)) +
 <p>De Santis, Fulvio, and Stefania Gubbiotti. “Sample Size Requirements for Calibrated Approximate Credible Intervals for Proportions in Clinical Trials.” <em>International Journal of Environmental Research and Public Health</em> 18, no. 2 (2021): 595.</p>
 </font></small>
 </p>
+<p><br>
+<br></p>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+<p>Here is the full R code for the Bayesian power analysis using simulation. I am including the <code>slurmR</code> code that I used to execute on the HPC:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(bayesplot)
+library(posterior)
+library(cmdstanr)
+library(slurmR)
+library(collapse)
+
+s_define &lt;- function() {
+    
+  defB &lt;- defDataAdd(varname = &quot;Y&quot;, formula = &quot;-2 + ..lor * rx&quot;, 
+                     dist = &quot;binary&quot;, link=&quot;logit&quot;)
+  
+  return(list(defB = defB)) # list_of_defs is a list of simstudy data definitions
+}
+
+s_generate &lt;- function(list_of_defs, argsvec) {
+    
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  #--- add data generation code ---#
+  
+  lor &lt;- rnorm(1, mu.lor, sigma.lor)
+  
+  dT &lt;- genData(nobs)
+  dT &lt;- trtAssign(dT, grpName = &quot;rx&quot;)
+  dT &lt;- addColumns(defB, dT)
+  
+  return(dT[])
+  
+}
+
+s_model &lt;- function(generated_data, mod, argsvec) {
+    
+  list2env(as.list(argsvec), envir = environment())
+    
+  dt_to_list &lt;- function(dx) {
+    
+    N &lt;- nrow(dx)                  ## number of observations 
+    y &lt;- dx$Y                      ## individual outcome 
+    x &lt;- dx$rx                     ## treatment arm for individual 
+    s &lt;- t_sigma
+    mu &lt;- 0 # can be mu.lor
+      
+    list(N=N, y=y, x=x, s=s, mu = mu)
+  }
+
+  fit &lt;- mod$sample(
+    data = dt_to_list(generated_data),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 1000,
+    iter_sampling = 4000,
+    step_size = 0.1,
+    show_messages = FALSE
+  )
+    
+  res &lt;- data.table(fit$summary(variables = &quot;beta&quot;))[, .(median, sd, q95, len = q95-q5)]
+    
+  draws_array &lt;- as_draws_array(fit$draws())
+  betas &lt;- data.table(beta = as.matrix(draws_array[,,&quot;beta&quot;]))
+  res$p0 &lt;- mean(betas$beta.V1 &lt; 0)
+
+  return(res) # model_results is a data.table
+  }
+
+s_single_rep &lt;- function(list_of_defs, argsvec, mod) {
+    
+  set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
+  
+  list_of_defs &lt;- s_define()
+  generated_data &lt;- s_generate(list_of_defs, argsvec)
+  model_results &lt;- s_model(generated_data, mod, argsvec)
+  
+  return(model_results)
+}
+  
+s_replicate &lt;- function(argsvec, nsim, mod) {
+  
+  list_of_defs &lt;- s_define()
+  
+  model_results &lt;- 
+    lapply(
+      X = 1 : nsim, 
+      FUN = function(x) s_single_rep(list_of_defs, argsvec, mod)
+    )
+  
+  #--- add summary statistics code ---#
+  
+  model_sums &lt;- unlist2d(lapply(model_results, function(x) x), 
+    idcols = &quot;replicate&quot;, DT = TRUE)
+  
+  summary_stats &lt;- model_sums[ , 
+    .(p_95 = mean(p0 &gt;= 0.95), 
+      p_len = mean(len &lt;= 2),
+      p_sd = mean(sd &lt;= 0.5))
+  ]
+  
+  model_ests &lt;- data.table(t(argsvec), summary_stats)
+
+  return(model_ests)
+  
+}
+
+###
+
+scenario_list &lt;- function(...) {
+  argmat &lt;- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+mu.lor &lt;- c(0, -0.5, -1.0, -1.5)
+sigma.lor &lt;- c(0.25)
+nobs &lt;- c(100, 150, 200, 250, 300, 350, 400)
+t_sigma &lt;- c(1, 5, 10)
+
+scenarios &lt;- scenario_list(mu.lor = mu.lor, sigma.lor = sigma.lor, 
+                           nobs = nobs, t_sigma = t_sigma)
+
+set_cmdstan_path(path = &quot;.../cmdstan/2.25.0&quot;)
+mod &lt;- cmdstan_model(&quot;present.stan&quot;)
+
+job &lt;- Slurm_lapply(
+  X = scenarios, 
+  FUN = s_replicate, 
+  mod = mod,
+  nsim = 1200,
+  njobs = min(length(scenarios), 90L), 
+  mc.cores = 4L,
+  job_name = &quot;i_bp&quot;,
+  tmp_path = &quot;/gpfs/data/troxellab/ksg/scratch&quot;,
+  plan = &quot;wait&quot;,
+  sbatch_opt = list(time = &quot;03:00:00&quot;, partition = &quot;cpu_short&quot;),
+  export = c(&quot;s_single_rep&quot;, &quot;s_define&quot;, &quot;s_generate&quot;, &quot;s_model&quot;),
+  overwrite = TRUE
+)
+
+summary_stats &lt;- Slurm_collect(job)
+final_tab &lt;- rbindlist(summary_stats)
+
+save(final_tab, file = &quot;.../bp.rda&quot;)</code></pre>
 </div>
