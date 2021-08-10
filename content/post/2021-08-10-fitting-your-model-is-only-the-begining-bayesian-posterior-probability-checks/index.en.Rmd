@@ -1,0 +1,355 @@
+---
+title: 
+  "Fitting your model is only the beginning: Bayesian posterior probability checks with rvars"
+author: ''
+date: '2021-08-09'
+slug: []
+categories: []
+tags:
+  - Bayesian model
+  - Stan
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+Say we've collected data and estimated parameters of a model that give structure to the data. An important question to ask is whether the model is a reasonable approximation of the true underlying data generating process. If we did a good job, we should be able to turn around and generate data from the model itself that looks similar to the data we started with. And if we didn't do such a great job, the newly generated data will diverge from the original.
+
+If we used a Bayesian approach to estimation, all the information we have about the parameters from our estimated model is contained in the data that have been sampled by the MCMC process. For example, if we are estimating a simple normal regression model with an intercept parameter $\alpha$, a slope parameter $\beta$, and a standard deviation parameter $\sigma$, and we collected 10,000 samples from a posterior distribution, then we will have a multivariate table of possible values of $\alpha$, $\beta$ and $\sigma$. To answer our question regarding model adequacy, we only need to extract the information contained in all that data.
+
+I've been casting about for ways to do this extraction efficiently in `R`, so I posted an inquiry on the [Stan Forums](https://discourse.mc-stan.org/){target="_blank"} to get advice. I got a suggestion to look into the random variable dataytpe (`rvar`) recently implemented in the package `posterior. Not at all familiar with this, I started off by reading through the [vignette](https://mc-stan.org/posterior/articles/rvar.html){target="_blank"}, and then at this Kerman & Gelman [paper](https://link.springer.com/content/pdf/10.1007/s11222-007-9020-4.pdf){target="_blank"}.
+
+To get a get a better handle on the ideas and tools, I decided to simulate some data, fit some models, and investigate what posterior probability checks might like look using `rvars`. I'm sharing some of the code with you here to give a bit of the flavor of what can be done. A little advanced warning: I am providing more output of the data than usual, because I think it is easier to grasp what is going on if you can see the data in the various stages of transformation.
+
+Before I get started, here is the requisite list of the packages needed to run the code:
+
+```{r libraries, message=FALSE, warning=FALSE}
+library(simstudy)
+library(data.table)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)
+library(ggplot2)
+library(abind)
+```
+
+### Simple linear model
+
+I am first generating data from a simple linear regression model where the outcome $y$ is a function of $x$, and $\alpha = 2$, $\beta=6$, and $\sigma = 2$:
+
+$$y \sim N(\mu = 2 + 6*x, \ \sigma^2 = 4)$$
+
+#### Data generation
+
+To get things going, I define the relationship between $x$ and $y$ and generate the data using `simstudy`, and then take a look at the data:
+
+```{r defs}
+b_quad <- 0
+
+ddef <- defData(varname = "x", formula = "0;10", dist = "uniform")
+ddef <- defData(ddef, "y", "2 + 6*x + ..b_quad*(x^2)", 4)
+
+set.seed(2762)
+dd <- genData(100, ddef)
+```
+
+```{r plot, 1, echo = F, fig.height = 4, fig.width = 6}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(color = "blue", size = 1) +
+  theme(panel.grid = element_blank())
+```
+
+#### Model fitting
+
+I am using `cmdstan` and `cmdstanr` to estimate the model. Here is the `Stan` code:
+
+```{stan output.var='priors', eval = FALSE}
+data {
+  int<lower=0> N;
+  vector[N] x;
+  vector[N] y;
+}
+
+parameters {
+  real alpha;
+  real beta;
+  real<lower=0> sigma;
+}
+
+model {
+  y ~ normal(alpha + beta*x, sigma);
+}
+```
+
+Next, I compile the Stan code, and sample from the posterior. The sampling will be done in four parallel chains of 2,500 (after the warm-up of 500 samples), which will give me a total sample of 10,000 for each parameter. All of the samples are stored in the `cmdstan` object *fit*.
+
+```{r fakestan, eval=FALSE}
+mod <- cmdstan_model("code/linear_regression.stan")
+```
+
+```{r realstan, echo=FALSE}
+if (file.exists("Pcode/linear_regression")) {
+  unlink("code/linear_regression")
+}
+
+mod <- cmdstan_model("code/linear_regression.stan")
+```
+
+```{r fitstan1}
+fit <- mod$sample(
+  data = list(N = nrow(dd), x = dd$x, y = dd$y),
+  seed = 93736,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500
+)
+```
+
+#### Extracting results
+
+Typically, I would extract the data using the `draws` method of the `cmdstanr` object. By default, the `draws` method returns an array, which is essentially (though not exactly) a multi-dimensional matrix. In this case there are multiple matrices, one for each parameter. The display of each parameter shows the first five rows of the four chains.
+
+```{r array1}
+(post_array <- fit$draws())
+```
+
+The package `bayesplot` uses this array to generate a range of different plots, including the important diagnostic trace plot:
+
+```{r diagfit1, fig.height = 4.5, fig.width=6}
+mcmc_trace(post_array, pars = c("alpha", "beta", "sigma"), facet_args = list(nrow = 3))
+```
+
+#### Random variable datatype
+
+Instead of extracting the array data, it is possible to convert the array into a *random variable datatype*, or `rvar`. It is probably easiest to explain what this is by looking more closely at it.
+
+```{r rvar1}
+(post_rvars <- as_draws_rvars(fit$draws()))
+```
+
+You can see that the *post_rvars* object is essentially a list of 4 items: *lp* (log probability), *alpha*, *beta*, and *sigma*. But what exactly are those items, "1.9 ± 0.41" for *alpha*, "6 ± 0.072" for *beta*, and "2.2 ± 0.16" for *sigma*? Well, the `rvar` is really a shorthand way of representing the detailed data that is in the underlying array, and the text displayed is merely the mean and standard deviation of the underlying data ($\mu ± \sigma$). We can peek under the hood a bit by using the function `draws_of`, and confirm the mean and standard deviation of the samples:
+
+```{r rvar1beta}
+beta_samples <- draws_of(post_rvars$beta)
+data.table(beta_samples)
+
+c(mean(beta_samples), sd(beta_samples))
+```
+
+#### Why all the fuss?
+
+The whole point of the `rvar` datatype is that it makes it much easier to do things like estimate the distributions of the functions of the parameters and to generate predicted values of new observations, both things we need for posterior probability checking. Of course, there are other ways to do all of this (as is always the case in `R`), but `this`rvars` seem to eliminate a lot of the manipulation that might be necessary if we chose to work directly with the data arrays.
+
+In this next step, I am generating the distribution of means $\mu$ for each of the 100 individuals in the data set:
+
+$$\mu_i = \alpha + \beta x_i$$
+I want to do this, because ultimately, I want to generate predicted values for each individual, which come from $N(\mu_i, \sigma)$. And I am not going to generate just a single predicted value for each individual, but rather 10,000 predicted values for each individual. So, now we will have the distribution of predicted values for each individual, which is quite powerful. And importantly, the distributions of these predicted values will incorporate the uncertainty of each $\mu_i$ and $\sigma$. With the `rvar` datatype, all of this can be accomplished with just a few commands - no manipulation necessary. 
+
+All `rvar` equations need to be specified using by `rvar` objects. We need the product of $x_i$ and $\beta$ to get $\mu_i$, but $x_i$ is observed data, not a random variable. No problem - we can covert the vector $x$ into a special kind of constant `rvar` that does not have a standard deviation. Once this is done, we can generate the $\mu_i$'s
+
+```{r}
+x_rvar <- as_rvar(dd$x)
+x_rvar
+
+mu <- post_rvars$alpha + post_rvars$beta * x_rvar
+mu
+```
+
+We can see that *mu* is an `rvar` vector of 100 objects, one for each individual $i$. But, as we saw before, each of those objects is actually 10,000 data points - the distribution of $\mu_i$ for each individual. Again, let's peek under the hood: here is the the distribution of $\mu$ for individual $i=6$:
+
+```{r}
+data.table(draws_of(mu[6]))
+```
+
+Now we are ready to generate the distribution of predicted values for each individual - again using a single command `rvar_rng`, specifying that we want to generate data for each individual using the distribution of the `rvar` *mu* and the the `rvar` *sigma*. We get 10,000 predicted values (our estimated distribution) for each of the 100 individuals:
+
+```{r}
+pred <- rvar_rng(rnorm, nrow(dd), mu, post_rvars$sigma)
+str(pred)
+```
+
+Here, I randomly sample from the sample of 10,000 predicted values and plot this one instance of predicted values (in orange) along with the original data (in blue):
+
+```{r plotpred1,  fig.height = 4, fig.width = 6}
+newdd <- data.table(x = dd$x, y = draws_of(pred)[sample(10000, 1),])
+head(newdd)
+
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(color = "blue", size = 1) +
+  geom_point(color = "orange", size = 1, data = newdd) +
+  theme(panel.grid = element_blank())
+```
+
+But we can actually visualize the *distribution* of predicted values for each individual and plot those distributions in relation to the actual data. If we want to look at the 80% interval for each individual (we could look at the 95% interval just as easily), we can estimate the  interval bounds simply by applying the `quantile` function to the `rvar` *pred*:
+
+```{r intervals1, fig.height = 4, fig.width = 6}
+interval80 <- t(quantile(pred, c(0.10, 0.90)))
+head(interval80)
+```
+
+If the model is a good fit, we would expect the actual data to be scattered across those distributions without any obvious pattern, as is the case here. Not so surprising given the simulated data generation process:
+
+```{r plotintervals1, fig.height = 4, fig.width = 6}
+df.80 <- data.table(x = dd$x, y=dd$y, interval80)
+df.80[, extreme := !(y >= V1 & y <= V2)]
+
+ggplot(data = df.80, aes(x = x, y = y)) +
+  geom_segment(aes(y = V1, yend = V2, x = x, xend = x), color = "grey30", size = .1) +
+  geom_point(aes(color = extreme), size = 1) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  scale_color_manual(values = c("black", "red"))
+```
+
+#### Bayesian p-value
+
+I find the visual presentation pretty compelling, but if we want to quantify the model fit, one option is to estimate a *Bayesian p-value*, described in this [Gelman paper](https://onlinelibrary.wiley.com/doi/pdf/10.1111/j.1751-5823.2003.tb00203.x?casa_token=WKxfT4KbAc8AAAAA:L7bqFCk4bcCo0BQhb19ZX_unLctcydfFtrc-oflAyrxjQzPyYEf0WctDXlpDfJdc7wc3YZXsBvAFWw){target="_blank"} as 
+
+$$\text{p-value}(y) = P(T(y^{rep}) > T(y) \ |\  y)$$
+averaged over the parameters $\theta$ (and is a function of the observed data $y$). $y^{rep}$ is the replicated or predicted data from the model (what we have saved in the variable *pred*). $T()$ is any function of the data that is reasonable in this context. The idea is that the p-value will not be extremely high or low (eg., not less than 0.05 or not greater than 0.95) if the model is a good approximation of the actual data generating process. Since my main goal here is to illustrate the usefulness of the `rvar` datatype, and not necessarily to come up with the ideal test statistic $T$, I've created a pretty crude idea for $T$ in the the context of linear regression. 
+
+The first step is to split the data defined by different values of predictors $x$ into different bins (in this case I'll use five) and calculate the proportion of observed $y_i$'s that fall below the predicted mean $\mu_i$:
+
+$$p_{b} = \frac{1}{n_b}\sum_{i=1}^{n_b} I(y_i < \mu_i), \ b \in \{1,\dots,B\} $$ 
+
+We also do the same to estimate $p_b^{rep}$ for each bin, using the replicated/predicted values of $y$. We expect the variability $p^{rep}$ (i.e. $p_1^{rep} \approx \dots \approx p_5^{rep}$): by definition, predictions are randomly scattered around the means in each bin, with half above and half below. If the model is a good fit of the observed data, we would expect the $p_b$'s of based on observed data to all also be close to 0,5. However, if the model is a poor fit, there will likely be variability in proportions based on observed $y$'s across bins, so that the $P(\text{var}(p^{rep}) > \text{var}(p))$ should be quite close to 0.
+
+[As I write this, I'm noticing that this binned test statistic might bear some of the same motivations that underlie the [Goldfeld-Quandt test for heteroscedasticity](https://www.tandfonline.com/doi/abs/10.1080/01621459.1965.10480811){target="_blank"}. OK, not quite, but perhaps it is very, very tangentially related? In any case, the more famous test was developed in part by my father; today would have been his 81st birthday, so I am very happy to make that (very subtle) connection.]
+
+#### Estimating the p-value from the data
+
+One cool feature of `rvars` is that they can be included in `data.frames` (though not in `data.tables`). This allows us to do some cool summarization without a lot of manipulation. 
+
+```{r pval1}
+df <- data.frame(x = dd$x, y = dd$y, mu, pred)
+df$grp <- cut(df$x, breaks = seq(0, 10, by = 2),include.lowest = TRUE, labels=FALSE)
+
+head(df)
+```
+
+In this case, I want to calculate the proportion of values where the observed $y$ is less than $\mu$ in each bin; I can use `lapply` on the data frame *df* to calculate each of those proportions. However, I am actually calculating the proportion 10,000 times within each bin, once for each sample, so I have a distribution of proportions within each bin.
+
+```{r}
+bin_prop_y <- lapply(1:5, function(x) rvar_mean(with(df[df$grp == x,], I(y < mu))))
+bin_prop_y
+```
+
+A brief word about the function `rvar_mean` that I've used here (there is a more detailed description on the `posterior` [website](https://mc-stan.org/posterior/articles/rvar.html){target="_blank"}). If we have samples of multiple variables, we can apply a function across the variables within a sample (as opposed to across samples within a single variable) by using `rvar_func`. Within each bin, there are roughly 20 variables (one for each individual), and by using the function `rvar_mean`, I am averaging across individuals within each sample to get a distribution of proportions within each bin.
+
+In the next steps, I need to do a little bit of manipulation to make things work. I was hoping to avoid this, but I haven't been able to figure out any other way to get the data in the right format to estimate the probability. I am basically taking the data underlying the random variable (the 10,000 values for each bin), creating a single array, and then creating a new `rvar`.
+
+```{r}
+array_y <- abind(lapply(bin_prop_y, function(x) as_draws_array(draws_of(x))))
+head(array_y)
+
+(rv_y <- rvar(array_y))
+```
+
+Here, I am repeating the steps on the predicted values ($y^{rep}$). Even with the inelegant coding, it is still only three lines:
+
+```{r}
+bin_prop_pred <- lapply(1:5, function(x) rvar_mean(with(df[df$grp == x,], (pred < mu))))
+array_pred <- abind(lapply(bin_prop_pred, function(x) as_draws_array(draws_of(x))))
+rv_pred <- rvar(array_pred)
+```
+
+Finally, we are ready to calculate the p-value using the distribution of test statistics $T$. Note that `rvar_var` is calculating the variance of the proportions across the bins within a single sample to give us a distribution of variances of the proportions based on the observed and predicted values. The overall p-value is the overage of the distribution.
+
+```{R}
+(T_y <- rvar_var(rv_y))
+(T_pred <- rvar_var(rv_pred))
+
+# p-value
+mean(T_pred > T_y)
+```
+
+As expected, since the data generation process and the model are roughly equivalent, the p-value is neither extremely large or small, indicating good fit.
+
+### Straying from the simple model assumptions
+
+If we tweak the data generation process slightly by including a quadratic term, things change a bit:
+
+$$y \sim N(\mu = 2 + 6*x - 0.3x^2, \ \sigma^2 = 4)$$
+
+Below, I give you the code and output without any commentary, except to say that both the visual display and the p-value strongly suggest that the simple linear regression model are *not* a good fit for these data generated with an added quadratic term.
+
+```{r}
+b_quad <- -0.3
+dd <- genData(100, ddef)
+```
+
+```{r plot2, echo = F, fig.height = 4, fig.width = 6}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(color = "blue", size = 1) +
+  theme(panel.grid = element_blank())
+```
+
+```{r fitstan2}
+fit <- mod$sample(
+  data = list(N = nrow(dd), x = dd$x, y = dd$y),
+  seed = 72651,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500
+)
+```
+
+```{r pred2}
+post_rvars <- as_draws_rvars(fit$draws())
+
+x_rvar <- as_rvar(dd$x)
+mu <- post_rvars$alpha + post_rvars$beta * x_rvar
+pred <- rvar_rng(rnorm, nrow(dd), mu, post_rvars$sigma)
+
+df.80 <- data.table(x = dd$x, y=dd$y, t(quantile(pred, c(0.10, 0.90))))
+df.80[, extreme := !(y >= V1 & y <= V2)]
+```
+
+```{r plotintervals2, fig.height = 4, fig.width = 6, echo=FALSE}
+ggplot(data = df.80, aes(x = x, y = y)) +
+  geom_segment(aes(y = V1, yend = V2, x = x, xend = x), color = "grey30", size = .1) +
+  geom_point(aes(color = extreme), size = 1) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  scale_color_manual(values = c("black", "red"))
+```
+
+```{r pval2}
+df <- data.frame(x = dd$x, y = dd$y, mu, pred)
+df$grp <- cut(df$x, breaks = seq(0, 10, by = 2),include.lowest = TRUE, labels=FALSE)
+
+bin_prop_y <- lapply(1:5, function(x) rvar_mean(with(df[df$grp == x,], (y < mu))))
+array_y <- abind(lapply(bin_prop_y, function(x) as_draws_array(draws_of(x))))
+rv_y <- rvar(array_y)
+
+bin_prop_pred <- lapply(1:5, function(x) rvar_mean(with(df[df$grp == x,], (pred < mu))))
+array_pred <- abind(lapply(bin_prop_pred, function(x) as_draws_array(draws_of(x))))
+rv_pred <- rvar(array_pred)
+
+(T_y <- rvar_var(rv_y))
+(T_pred <- rvar_var(rv_pred))
+
+mean(T_pred > T_y)
+```
+
+<p><small><font color="darkkhaki">
+
+References:
+
+Gelman, Andrew. "A Bayesian formulation of exploratory data analysis and goodness‐of‐fit testing." *International Statistical Review* 71, no. 2 (2003): 369-382.
+
+Goldfeld, Stephen M., and Richard E. Quandt. "Some tests for homoscedasticity." *Journal of the American statistical Association* 60, no. 310 (1965): 539-547.
+
+Kerman, Jouni, and Andrew Gelman. "Manipulating and summarizing posterior simulations using random variable objects." *Statistics and Computing* 17, no. 3 (2007): 235-244.
+
+</font></small></p>
