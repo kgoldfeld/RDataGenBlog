@@ -1,0 +1,110 @@
+---
+title: 
+  "Posterior probability checking with rvars: a quick follow-up"
+author: ''
+date: '2021-08-17'
+slug: []
+categories: []
+tags:
+  - Bayesian model
+  - Stan
+  - R
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>This is a relatively brief addendum to last week’s <a href="https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/">post</a>, where I described how the <code>rvar</code> datatype implemented in the <code>R</code> package <code>posterior</code> makes it quite easy to perform posterior probability checks to assess goodness of fit. In the initial post, I generated data from a linear model and estimated parameters for a linear regression model, and, unsurprisingly, the model fit the data quite well. When I introduced a quadratic term into the data generating process and fit the same linear model (without a quadratic term), equally unsurprising, the model wasn’t a great fit.</p>
+<p>Immediately after putting the post up, I decided to make sure the correct model with the quadratic term would not result in extreme p-value (i.e. would fall between 0.02 and 0.98). And, again not surprisingly, the model was a good fit. I’m sharing all this here, because I got some advice on how to work with the <code>rvar</code> data a little more efficiently, and wanted to make sure those who are interested could see that. And while I was at it, I decided to investigate the distribution of Bayesian p-values under the condition that the model and data generating process are the same (i.e. the model is correct).</p>
+<p>Just as a reminder, here is the data generation process:</p>
+<p><span class="math display">\[y \sim N(\mu = 2 + 6*x - 0.3x^2, \ \sigma^2 = 4)\]</span></p>
+<p>Here are the necessary libraries:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)
+library(ggplot2)</code></pre>
+<p>And here is the data generation:</p>
+<pre class="r"><code>b_quad &lt;- -0.3
+
+ddef &lt;- defData(varname = &quot;x&quot;, formula = &quot;0;10&quot;, dist = &quot;uniform&quot;)
+ddef &lt;- defData(ddef, &quot;y&quot;, &quot;2 + 6*x + ..b_quad*(x^2)&quot;, 4)
+
+set.seed(72612)
+dd &lt;- genData(100, ddef)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot2-1.png" width="576" /></p>
+<p>The <code>Stan</code> model is slightly modified to include the additional term; <span class="math inline">\(\gamma\)</span> is the quadratic parameter:</p>
+<pre class="stan"><code>data {
+  int&lt;lower=0&gt; N;
+  vector[N] x;
+  vector[N] y;
+}
+
+transformed data{
+  vector[N] x2;
+  
+  for (i in 1:N) {
+    x2[i] = x[i]*x[i];
+  };
+  
+}
+
+parameters {
+  real alpha;
+  real beta;
+  real gamma;
+  real&lt;lower=0&gt; sigma;
+}
+
+model {
+  y ~ normal(alpha + beta*x + gamma*x2, sigma);
+}</code></pre>
+<pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/quadratic_regression.stan&quot;)</code></pre>
+<pre class="r"><code>fit &lt;- mod$sample(
+  data = list(N = nrow(dd), x = dd$x, y = dd$y),
+  seed = 72651,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 3 finished in 0.5 seconds.
+## Chain 1 finished in 0.5 seconds.
+## Chain 2 finished in 0.5 seconds.
+## Chain 4 finished in 0.5 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.5 seconds.
+## Total execution time: 0.6 seconds.</code></pre>
+<p>As before, I am plotting the observed (actual data) along with the 80% intervals of predicted values at each level of <span class="math inline">\(x\)</span>. The observed data appear to be randomly scattered within the intervals with no apparent pattern:</p>
+<pre class="r"><code>post_rvars &lt;- as_draws_rvars(fit$draws())
+
+mu &lt;- with(post_rvars, alpha + beta * as_rvar(dd$x) + gamma * as_rvar(dd$x^2))
+pred &lt;- rvar_rng(rnorm, nrow(dd), mu, post_rvars$sigma)
+
+df.80 &lt;- data.table(x = dd$x, y=dd$y, t(quantile(pred, c(0.10, 0.90))))
+df.80[, extreme := !(y &gt;= V1 &amp; y &lt;= V2)]</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plotintervals2-1.png" width="576" /></p>
+<p>The code to estimate the p-value is slightly modified from last time. The important difference is that the lists of <code>rvars</code> (<em>bin_prop_y</em> and <em>bin_prop_pred</em>) are converted directly into vectors of <code>rvars</code> using the <code>do.call</code> function:</p>
+<pre class="r"><code>df &lt;- data.frame(x = dd$x, y = dd$y, mu, pred)
+df$grp &lt;- cut(df$x, breaks = seq(0, 10, by = 2),include.lowest = TRUE, labels=FALSE)
+
+bin_prop_y &lt;- lapply(split(df, df$grp), function(x) rvar_mean(x$y &lt; x$mu))
+rv_y &lt;- do.call(c, bin_prop_y)
+T_y &lt;- rvar_var(rv_y)
+
+bin_prop_pred &lt;- lapply(split(df, df$grp), function(x) rvar_mean(x$pred &lt; x$mu))
+rv_pred &lt;- do.call(c, bin_prop_pred)
+T_pred &lt;- rvar_var(rv_pred)
+
+mean(T_pred &gt; T_y)</code></pre>
+<pre><code>## [1] 0.583</code></pre>
+<p>In this one case, the p-value is 0.58, suggesting the model is a good fit. But, could this have been a fluke? Looking below at the density plot of p-values based on 10,000 simulated data sets suggests not; indeed, <span class="math inline">\(P(0.02 &lt; \text{p-value} &lt; 0.98) = 99.8\%.\)</span> (If you are interested in the code that estimated the density of p-values, I can post it as well.)</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
