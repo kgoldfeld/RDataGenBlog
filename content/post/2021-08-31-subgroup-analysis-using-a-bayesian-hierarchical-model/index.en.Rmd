@@ -14,4 +14,248 @@ image: ''
 draft: true
 ---
 
-This is a test.
+I'm part of a team that recently submitted the results of a randomized clinical trial to a journal. The overall findings of the study were inconclusive, and we certainly didn't try to hide that fact in our paper. Of course, the story was a bit more complicated, as the RCT was conducted during various phases of the COVID-19 pandemic so that the context in which the therapeutic treatment was provided changed over time. In particular, different alternative treatments were used at different time points, resulting in apparent heterogeneous treatment effects; the treatment we were studying might have been effective only in one period when alternative treatments were not available. While we planned to evaluate the treatment effect over time, it was not our primary planned analysis, and journal objected to the inclusion of the these secondary analyses.
+
+Which got me thinking, of course, about subgroup analyses. In the context of a null hypothesis significance testing framework, it is well known that conducting numerous *post hoc* analyses runs the risks of dramatically inflating the probability of a Type 1 error - concluding there is some sort of effect when in fact there is none. So, if there is no overall effect, and you decide to look at a subgroup of the sample (say patients over 50), you may find that the treatment has an effect in that group. But, if you failed to adjust for multiple tests, than that conclusion may not be warranted. And if that second subgroup analysis was not pre-specified or planned ahead of time, that conclusion may be even more dubious.
+
+If we use a Bayesian approach, we might be able to [avoid this problem](https://statmodeling.stat.columbia.edu/2016/08/22/bayesian-inference-completely-solves-the-multiple-comparisons-problem/){target="_blank"}, and there might be no need to adjust for multiple tests. I have started to explore this a bit using simulated data under a variety of scenarios of different data generation processes and prior distribution assumptions. It might all be a bit too much for a single post, so I am planning on spreading it out a bit.
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+options(digits = 3)
+```
+
+```{r}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(cmdstanr)
+library(posterior)
+```
+
+```{r}
+d <- defData(varname = "a", formula = 0.5, dist="binary")
+d <- defData(d, varname = "b", formula = 0.5, dist="binary")
+d <- defData(d, varname = "c", formula = 0.5, dist="binary")
+  
+drx <- defDataAdd(varname = "theta", formula = "0 + 2*a  + 4*c - 1*a*c", 
+  dist = "nonrandom")
+drx <- defDataAdd(drx, varname = "y", formula = "0 + theta*rx", variance = 4,
+  dist = "normal")
+```
+
+```{r}
+set.seed(382715)
+
+dd <- genData(100, d)
+dd <- trtAssign(dd, grpName = "rx")
+dd <- addColumns(drx, dd)
+  
+dd[a==0 & b==0 & c==0, grp:= 1]
+dd[a==1 & b==0 & c==0, grp:= 2]
+dd[a==0 & b==1 & c==0, grp:= 3]
+dd[a==0 & b==0 & c==1, grp:= 4]
+dd[a==1 & b==1 & c==0, grp:= 5]
+dd[a==1 & b==0 & c==1, grp:= 6]
+dd[a==0 & b==1 & c==1, grp:= 7]
+dd[a==1 & b==1 & c==1, grp:= 8]
+```
+
+```{r}
+
+ df <- data.frame(dd)
+
+ getparams <- function(dx) {
+    fit <- lm(y ~ rx, data = dx)
+    c(coef(fit)["rx"], confint(fit)[2,])
+  }
+  
+  
+  est_cis <- function(sub_grp) {
+    mean_pred <- lapply(split(df[,c(sub_grp, "y", "rx")], df[, c(sub_grp)]), 
+                        function(x) getparams(x)
+    )
+    do.call(rbind, mean_pred)
+  }
+  
+  cis <- do.call(rbind, lapply(c("a","b","c"), function(x) est_cis(x)))
+  ci <- getparams(dd)
+  cis <- data.table(rbind(cis, ci))
+  setnames(cis, c("p.50","p.025", "p.975"))
+  cis[, model := 3]
+  cis[, subgroup := c("a = 0", "a = 1", "b = 0", "b = 1", "c = 0", "c = 1", "overall")]
+
+  cis
+```
+
+```{r, fig.width = 8, fig.height=2.5, echo = FALSE}
+library(ggpubr)
+
+plotsub <- function(sub_g, dd) {
+  
+  dx <- copy(dd)
+  dx[, new_col := get(sub_g)]
+  dsum <- dx[, mean(y), keyby = .(new_col, rx)]
+  
+  ggplot(data = dsum, aes(x = factor(rx, labels = c("no", "yes")), y = V1)) +
+    geom_point(aes(color = factor(new_col))) +
+    geom_line(aes(group = new_col, color = factor(new_col))) +
+    theme(panel.grid = element_blank(),
+          plot.title = element_text(size = 9),
+          axis.title = element_blank()) +
+    ggtitle(paste0("subgroups based on ", sub_g)) +
+    scale_color_manual(name = "subgroup value", values = c("red", "black")) +
+    ylim(-1, 5)
+    
+}
+
+plots <- lapply(c("a", "b", "c"), function(x) plotsub(x, dd))
+figure <- ggarrange(plotlist=plots, nrow = 1, common.legend = TRUE, legend = "right")
+annotate_figure(figure, 
+                bottom = text_grob("treatment status", size = 10, hjust = 1),
+                left = text_grob("outcome", size = 10, rot = 90, hjust = 0.3)
+)
+
+
+```
+
+### Model estimation
+
+```{r, eval = FALSE}
+model_pool <- cmdstan_model("code/pooled_subgroup.stan")
+model_unpool <- cmdstan_model("code/unpooled_subgroup.stan")
+```
+
+```{r, echo=FALSE}
+stanfile <- "code/pooled_subgroup"
+if (file.exists(stanfile)) unlink(stanfile)
+model_pool <- cmdstan_model(paste0(stanfile, ".stan"))
+
+stanfile <- "code/unpooled_subgroup"
+if (file.exists(stanfile)) unlink(stanfile)
+model_unpool <- cmdstan_model(paste0(stanfile, ".stan"))
+```
+
+```{r}
+fit <- model_pool$sample(
+    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y]),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.99,
+    max_treedepth = 20
+)
+
+r <- as_draws_rvars(fit$draws(variables = c("alpha","theta","sigma")))
+    
+est_effects <- function(sub_grp) {
+  mean_pred <- lapply(split(df[,c(sub_grp, "rx","pred")], df[, c(sub_grp, "rx")]), 
+                      function(x) rvar_mean(x$pred) )
+  c(mean_pred[["0.1"]] - mean_pred[["0.0"]], mean_pred[["1.1"]] - mean_pred[["1.0"]])
+}
+    
+df <- as.data.frame(dd)
+    
+df$theta_hat <- r$theta[dd$grp]
+df$alpha_hat <- r$alpha[dd$grp]
+df$mu_hat <- with(df, alpha_hat + rx* theta_hat)
+    
+df$pred <- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
+effects <- do.call(c, lapply(c("a","b","c"), function(x) est_effects(x)))
+    
+mean_pred <- lapply(split(df[,c("rx","pred")], df[, "rx"]), function(x) rvar_mean(x$pred) )
+overall <- mean_pred[["1"]] - mean_pred[["0"]]
+    
+effects <- c(effects, overall)
+    
+sumstats_pooled <- data.table( 
+  subgroup = c("a = 0", "a = 1", "b = 0", "b = 1", "c = 0", "c = 1", "overall"),
+  model = 1,
+  p.025 = quantile(effects, 0.025),
+#  p.25 = quantile(effects, 0.25),
+  p.50 = quantile(effects, 0.50),
+#  p.75 = quantile(effects, 0.75),
+  p.975 = quantile(effects, 0.975)
+)
+```
+
+```{r, echo = FALSE}
+fit <- model_unpool$sample(
+    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y], prior_sigma = 10),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.99,
+    max_treedepth = 20
+)
+
+r <- as_draws_rvars(fit$draws(variables = c("alpha","theta","sigma")))
+    
+est_effects <- function(sub_grp) {
+  mean_pred <- lapply(split(df[,c(sub_grp, "rx","pred")], df[, c(sub_grp, "rx")]), 
+                      function(x) rvar_mean(x$pred) )
+  c(mean_pred[["0.1"]] - mean_pred[["0.0"]], mean_pred[["1.1"]] - mean_pred[["1.0"]])
+}
+    
+df <- as.data.frame(dd)
+    
+df$theta_hat <- r$theta[dd$grp]
+df$alpha_hat <- r$alpha[dd$grp]
+df$mu_hat <- with(df, alpha_hat + rx* theta_hat)
+    
+df$pred <- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
+effects <- do.call(c, lapply(c("a","b","c"), function(x) est_effects(x)))
+    
+mean_pred <- lapply(split(df[,c("rx","pred")], df[, "rx"]), function(x) rvar_mean(x$pred) )
+overall <- mean_pred[["1"]] - mean_pred[["0"]]
+    
+effects <- c(effects, overall)
+    
+sumstats_unpooled_10 <- data.table( 
+  subgroup = c("a = 0", "a = 1", "b = 0", "b = 1", "c = 0", "c = 1", "overall"),
+  model = 2,
+  p.025 = quantile(effects, 0.025),
+#  p.25 = quantile(effects, 0.25),
+  p.50 = quantile(effects, 0.50),
+#  p.75 = quantile(effects, 0.75),
+  p.975 = quantile(effects, 0.975)
+)
+```
+
+
+```{r, echo = FALSE, fig.height = 5, fig.width = 7}
+dd <- genData(100000, d)
+dd <- trtAssign(dd, grpName = "rx")
+dd <- addColumns(drx, dd)
+
+dv <- data.table(
+  subgroup =  c("a = 0", "a = 1", "b = 0", "b = 1", "c = 0", "c = 1", "overall"),
+  true_vals = c(dd[a == 0 & rx == 1, mean(y)] - dd[a == 0 & rx == 0, mean(y)],
+    dd[a == 1 & rx == 1, mean(y)] - dd[a == 1 & rx == 0, mean(y)], 
+    dd[b == 0 & rx == 1, mean(y)] - dd[b == 0 & rx == 0, mean(y)],
+    dd[b == 1 & rx == 1, mean(y)] - dd[b == 1 & rx == 0, mean(y)],
+    dd[c == 0 & rx == 1, mean(y)] - dd[c == 0 & rx == 0, mean(y)],
+    dd[c == 1 & rx == 1, mean(y)] - dd[c == 1 & rx == 0, mean(y)],
+    dd[rx == 1, mean(y)] - dd[rx == 0, mean(y)]
+))
+  
+sumstats <- rbind(sumstats_pooled, sumstats_unpooled_10, cis)
+sumstats[, model := factor(model, labels = c("pooled", "unpooled", "lm"))]
+
+ggplot(data = sumstats, aes(y = model, yend = model)) +
+  geom_vline(xintercept = 0, color = "grey85") +
+  geom_vline(data = dv, aes(xintercept = true_vals), color = "grey40", lty = 3) +
+  geom_segment(aes(x = p.025, xend = p.975), color = "grey75") +
+#  geom_segment(aes(x = p.25, xend = p.75), size = 1.25, color = "#9a0000") +
+  geom_point(aes(x = p.50), size = 1) +
+  scale_x_continuous(limits = c(-1, 7), breaks = c(-1:6), name = "effect size") +
+  facet_grid(subgroup ~ .) +
+  theme(panel.grid = element_blank(),
+        axis.title.y = element_blank())
+```
+
+

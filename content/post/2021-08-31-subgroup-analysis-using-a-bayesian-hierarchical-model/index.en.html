@@ -17,4 +17,132 @@ draft: true
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>This is a test.</p>
+<p>I’m part of a team that recently submitted the results of a randomized clinical trial to a journal. The overall findings of the study were inconclusive, and we certainly didn’t try to hide that fact in our paper. Of course, the story was a bit more complicated, as the RCT was conducted during various phases of the COVID-19 pandemic so that the context in which the therapeutic treatment was provided changed over time. In particular, different alternative treatments were used at different time points, resulting in apparent heterogeneous treatment effects; the treatment we were studying might have been effective only in one period when alternative treatments were not available. While we planned to evaluate the treatment effect over time, it was not our primary planned analysis, and journal objected to the inclusion of the these secondary analyses.</p>
+<p>Which got me thinking, of course, about subgroup analyses. In the context of a null hypothesis significance testing framework, it is well known that conducting numerous <em>post hoc</em> analyses runs the risks of dramatically inflating the probability of a Type 1 error - concluding there is some sort of effect when in fact there is none. So, if there is no overall effect, and you decide to look at a subgroup of the sample (say patients over 50), you may find that the treatment has an effect in that group. But, if you failed to adjust for multiple tests, than that conclusion may not be warranted. And if that second subgroup analysis was not pre-specified or planned ahead of time, that conclusion may be even more dubious.</p>
+<p>If we use a Bayesian approach, we might be able to <a href="https://statmodeling.stat.columbia.edu/2016/08/22/bayesian-inference-completely-solves-the-multiple-comparisons-problem/" target="_blank">avoid this problem</a>, and there might be no need to adjust for multiple tests. I have started to explore this a bit using simulated data under a variety of scenarios of different data generation processes and prior distribution assumptions. It might all be a bit too much for a single post, so I am planning on spreading it out a bit.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(cmdstanr)
+library(posterior)</code></pre>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0.5, dist=&quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;b&quot;, formula = 0.5, dist=&quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;c&quot;, formula = 0.5, dist=&quot;binary&quot;)
+  
+drx &lt;- defDataAdd(varname = &quot;theta&quot;, formula = &quot;0 + 2*a  + 4*c - 1*a*c&quot;, 
+  dist = &quot;nonrandom&quot;)
+drx &lt;- defDataAdd(drx, varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 4,
+  dist = &quot;normal&quot;)</code></pre>
+<pre class="r"><code>set.seed(382715)
+
+dd &lt;- genData(100, d)
+dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
+dd &lt;- addColumns(drx, dd)
+  
+dd[a==0 &amp; b==0 &amp; c==0, grp:= 1]
+dd[a==1 &amp; b==0 &amp; c==0, grp:= 2]
+dd[a==0 &amp; b==1 &amp; c==0, grp:= 3]
+dd[a==0 &amp; b==0 &amp; c==1, grp:= 4]
+dd[a==1 &amp; b==1 &amp; c==0, grp:= 5]
+dd[a==1 &amp; b==0 &amp; c==1, grp:= 6]
+dd[a==0 &amp; b==1 &amp; c==1, grp:= 7]
+dd[a==1 &amp; b==1 &amp; c==1, grp:= 8]</code></pre>
+<pre class="r"><code> df &lt;- data.frame(dd)
+
+ getparams &lt;- function(dx) {
+    fit &lt;- lm(y ~ rx, data = dx)
+    c(coef(fit)[&quot;rx&quot;], confint(fit)[2,])
+  }
+  
+  
+  est_cis &lt;- function(sub_grp) {
+    mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;y&quot;, &quot;rx&quot;)], df[, c(sub_grp)]), 
+                        function(x) getparams(x)
+    )
+    do.call(rbind, mean_pred)
+  }
+  
+  cis &lt;- do.call(rbind, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_cis(x)))
+  ci &lt;- getparams(dd)
+  cis &lt;- data.table(rbind(cis, ci))
+  setnames(cis, c(&quot;p.50&quot;,&quot;p.025&quot;, &quot;p.975&quot;))
+  cis[, model := 3]
+  cis[, subgroup := c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;)]
+
+  cis</code></pre>
+<pre><code>##     p.50   p.025 p.975 model subgroup
+## 1: 1.399  0.0441  2.75     3    a = 0
+## 2: 3.615  2.3016  4.93     3    a = 1
+## 3: 1.890  0.2887  3.49     3    b = 0
+## 4: 2.716  1.4461  3.99     3    b = 1
+## 5: 0.936 -0.4276  2.30     3    c = 0
+## 6: 4.457  3.3739  5.54     3    c = 1
+## 7: 2.374  1.3971  3.35     3  overall</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
+<div id="model-estimation" class="section level3">
+<h3>Model estimation</h3>
+<pre class="r"><code>model_pool &lt;- cmdstan_model(&quot;code/pooled_subgroup.stan&quot;)
+model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code></pre>
+<pre class="r"><code>fit &lt;- model_pool$sample(
+    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y]),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.99,
+    max_treedepth = 20
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 1 finished in 1.9 seconds.
+## Chain 2 finished in 1.8 seconds.
+## Chain 4 finished in 2.2 seconds.
+## Chain 3 finished in 2.6 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 2.1 seconds.
+## Total execution time: 2.8 seconds.</code></pre>
+<pre class="r"><code>r &lt;- as_draws_rvars(fit$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
+    
+est_effects &lt;- function(sub_grp) {
+  mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;rx&quot;,&quot;pred&quot;)], df[, c(sub_grp, &quot;rx&quot;)]), 
+                      function(x) rvar_mean(x$pred) )
+  c(mean_pred[[&quot;0.1&quot;]] - mean_pred[[&quot;0.0&quot;]], mean_pred[[&quot;1.1&quot;]] - mean_pred[[&quot;1.0&quot;]])
+}
+    
+df &lt;- as.data.frame(dd)
+    
+df$theta_hat &lt;- r$theta[dd$grp]
+df$alpha_hat &lt;- r$alpha[dd$grp]
+df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)
+    
+df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
+effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_effects(x)))
+    
+mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred) )
+overall &lt;- mean_pred[[&quot;1&quot;]] - mean_pred[[&quot;0&quot;]]
+    
+effects &lt;- c(effects, overall)
+    
+sumstats_pooled &lt;- data.table( 
+  subgroup = c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;),
+  model = 1,
+  p.025 = quantile(effects, 0.025),
+#  p.25 = quantile(effects, 0.25),
+  p.50 = quantile(effects, 0.50),
+#  p.75 = quantile(effects, 0.75),
+  p.975 = quantile(effects, 0.975)
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 3 finished in 1.4 seconds.
+## Chain 2 finished in 1.6 seconds.
+## Chain 1 finished in 1.8 seconds.
+## Chain 4 finished in 2.1 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.7 seconds.
+## Total execution time: 2.2 seconds.</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+</div>
