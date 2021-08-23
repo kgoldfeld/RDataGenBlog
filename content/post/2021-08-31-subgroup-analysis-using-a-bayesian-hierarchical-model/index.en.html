@@ -20,71 +20,150 @@ draft: true
 <p>I’m part of a team that recently submitted the results of a randomized clinical trial to a journal. The overall findings of the study were inconclusive, and we certainly didn’t try to hide that fact in our paper. Of course, the story was a bit more complicated, as the RCT was conducted during various phases of the COVID-19 pandemic so that the context in which the therapeutic treatment was provided changed over time. In particular, different alternative treatments were used at different time points, resulting in apparent heterogeneous treatment effects; the treatment we were studying might have been effective only in one period when alternative treatments were not available. While we planned to evaluate the treatment effect over time, it was not our primary planned analysis, and journal objected to the inclusion of the these secondary analyses.</p>
 <p>Which got me thinking, of course, about subgroup analyses. In the context of a null hypothesis significance testing framework, it is well known that conducting numerous <em>post hoc</em> analyses runs the risks of dramatically inflating the probability of a Type 1 error - concluding there is some sort of effect when in fact there is none. So, if there is no overall effect, and you decide to look at a subgroup of the sample (say patients over 50), you may find that the treatment has an effect in that group. But, if you failed to adjust for multiple tests, than that conclusion may not be warranted. And if that second subgroup analysis was not pre-specified or planned ahead of time, that conclusion may be even more dubious.</p>
 <p>If we use a Bayesian approach, we might be able to <a href="https://statmodeling.stat.columbia.edu/2016/08/22/bayesian-inference-completely-solves-the-multiple-comparisons-problem/" target="_blank">avoid this problem</a>, and there might be no need to adjust for multiple tests. I have started to explore this a bit using simulated data under a variety of scenarios of different data generation processes and prior distribution assumptions. It might all be a bit too much for a single post, so I am planning on spreading it out a bit.</p>
+<div id="the-data" class="section level3">
+<h3>The data</h3>
+<p>To get this going, here are the libraries used in this post:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(ggplot2)
 library(cmdstanr)
 library(posterior)</code></pre>
-<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0.5, dist=&quot;binary&quot;)
-d &lt;- defData(d, varname = &quot;b&quot;, formula = 0.5, dist=&quot;binary&quot;)
-d &lt;- defData(d, varname = &quot;c&quot;, formula = 0.5, dist=&quot;binary&quot;)
+<p>In this simulated data set of 150 individuals, there are three binary covariates <span class="math inline">\(A, B, C \in \{0,1\}\)</span> and a treatment indicator <span class="math inline">\(rx \in \{0,1\}\)</span>. When we randomize the individuals to arms, we should have pretty good balance across treatment arms, so a comparison of the two treatment arms without adjusting for the covariates should provide a good estimate of the <em>overall</em> treatment effect. However, we might still be interested in looking at specific subgroups defined by <span class="math inline">\(A\)</span>, <span class="math inline">\(B\)</span>, and <span class="math inline">\(C\)</span>, say patients for whom <span class="math inline">\(A=0\)</span> or those where <span class="math inline">\(C=1\)</span>. (We could also look at subgroups defined by combinations of these covariates.)</p>
+<p>In the data generation process, the treatment effect will be a parameter <span class="math inline">\(\theta\)</span> that will be determined by the levels of the three covariates. In this case, for patients <span class="math inline">\(A=B=C=0\)</span>, there will be no treatment effect. However, for patients with <span class="math inline">\(A=1\)</span>, there will be a small treatment effect of <span class="math inline">\(2\)</span>, and there will be a slightly larger effect of <span class="math inline">\(4\)</span> for patients with <span class="math inline">\(C=1\)</span>, and for patients with <span class="math inline">\(A=1 \ \&amp; \ C=1\)</span>, there will be a treatment effect of <span class="math inline">\(5\)</span>. For patients with <span class="math inline">\(B=1\)</span> there is no treatment effect.</p>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0.6, dist=&quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;b&quot;, formula = 0.3, dist=&quot;binary&quot;)
+d &lt;- defData(d, varname = &quot;c&quot;, formula = 0.4, dist=&quot;binary&quot;)
   
 drx &lt;- defDataAdd(varname = &quot;theta&quot;, formula = &quot;0 + 2*a  + 4*c - 1*a*c&quot;, 
   dist = &quot;nonrandom&quot;)
 drx &lt;- defDataAdd(drx, varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 4,
   dist = &quot;normal&quot;)</code></pre>
-<pre class="r"><code>set.seed(382715)
+<p>In the data generation process, I am assigning group identifiers based on the covariates that will be relevant for the Bayes model (described further below).</p>
+<pre class="r"><code>set.seed(38715)
 
-dd &lt;- genData(100, d)
+dd &lt;- genData(150, d)
 dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
 dd &lt;- addColumns(drx, dd)
   
-dd[a==0 &amp; b==0 &amp; c==0, grp:= 1]
-dd[a==1 &amp; b==0 &amp; c==0, grp:= 2]
-dd[a==0 &amp; b==1 &amp; c==0, grp:= 3]
-dd[a==0 &amp; b==0 &amp; c==1, grp:= 4]
-dd[a==1 &amp; b==1 &amp; c==0, grp:= 5]
-dd[a==1 &amp; b==0 &amp; c==1, grp:= 6]
-dd[a==0 &amp; b==1 &amp; c==1, grp:= 7]
-dd[a==1 &amp; b==1 &amp; c==1, grp:= 8]</code></pre>
-<pre class="r"><code> df &lt;- data.frame(dd)
+dd[a==0 &amp; b==0 &amp; c==0, grp := 1]
+dd[a==1 &amp; b==0 &amp; c==0, grp := 2]
+dd[a==0 &amp; b==1 &amp; c==0, grp := 3]
+dd[a==0 &amp; b==0 &amp; c==1, grp := 4]
+dd[a==1 &amp; b==1 &amp; c==0, grp := 5]
+dd[a==1 &amp; b==0 &amp; c==1, grp := 6]
+dd[a==0 &amp; b==1 &amp; c==1, grp := 7]
+dd[a==1 &amp; b==1 &amp; c==1, grp := 8]
 
- getparams &lt;- function(dx) {
-    fit &lt;- lm(y ~ rx, data = dx)
-    c(coef(fit)[&quot;rx&quot;], confint(fit)[2,])
-  }
-  
-  
-  est_cis &lt;- function(sub_grp) {
-    mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;y&quot;, &quot;rx&quot;)], df[, c(sub_grp)]), 
-                        function(x) getparams(x)
-    )
-    do.call(rbind, mean_pred)
-  }
-  
-  cis &lt;- do.call(rbind, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_cis(x)))
-  ci &lt;- getparams(dd)
-  cis &lt;- data.table(rbind(cis, ci))
-  setnames(cis, c(&quot;p.50&quot;,&quot;p.025&quot;, &quot;p.975&quot;))
-  cis[, model := 3]
-  cis[, subgroup := c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;)]
+dd</code></pre>
+<pre><code>##       id a b c rx theta      y grp
+##   1:   1 0 0 0  0     0  2.169   1
+##   2:   2 1 0 1  0     5  1.044   6
+##   3:   3 1 0 1  0     5 -3.383   6
+##   4:   4 0 0 0  0     0  3.342   1
+##   5:   5 1 1 0  0     2  1.709   5
+##  ---                              
+## 146: 146 1 0 0  1     2  4.046   2
+## 147: 147 1 0 0  0     2  1.565   2
+## 148: 148 1 1 1  0     5 -0.332   8
+## 149: 149 1 1 1  0     5  0.924   8
+## 150: 150 1 0 0  0     2  5.129   2</code></pre>
+<p>Here is a plot of the average outcome <span class="math inline">\(Y\)</span> for each of the subgroups with and without treatment. The treatment effect for a particular subgroup is the difference of the <span class="math inline">\(Y\)</span> values for each segment. Now, it appears that there is a treatment effect for the two subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, yet <span class="math inline">\(B\)</span> was not supposed to have any impact on the overall effect size, which is <span class="math inline">\(0\)</span>. Just in case this is at all confusing, this is due to the fact that these patients have characteristics <span class="math inline">\(A\)</span> and <span class="math inline">\(C\)</span>, which do influence the effect size. Indeed, if you compare the subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, it appears that the effect size could be the same, which is consistent with the fact that <span class="math inline">\(B\)</span> has no impact on effect size. This is definitely not the case when comparing <span class="math inline">\(C=0\)</span> and <span class="math inline">\(C=1\)</span>. I point this out, because when I report the estimated effect sizes from the models, I will be reporting the subgroup-specific effects shown here, rather than parameter estimates of <span class="math inline">\(\theta\)</span>.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="768" /></p>
+</div>
+<div id="subgroup-analysis-using-simple-linear-regression" class="section level3">
+<h3>Subgroup analysis using simple linear regression</h3>
+<p>Before jumping into the Bayes models, I am fitting seven simple linear regression models to estimate seven treatment effects, one for each of the six subgroups defined by the covariates <span class="math inline">\(A\)</span>, <span class="math inline">\(B\)</span>, and <span class="math inline">\(C\)</span>, plus an overall estimate.</p>
+<pre class="r"><code>df &lt;- data.frame(dd)
 
-  cis</code></pre>
-<pre><code>##     p.50   p.025 p.975 model subgroup
-## 1: 1.399  0.0441  2.75     3    a = 0
-## 2: 3.615  2.3016  4.93     3    a = 1
-## 3: 1.890  0.2887  3.49     3    b = 0
-## 4: 2.716  1.4461  3.99     3    b = 1
-## 5: 0.936 -0.4276  2.30     3    c = 0
-## 6: 4.457  3.3739  5.54     3    c = 1
-## 7: 2.374  1.3971  3.35     3  overall</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
+est_lm &lt;- function(dx) {
+  fit &lt;- lm(y ~ rx, data = dx)
+  c(coef(fit)[&quot;rx&quot;], confint(fit)[2,])
+}
+
+est_cis &lt;- function(sub_grp) {
+  mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;y&quot;, &quot;rx&quot;)], df[, c(sub_grp)]), est_lm) 
+  do.call(rbind, mean_pred)
+}
+
+ci_subgroups &lt;- do.call(rbind, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), est_cis))
+ci_overall &lt;- est_lm(dd)
+
+cis &lt;- data.table(
+  subgroup = c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;),
+  model = 3,
+  rbind(ci_subgroups, ci_overall)
+)
+
+setnames(cis, c(&quot;rx&quot;,&quot;2.5 %&quot;, &quot;97.5 %&quot;), c(&quot;p.50&quot;,&quot;p.025&quot;, &quot;p.975&quot;))</code></pre>
+<p>Inspecting the point estimates (denoted as <em>p.50</em> for the treatment effect for each subgroup (and the overall group), we see that they match pretty closely with the effect sizes depicted in the figure of the means by subgroup above. I compare these estimates to the Bayes estimates in a bit.</p>
+<pre class="r"><code>cis</code></pre>
+<pre><code>##    subgroup model  p.50   p.025 p.975
+## 1:    a = 0     3 1.610  0.3502  2.87
+## 2:    a = 1     3 2.803  1.9016  3.71
+## 3:    b = 0     3 2.327  1.3806  3.27
+## 4:    b = 1     3 2.269  1.1488  3.39
+## 5:    c = 0     3 0.845 -0.0647  1.75
+## 6:    c = 1     3 4.611  3.6611  5.56
+## 7:  overall     3 2.351  1.6132  3.09</code></pre>
+</div>
+<div id="two-possible-bayesian-models" class="section level3">
+<h3>Two possible Bayesian models</h3>
+<p>I am including two Bayesian models here, one that I am calling a <em>pooled</em> model and the other an <em>unpooled</em> model (though the second is not absolutely unpooled, just relatively unpooled). In both cases, the outcome model is described as</p>
+<p><span class="math display">\[
+y_{ij} \sim N\left(\alpha_j +\theta_{j}x_i, \ \sigma_0   \right)
+\]</span></p>
+<p>where <span class="math inline">\(y_{ij}\)</span> is the outcome measure for individual <span class="math inline">\(i\)</span> who has covariate/subgroup pattern <span class="math inline">\(j\)</span>. (These subgroup patterns were defined above in <code>R</code> code. For example group 1 is all cases where <span class="math inline">\(a=b=c=0\)</span> and group 5 is <span class="math inline">\(a=b=1, \ c=0\)</span>.) <span class="math inline">\(x_i\)</span> is a treatment indicator, <span class="math inline">\(x \in \{0,1\}\)</span>. <span class="math inline">\(\alpha_j\)</span> is the intercept for covariate pattern <span class="math inline">\(j\)</span> (representing the mean outcome for all patients with pattern <span class="math inline">\(j\)</span> randomized to control). <span class="math inline">\(\theta_j\)</span> represents the treatment effect for patients with pattern <span class="math inline">\(j\)</span>. <span class="math inline">\(\sigma_0\)</span> is the within treatment arm/covariate pattern standard deviation, and is assumed to be constant across arms and patterns.</p>
+<p>The treatment effect parameter <span class="math inline">\(\theta_j\)</span> can be further parameterized as function of a set of <span class="math inline">\(\tau\)</span>’s. (This parameterization was inspired by this <a href="https://journals.sagepub.com/doi/full/10.1177/1740774510396933" target="_blank"><em>Jones et al</em> paper</a>.) In this parameterization, the treatment effect is a function of the covariates <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span> as well as their interaction:</p>
+<span class="math display">\[\begin{aligned}
+  \theta_1 &amp;= \tau_0 \\
+  \theta_2 &amp;= \tau_0 + \tau_a \\
+  \theta_3 &amp;= \tau_0 + \tau_b \\
+  \theta_4 &amp;= \tau_0 + \tau_c \\
+  \theta_5 &amp;= \tau_0 + \tau_a + \tau_b + \tau_{ab} \\
+  \theta_6 &amp;= \tau_0 + \tau_a + \tau_c + \tau_{ac} \\
+  \theta_7 &amp;= \tau_0 + \tau_b + \tau_c + \tau_{bc} \\
+  \theta_8 &amp;= \tau_0 + \tau_a + \tau_b + \tau_c + \tau_{ab} + \tau_{ac} + \tau_{bc} + \tau_{abc}
+\end{aligned}\]</span>
+<div id="pooled-model" class="section level4">
+<h4>Pooled model</h4>
+<p>So far, the parameterization for the <em>pooled</em> and <em>unpooled</em> models are the same. And this is where the models diverge. The idea behind the <em>pooled</em> model is that the <em>main effects</em> of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span> (<span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span>, respectively) are drawn from the same distribution centered around <span class="math inline">\(\delta_m\)</span> with a standard deviation <span class="math inline">\(\sigma_m\)</span>, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects (<span class="math inline">\(\tau_{ab}\)</span>, <span class="math inline">\(\tau_{ac}\)</span> and <span class="math inline">\(\tau_{bc}\)</span>) are independent of the main effects, but they share a commone distribution to be estimated from the data. (In this case, the <span class="math inline">\(\alpha_j\)</span> intercepts are also pooled, but we could just as easily relax this, as we are not particuarly interested in these parameters.)</p>
+<span class="math display">\[\begin{aligned}
+  \alpha_j &amp;\sim N(\mu = \delta_\alpha, \sigma = \sigma_\alpha) \\
+  \tau_a, \tau_b, \tau_c &amp;\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
+  \tau_{ab}, \tau_{ac}, \tau_{bc} &amp;\sim N(\mu = \delta_x, \sigma = \sigma_x) \\
+\end{aligned}\]</span>
+<p>With the exception of <span class="math inline">\(\sigma_0\)</span> and <span class="math inline">\(\sigma_\alpha\)</span>, the prior distributions for the model parameters are quite conservative/pessimistic, centered pretty closely around 0. (It would certainly be wise to explore how these prior assumptions impact the findings, but since this is just an illustrative example, I won’t dwell too much on these particular assumptions).</p>
+<span class="math display">\[\begin{aligned}
+  \tau_0 &amp;\sim N(\mu=0, \sigma = 2) \\
+  \tau_{abc} &amp;\sim N(\mu = 0, \sigma = 2) \\
+  \delta_\alpha  &amp;\sim N(\mu = 0, \sigma = 2) \\
+  \delta_m  &amp;\sim N(\mu = 0, \sigma = 2) \\
+  \delta_x  &amp;\sim N(\mu = 0, \sigma = 2) \\
+  \sigma_0 &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
+  \sigma_\alpha &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_\alpha \ge 0 \\
+  \sigma_m  &amp;\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_m \ge 0 \\
+  \sigma_x  &amp;\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_x \ge 0 \\
+\end{aligned}\]</span>
+</div>
+<div id="unpooled-model" class="section level4">
+<h4>Unpooled model</h4>
+<p>In the unpooled model, the <span class="math inline">\(\tau\)</span>’s (and <span class="math inline">\(\alpha\)</span>’s) are not jointly parameterized with a common mean, and prior distributions are more diffuse. The only variance estimation is for <span class="math inline">\(\sigma_0\)</span>:</p>
+<span class="math display">\[\begin{aligned}
+  \alpha_j &amp;\sim N(\mu=0, \sigma = 10), \ \ \ j \in \{1,\dots,8\} \\
+  \tau_0 &amp;\sim N(\mu=0, \sigma = 10) \\
+  \tau_m &amp;\sim N(\mu=0, \sigma = 10), \ \ \ m \in \{a, b, c\} \\
+  \tau_x &amp;\sim N(\mu=0, \sigma = 10), \ \ \ x \in \{ab, ac, bc\} \\
+  \tau_{abc} &amp;\sim N(\mu = 0, \sigma = 10) \\
+  \sigma_0 &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
+\end{aligned}\]</span>
+</div>
+</div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
 <pre class="r"><code>model_pool &lt;- cmdstan_model(&quot;code/pooled_subgroup.stan&quot;)
 model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code></pre>
-<pre class="r"><code>fit &lt;- model_pool$sample(
-    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y]),
+<pre class="r"><code>fit_pool &lt;- model_pool$sample(
+    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y=dd[,y]),
     refresh = 0,
     chains = 4L,
     parallel_chains = 4L,
@@ -95,19 +174,43 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 1 finished in 1.9 seconds.
-## Chain 2 finished in 1.8 seconds.
-## Chain 4 finished in 2.2 seconds.
-## Chain 3 finished in 2.6 seconds.
+## Chain 3 finished in 2.8 seconds.
+## Chain 1 finished in 2.8 seconds.
+## Chain 4 finished in 3.0 seconds.
+## Chain 2 finished in 3.1 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 2.1 seconds.
-## Total execution time: 2.8 seconds.</code></pre>
-<pre class="r"><code>r &lt;- as_draws_rvars(fit$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
+## Mean chain execution time: 2.9 seconds.
+## Total execution time: 3.2 seconds.</code></pre>
+<pre class="r"><code>fit_unpool &lt;- model_unpool$sample(
+    data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y=dd[,y], prior_sigma=10),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.99,
+    max_treedepth = 20
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 3 finished in 2.0 seconds.
+## Chain 4 finished in 2.0 seconds.
+## Chain 1 finished in 2.2 seconds.
+## Chain 2 finished in 2.9 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 2.3 seconds.
+## Total execution time: 3.1 seconds.</code></pre>
+</div>
+<div id="extracting-data" class="section level3">
+<h3>Extracting data</h3>
+<pre class="r"><code>r &lt;- as_draws_rvars(fit_pool$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
     
 est_effects &lt;- function(sub_grp) {
   mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;rx&quot;,&quot;pred&quot;)], df[, c(sub_grp, &quot;rx&quot;)]), 
-                      function(x) rvar_mean(x$pred) )
+    function(x) rvar_mean(x$pred)
+  )
   c(mean_pred[[&quot;0.1&quot;]] - mean_pred[[&quot;0.0&quot;]], mean_pred[[&quot;1.1&quot;]] - mean_pred[[&quot;1.0&quot;]])
 }
     
@@ -118,7 +221,7 @@ df$alpha_hat &lt;- r$alpha[dd$grp]
 df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)
     
 df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
-effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_effects(x)))
+effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), est_effects))
     
 mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred) )
 overall &lt;- mean_pred[[&quot;1&quot;]] - mean_pred[[&quot;0&quot;]]
@@ -129,20 +232,14 @@ sumstats_pooled &lt;- data.table(
   subgroup = c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;),
   model = 1,
   p.025 = quantile(effects, 0.025),
-#  p.25 = quantile(effects, 0.25),
   p.50 = quantile(effects, 0.50),
-#  p.75 = quantile(effects, 0.75),
   p.975 = quantile(effects, 0.975)
 )</code></pre>
-<pre><code>## Running MCMC with 4 parallel chains...
-## 
-## Chain 3 finished in 1.4 seconds.
-## Chain 2 finished in 1.6 seconds.
-## Chain 1 finished in 1.8 seconds.
-## Chain 4 finished in 2.1 seconds.
-## 
-## All 4 chains finished successfully.
-## Mean chain execution time: 1.7 seconds.
-## Total execution time: 2.2 seconds.</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p>
+<p><small><font color="darkkhaki"></p>
+<p>Reference:</p>
+<p>Jones, Hayley E., David I. Ohlssen, Beat Neuenschwander, Amy Racine, and Michael Branson. “Bayesian models for subgroup analysis in clinical trials.” Clinical Trials 8, no. 2 (2011): 129-143.</p>
+</font></small>
+</p>
 </div>
