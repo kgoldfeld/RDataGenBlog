@@ -39,7 +39,7 @@ drx &lt;- defDataAdd(varname = &quot;theta&quot;, formula = &quot;0 + 2*a  + 4*c
 drx &lt;- defDataAdd(drx, varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 4,
   dist = &quot;normal&quot;)</code></pre>
 <p>In the data generation process, I am assigning group identifiers based on the covariates that will be relevant for the Bayes model (described further below).</p>
-<pre class="r"><code>set.seed(38715)
+<pre class="r"><code>set.seed(3871598)
 
 dd &lt;- genData(150, d)
 dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
@@ -55,18 +55,18 @@ dd[a==0 &amp; b==1 &amp; c==1, grp := 7]
 dd[a==1 &amp; b==1 &amp; c==1, grp := 8]
 
 dd</code></pre>
-<pre><code>##       id a b c rx theta      y grp
-##   1:   1 0 0 0  0     0  2.169   1
-##   2:   2 1 0 1  0     5  1.044   6
-##   3:   3 1 0 1  0     5 -3.383   6
-##   4:   4 0 0 0  0     0  3.342   1
-##   5:   5 1 1 0  0     2  1.709   5
-##  ---                              
-## 146: 146 1 0 0  1     2  4.046   2
-## 147: 147 1 0 0  0     2  1.565   2
-## 148: 148 1 1 1  0     5 -0.332   8
-## 149: 149 1 1 1  0     5  0.924   8
-## 150: 150 1 0 0  0     2  5.129   2</code></pre>
+<pre><code>##       id a b c rx theta     y grp
+##   1:   1 1 0 1  0     5  0.14   6
+##   2:   2 1 1 0  0     2  1.57   5
+##   3:   3 0 0 0  0     0  0.36   1
+##   4:   4 1 1 0  1     2  1.39   5
+##   5:   5 1 1 1  0     5 -2.97   8
+##  ---                             
+## 146: 146 1 1 0  1     2  3.34   5
+## 147: 147 0 0 1  0     4  1.55   4
+## 148: 148 1 0 0  0     2  2.94   2
+## 149: 149 1 1 1  1     5  4.61   8
+## 150: 150 0 1 1  1     4  4.38   7</code></pre>
 <p>Here is a plot of the average outcome <span class="math inline">\(Y\)</span> for each of the subgroups with and without treatment. The treatment effect for a particular subgroup is the difference of the <span class="math inline">\(Y\)</span> values for each segment. Now, it appears that there is a treatment effect for the two subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, yet <span class="math inline">\(B\)</span> was not supposed to have any impact on the overall effect size, which is <span class="math inline">\(0\)</span>. Just in case this is at all confusing, this is due to the fact that these patients have characteristics <span class="math inline">\(A\)</span> and <span class="math inline">\(C\)</span>, which do influence the effect size. Indeed, if you compare the subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, it appears that the effect size could be the same, which is consistent with the fact that <span class="math inline">\(B\)</span> has no impact on effect size. This is definitely not the case when comparing <span class="math inline">\(C=0\)</span> and <span class="math inline">\(C=1\)</span>. I point this out, because when I report the estimated effect sizes from the models, I will be reporting the subgroup-specific effects shown here, rather than parameter estimates of <span class="math inline">\(\theta\)</span>.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="768" /></p>
 </div>
@@ -97,14 +97,14 @@ cis &lt;- data.table(
 setnames(cis, c(&quot;rx&quot;,&quot;2.5 %&quot;, &quot;97.5 %&quot;), c(&quot;p.50&quot;,&quot;p.025&quot;, &quot;p.975&quot;))</code></pre>
 <p>Inspecting the point estimates (denoted as <em>p.50</em> for the treatment effect for each subgroup (and the overall group), we see that they match pretty closely with the effect sizes depicted in the figure of the means by subgroup above. I compare these estimates to the Bayes estimates in a bit.</p>
 <pre class="r"><code>cis</code></pre>
-<pre><code>##    subgroup model  p.50   p.025 p.975
-## 1:    a = 0     3 1.610  0.3502  2.87
-## 2:    a = 1     3 2.803  1.9016  3.71
-## 3:    b = 0     3 2.327  1.3806  3.27
-## 4:    b = 1     3 2.269  1.1488  3.39
-## 5:    c = 0     3 0.845 -0.0647  1.75
-## 6:    c = 1     3 4.611  3.6611  5.56
-## 7:  overall     3 2.351  1.6132  3.09</code></pre>
+<pre><code>##    subgroup model p.50 p.025 p.975
+## 1:    a = 0     3  2.4   1.2   3.6
+## 2:    a = 1     3  3.0   2.1   3.9
+## 3:    b = 0     3  2.8   1.8   3.7
+## 4:    b = 1     3  2.6   1.5   3.8
+## 5:    c = 0     3  1.9   1.0   2.7
+## 6:    c = 1     3  4.5   3.4   5.6
+## 7:  overall     3  2.8   2.0   3.5</code></pre>
 </div>
 <div id="two-possible-bayesian-models" class="section level3">
 <h3>Two possible Bayesian models</h3>
@@ -126,7 +126,7 @@ y_{ij} \sim N\left(\alpha_j +\theta_{j}x_i, \ \sigma_0   \right)
 \end{aligned}\]</span>
 <div id="pooled-model" class="section level4">
 <h4>Pooled model</h4>
-<p>So far, the parameterization for the <em>pooled</em> and <em>unpooled</em> models are the same. And this is where the models diverge. The idea behind the <em>pooled</em> model is that the <em>main effects</em> of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span> (<span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span>, respectively) are drawn from the same distribution centered around <span class="math inline">\(\delta_m\)</span> with a standard deviation <span class="math inline">\(\sigma_m\)</span>, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects (<span class="math inline">\(\tau_{ab}\)</span>, <span class="math inline">\(\tau_{ac}\)</span> and <span class="math inline">\(\tau_{bc}\)</span>) are independent of the main effects, but they share a commone distribution to be estimated from the data. (In this case, the <span class="math inline">\(\alpha_j\)</span> intercepts are also pooled, but we could just as easily relax this, as we are not particuarly interested in these parameters.)</p>
+<p>So far, the parameterization for the <em>pooled</em> and <em>unpooled</em> models are the same. And this is where the models diverge. The idea behind the <em>pooled</em> model is that the <em>main effects</em> of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span> (<span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span>, respectively) are drawn from the same distribution centered around <span class="math inline">\(\delta_m\)</span> with a standard deviation <span class="math inline">\(\sigma_m\)</span>, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects (<span class="math inline">\(\tau_{ab}\)</span>, <span class="math inline">\(\tau_{ac}\)</span> and <span class="math inline">\(\tau_{bc}\)</span>) are independent of the main effects, but they share a common distribution to be estimated from the data. (In this case, the <span class="math inline">\(\alpha_j\)</span> intercepts are also pooled, but we could just as easily relax this, as we are not particularly interested in these parameters.)</p>
 <span class="math display">\[\begin{aligned}
   \alpha_j &amp;\sim N(\mu = \delta_\alpha, \sigma = \sigma_\alpha) \\
   \tau_a, \tau_b, \tau_c &amp;\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
@@ -160,6 +160,7 @@ y_{ij} \sim N\left(\alpha_j +\theta_{j}x_i, \ \sigma_0   \right)
 </div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
+<p>I’m using <code>cmdstanr</code> to estimate the models in <code>Stan</code>. (The Stan code is available if any anyone is interested, or you can try to write it yourself.) For each model, I am sampling in 4 chains of length 2500 following 500 warm-up steps. I’ll skip the required diagnostics here (e.g. trace plots) for brevity, but I did check everything, and things looked OK.</p>
 <pre class="r"><code>model_pool &lt;- cmdstan_model(&quot;code/pooled_subgroup.stan&quot;)
 model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code></pre>
 <pre class="r"><code>fit_pool &lt;- model_pool$sample(
@@ -174,14 +175,14 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 3 finished in 2.8 seconds.
-## Chain 1 finished in 2.8 seconds.
-## Chain 4 finished in 3.0 seconds.
-## Chain 2 finished in 3.1 seconds.
+## Chain 4 finished in 2.0 seconds.
+## Chain 1 finished in 2.5 seconds.
+## Chain 3 finished in 3.1 seconds.
+## Chain 2 finished in 3.9 seconds.
 ## 
 ## All 4 chains finished successfully.
 ## Mean chain execution time: 2.9 seconds.
-## Total execution time: 3.2 seconds.</code></pre>
+## Total execution time: 4.1 seconds.</code></pre>
 <pre class="r"><code>fit_unpool &lt;- model_unpool$sample(
     data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y=dd[,y], prior_sigma=10),
     refresh = 0,
@@ -194,36 +195,83 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 3 finished in 2.0 seconds.
-## Chain 4 finished in 2.0 seconds.
-## Chain 1 finished in 2.2 seconds.
-## Chain 2 finished in 2.9 seconds.
+## Chain 1 finished in 2.0 seconds.
+## Chain 3 finished in 2.1 seconds.
+## Chain 4 finished in 2.1 seconds.
+## Chain 2 finished in 2.7 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 2.3 seconds.
-## Total execution time: 3.1 seconds.</code></pre>
+## Mean chain execution time: 2.2 seconds.
+## Total execution time: 2.9 seconds.</code></pre>
 </div>
 <div id="extracting-data" class="section level3">
 <h3>Extracting data</h3>
+<p>In this case, I am actually not directly interested in the effect parameters <span class="math inline">\(\theta_j\)</span>, but actually in the estimated treatment effects for the six subgroups defined by <span class="math inline">\(a=0\)</span>, <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=0\)</span>, <span class="math inline">\(b=1\)</span>, <span class="math inline">\(c=0\)</span>, and <span class="math inline">\(c=1\)</span>. (These groups are not distinct from one another, as each individual has measures for each of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>.) I will step through the process of how I get these estimates, and then will plot a summary of the estimates.</p>
+<p>First, I extract the key parameter estimates into an <code>rvars</code> data structure, which I discussed recently in a couple of posts (<a href="https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/" target="_blank">here</a> and <a href="https://www.rdatagen.net/post/2021-08-17-quick-follow-up-on-posterior-probability-checks-with-rvars/" target="_blank">here</a>). Although the object <code>r</code> below looks like a list of 3 items with just a handful of values, there is actually an entire data set supporting each value that contains 10,000 samples from the posterior distribution. What we are seeing are the mean and standard deviation of those distributions.</p>
 <pre class="r"><code>r &lt;- as_draws_rvars(fit_pool$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
+r</code></pre>
+<pre><code>## # A draws_rvars: 2500 iterations, 4 chains, and 3 variables
+## $alpha: rvar&lt;2500,4&gt;[8] mean ± sd:
+## [1] -0.81 ± 0.51   0.17 ± 0.38  -0.53 ± 0.59  -0.29 ± 0.49   0.26 ± 0.56 
+## [6]  0.24 ± 0.42   0.48 ± 0.65  -0.11 ± 0.47 
+## 
+## $theta: rvar&lt;2500,4&gt;[8] mean ± sd:
+## [1] 0.8 ± 0.66  2.4 ± 0.52  1.7 ± 0.79  3.7 ± 0.72  2.4 ± 0.72  5.0 ± 0.68 
+## [7] 4.3 ± 0.88  4.4 ± 0.84 
+## 
+## $sigma: rvar&lt;2500,4&gt;[1] mean ± sd:
+## [1] 1.9 ± 0.12</code></pre>
+<p>A cool feature of the <code>rvars</code> data structure (which is part of the package <code>posterior</code>) is that they can be stored in a data.frame, and easily manipulated. Here I am matching the <span class="math inline">\(\theta_j\)</span> to each individual depending on their covariate pattern <span class="math inline">\(j\)</span>. The plan is to generate simulated data for each individual based on the estimated means and standard deviations.</p>
+<pre class="r"><code>df &lt;- as.data.frame(dd)
     
-est_effects &lt;- function(sub_grp) {
+df$theta_hat &lt;- r$theta[dd$grp]
+df$alpha_hat &lt;- r$alpha[dd$grp]
+df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)</code></pre>
+<p>Here are the first ten rows (out of the 150 individual records):</p>
+<pre class="r"><code>head(df, 10)</code></pre>
+<pre><code>##    id a b c rx theta     y grp  theta_hat    alpha_hat       mu_hat
+## 1   1 1 0 1  0     5  0.14   6 5.0 ± 0.68  0.24 ± 0.42  0.24 ± 0.42
+## 2   2 1 1 0  0     2  1.57   5 2.4 ± 0.72  0.26 ± 0.56  0.26 ± 0.56
+## 3   3 0 0 0  0     0  0.36   1 0.8 ± 0.66 -0.81 ± 0.51 -0.81 ± 0.51
+## 4   4 1 1 0  1     2  1.39   5 2.4 ± 0.72  0.26 ± 0.56  2.65 ± 0.51
+## 5   5 1 1 1  0     5 -2.97   8 4.4 ± 0.84 -0.11 ± 0.47 -0.11 ± 0.47
+## 6   6 1 1 1  0     5 -0.73   8 4.4 ± 0.84 -0.11 ± 0.47 -0.11 ± 0.47
+## 7   7 1 1 0  0     2  2.73   5 2.4 ± 0.72  0.26 ± 0.56  0.26 ± 0.56
+## 8   8 1 1 0  1     2 -0.16   5 2.4 ± 0.72  0.26 ± 0.56  2.65 ± 0.51
+## 9   9 0 0 1  1     4  2.42   4 3.7 ± 0.72 -0.29 ± 0.49  3.44 ± 0.59
+## 10 10 1 0 0  1     2  4.53   2 2.4 ± 0.52  0.17 ± 0.38  2.54 ± 0.43</code></pre>
+<p>We can add a column of predicted “values” to the data frame.</p>
+<pre class="r"><code>df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
+head(df[,c(&quot;id&quot;, &quot;grp&quot;, &quot;mu_hat&quot;, &quot;pred&quot;)], 10)</code></pre>
+<pre><code>##    id grp       mu_hat       pred
+## 1   1   6  0.24 ± 0.42  0.216 ± 2
+## 2   2   5  0.26 ± 0.56  0.261 ± 2
+## 3   3   1 -0.81 ± 0.51 -0.807 ± 2
+## 4   4   5  2.65 ± 0.51  2.644 ± 2
+## 5   5   8 -0.11 ± 0.47 -0.092 ± 2
+## 6   6   8 -0.11 ± 0.47 -0.071 ± 2
+## 7   7   5  0.26 ± 0.56  0.294 ± 2
+## 8   8   5  2.65 ± 0.51  2.622 ± 2
+## 9   9   4  3.44 ± 0.59  3.398 ± 2
+## 10 10   2  2.54 ± 0.43  2.528 ± 2</code></pre>
+<p>But note that we don’t just have a single value for each of the 150 individuals, but 10,000 samples for each of the 150 individuals (for a total 1.5 million predicted values.) Here is a little bit of evidence that this is the case, as you can see that this is an <code>rvar</code> of dimension <span class="math inline">\(2500 \text{ samples} \times 4 \text{ chains}\)</span>, or <span class="math inline">\(10,000\)</span> predicted values:</p>
+<pre class="r"><code>df[9, &quot;pred&quot;]</code></pre>
+<pre><code>## rvar&lt;2500,4&gt;[1] mean ± sd:
+## [1] 3.4 ± 2</code></pre>
+<p>Finally, we are ready to get estimates of the within-subgroup effect sizes. I’ve written a little function to help out here. For each covariate <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>, the function splits the data set into four subsets. So, for covariate <span class="math inline">\(a\)</span> we have <span class="math inline">\([a=0 \ \&amp; \ rx=0]\)</span>, <span class="math inline">\([a=0 \ \&amp; \ rx=1]\)</span>, <span class="math inline">\([a=1 \ \&amp; \ rx=0]\)</span>, and <span class="math inline">\(a=1 \ \&amp; \ rx=1]\)</span>. For each of those subsets, we get a distribution of mean predicted values by averaging across the distribution of individual predicted values. So, the variable <code>effects</code> contains the distribution of effects for the six subgroups (<span class="math inline">\(a=0\)</span>, <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=0\)</span>, <span class="math inline">\(b=1\)</span>, <span class="math inline">\(c=0\)</span>, and <span class="math inline">\(c=1\)</span>):</p>
+<pre class="r"><code>est_effects &lt;- function(sub_grp) {
   mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;rx&quot;,&quot;pred&quot;)], df[, c(sub_grp, &quot;rx&quot;)]), 
     function(x) rvar_mean(x$pred)
   )
   c(mean_pred[[&quot;0.1&quot;]] - mean_pred[[&quot;0.0&quot;]], mean_pred[[&quot;1.1&quot;]] - mean_pred[[&quot;1.0&quot;]])
 }
-    
-df &lt;- as.data.frame(dd)
-    
-df$theta_hat &lt;- r$theta[dd$grp]
-df$alpha_hat &lt;- r$alpha[dd$grp]
-df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)
-    
-df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
+
 effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), est_effects))
-    
-mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred) )
+effects</code></pre>
+<pre><code>## rvar&lt;2500,4&gt;[6] mean ± sd:
+## [1] 2.0 ± 0.67  3.2 ± 0.55  2.6 ± 0.51  3.0 ± 0.75  1.9 ± 0.57  4.3 ± 0.67</code></pre>
+<p>We can also get the distribution of the overall (marginal) treatment effect by sub-setting by <span class="math inline">\(rx\)</span> only. The last step is to create a summary table for the <em>pooled</em> model. Remember, the <code>effects</code> table is really a table of distributions, and we can extract summary statistics from those distributions for reporting or plotting. Here, we are extracting the <span class="math inline">\(2.5\%\)</span>, <span class="math inline">\(50\%\)</span>, and <span class="math inline">\(97.5\%\)</span> quantiles to show the median and a <span class="math inline">\(95\%\)</span> interval.</p>
+<pre class="r"><code>mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred))
 overall &lt;- mean_pred[[&quot;1&quot;]] - mean_pred[[&quot;0&quot;]]
     
 effects &lt;- c(effects, overall)
@@ -235,7 +283,14 @@ sumstats_pooled &lt;- data.table(
   p.50 = quantile(effects, 0.50),
   p.975 = quantile(effects, 0.975)
 )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+</div>
+<div id="comparing-model-estimates" class="section level3">
+<h3>Comparing model estimates</h3>
+<p>Now to take a look at the distribution of effect sizes based on the different models. (I didn’t show it, but I also created a table called <code>sumstats_unpooled</code> using the same process I just walked you through.) Below is a plot of the effect estimates for each of the subgroups as well as the overall (marginal) effect estimates. The <code>lm</code> plot shows the point estimate with a <span class="math inline">\(95\%\)</span> confidence interval. The other two plots show the medians of the posterior distributions for the subgroup effects along with <span class="math inline">\(95\%\)</span> intervals.</p>
+<p>Two important things to see in the plot, which will be very important when I write next time about “Type 1” errors, are the relative length of the intervals and the apparent shrinkage of some of the estimates. In all the cases, the length of the interval for the standard linear regression model is smaller than the two Bayesian models, reflecting less uncertainty. The <em>pooled</em> model also appears to have slightly less uncertainty compared to the <em>unpooled</em> model.</p>
+<p>The second point is that the point estimates for the linear regression model and the median estimates for the <em>unpooled</em> model are quite close, while the <em>pooled</em> medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the <span class="math inline">\(\tau\)</span>’s) that are shifting things around. It appears that the effects of the subgroups <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=1\)</span>, and <span class="math inline">\(c=1\)</span> are being pulled towards each other, and maybe the same can be said for the group defined by <span class="math inline">\(a=0\)</span>, <span class="math inline">\(b=0\)</span>, and <span class="math inline">\(c=0\)</span>.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p>If we were using the <em>pooled</em> model to draw conclusions, I would say that it appears that subgroups defined by <span class="math inline">\(c\)</span> seem to have heterogeneous treatment effects, though I would probably want to have more data to confirm, as the intervals are still quite wide. If we use the results from the linear regression model, we might want to proceed with caution, because the intervals are likely too narrow, we have not adjusted for multiple testing. We will see this next time when I look at a case where there are no underlying treatment effects in the data generation process.</p>
 <p>
 <p><small><font color="darkkhaki"></p>
 <p>Reference:</p>
