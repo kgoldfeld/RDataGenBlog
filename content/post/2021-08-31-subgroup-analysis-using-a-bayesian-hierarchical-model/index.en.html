@@ -126,21 +126,19 @@ y_{ij} \sim N\left(\alpha_j +\theta_{j}x_i, \ \sigma_0   \right)
 \end{aligned}\]</span>
 <div id="pooled-model" class="section level4">
 <h4>Pooled model</h4>
-<p>So far, the parameterization for the <em>pooled</em> and <em>unpooled</em> models are the same. And this is where the models diverge. The idea behind the <em>pooled</em> model is that the <em>main effects</em> of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span> (<span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span>, respectively) are drawn from the same distribution centered around <span class="math inline">\(\delta_m\)</span> with a standard deviation <span class="math inline">\(\sigma_m\)</span>, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects (<span class="math inline">\(\tau_{ab}\)</span>, <span class="math inline">\(\tau_{ac}\)</span> and <span class="math inline">\(\tau_{bc}\)</span>) are independent of the main effects, but they share a common distribution to be estimated from the data. (In this case, the <span class="math inline">\(\alpha_j\)</span> intercepts are also pooled, but we could just as easily relax this, as we are not particularly interested in these parameters.)</p>
+<p>So far, the parameterization for the <em>pooled</em> and <em>unpooled</em> models are the same. And this is where the models diverge. The idea behind the <em>pooled</em> model is that the <em>main effects</em> of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span> (<span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span>, respectively) are drawn from the same distribution centered around <span class="math inline">\(\delta_m\)</span> with a standard deviation <span class="math inline">\(\sigma_m\)</span>, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects (<span class="math inline">\(\tau_{ab}\)</span>, <span class="math inline">\(\tau_{ac}\)</span> and <span class="math inline">\(\tau_{bc}\)</span>) are independent of the main effects, but they share a common distribution to be estimated from the data. (In this case we have only a single three-way interaction term <span class="math inline">\(\tau_{abc}\)</span>, but if we had 4 covariates rather than 3, we would have 4 three-way interaction terms, which could all share the same prior distribution. At some point, it might be reasonable to exclude higher order interactions, such as four- or five-way interactions.)</p>
 <span class="math display">\[\begin{aligned}
-  \alpha_j &amp;\sim N(\mu = \delta_\alpha, \sigma = \sigma_\alpha) \\
   \tau_a, \tau_b, \tau_c &amp;\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
   \tau_{ab}, \tau_{ac}, \tau_{bc} &amp;\sim N(\mu = \delta_x, \sigma = \sigma_x) \\
 \end{aligned}\]</span>
-<p>With the exception of <span class="math inline">\(\sigma_0\)</span> and <span class="math inline">\(\sigma_\alpha\)</span>, the prior distributions for the model parameters are quite conservative/pessimistic, centered pretty closely around 0. (It would certainly be wise to explore how these prior assumptions impact the findings, but since this is just an illustrative example, I won’t dwell too much on these particular assumptions).</p>
+<p>With the exception of <span class="math inline">\(\alpha_j\)</span> and <span class="math inline">\(\sigma_0\)</span>, the prior distributions for the model parameters are quite conservative/pessimistic, centered pretty closely around 0. (It would certainly be wise to explore how these prior assumptions impact the findings, but since this is just an illustrative example, I won’t dwell too much on these particular assumptions).</p>
 <span class="math display">\[\begin{aligned}
+  \alpha_j &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ j \in \{1,\dots,8\}  \\
   \tau_0 &amp;\sim N(\mu=0, \sigma = 2) \\
   \tau_{abc} &amp;\sim N(\mu = 0, \sigma = 2) \\
-  \delta_\alpha  &amp;\sim N(\mu = 0, \sigma = 2) \\
   \delta_m  &amp;\sim N(\mu = 0, \sigma = 2) \\
   \delta_x  &amp;\sim N(\mu = 0, \sigma = 2) \\
   \sigma_0 &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
-  \sigma_\alpha &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_\alpha \ge 0 \\
   \sigma_m  &amp;\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_m \ge 0 \\
   \sigma_x  &amp;\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_x \ge 0 \\
 \end{aligned}\]</span>
@@ -151,8 +149,8 @@ y_{ij} \sim N\left(\alpha_j +\theta_{j}x_i, \ \sigma_0   \right)
 <span class="math display">\[\begin{aligned}
   \alpha_j &amp;\sim N(\mu=0, \sigma = 10), \ \ \ j \in \{1,\dots,8\} \\
   \tau_0 &amp;\sim N(\mu=0, \sigma = 10) \\
-  \tau_m &amp;\sim N(\mu=0, \sigma = 10), \ \ \ m \in \{a, b, c\} \\
-  \tau_x &amp;\sim N(\mu=0, \sigma = 10), \ \ \ x \in \{ab, ac, bc\} \\
+  \tau_q &amp;\sim N(\mu=0, \sigma = 10), \ \ \ q \in \{a, b, c\} \\
+  \tau_{qq} &amp;\sim N(\mu=0, \sigma = 10), \ \ \ qq \in \{ab, ac, bc\} \\
   \tau_{abc} &amp;\sim N(\mu = 0, \sigma = 10) \\
   \sigma_0 &amp;\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
 \end{aligned}\]</span>
@@ -171,18 +169,19 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
     iter_warmup = 500,
     iter_sampling = 2500,
     adapt_delta = 0.99,
-    max_treedepth = 20
+    max_treedepth = 20,
+    seed = 898171
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 4 finished in 2.0 seconds.
-## Chain 1 finished in 2.5 seconds.
-## Chain 3 finished in 3.1 seconds.
-## Chain 2 finished in 3.9 seconds.
+## Chain 4 finished in 1.4 seconds.
+## Chain 1 finished in 2.1 seconds.
+## Chain 2 finished in 2.0 seconds.
+## Chain 3 finished in 2.4 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 2.9 seconds.
-## Total execution time: 4.1 seconds.</code></pre>
+## Mean chain execution time: 2.0 seconds.
+## Total execution time: 2.5 seconds.</code></pre>
 <pre class="r"><code>fit_unpool &lt;- model_unpool$sample(
     data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y=dd[,y], prior_sigma=10),
     refresh = 0,
@@ -191,33 +190,34 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
     iter_warmup = 500,
     iter_sampling = 2500,
     adapt_delta = 0.99,
-    max_treedepth = 20
+    max_treedepth = 20,
+    seed = 18717
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 1 finished in 2.0 seconds.
-## Chain 3 finished in 2.1 seconds.
-## Chain 4 finished in 2.1 seconds.
-## Chain 2 finished in 2.7 seconds.
+## Chain 2 finished in 1.7 seconds.
+## Chain 1 finished in 1.7 seconds.
+## Chain 3 finished in 1.9 seconds.
+## Chain 4 finished in 1.8 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 2.2 seconds.
-## Total execution time: 2.9 seconds.</code></pre>
+## Mean chain execution time: 1.8 seconds.
+## Total execution time: 2.0 seconds.</code></pre>
 </div>
-<div id="extracting-data" class="section level3">
-<h3>Extracting data</h3>
+<div id="extracting-posterior-probabilities" class="section level3">
+<h3>Extracting posterior probabilities</h3>
 <p>In this case, I am actually not directly interested in the effect parameters <span class="math inline">\(\theta_j\)</span>, but actually in the estimated treatment effects for the six subgroups defined by <span class="math inline">\(a=0\)</span>, <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=0\)</span>, <span class="math inline">\(b=1\)</span>, <span class="math inline">\(c=0\)</span>, and <span class="math inline">\(c=1\)</span>. (These groups are not distinct from one another, as each individual has measures for each of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>.) I will step through the process of how I get these estimates, and then will plot a summary of the estimates.</p>
 <p>First, I extract the key parameter estimates into an <code>rvars</code> data structure, which I discussed recently in a couple of posts (<a href="https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/" target="_blank">here</a> and <a href="https://www.rdatagen.net/post/2021-08-17-quick-follow-up-on-posterior-probability-checks-with-rvars/" target="_blank">here</a>). Although the object <code>r</code> below looks like a list of 3 items with just a handful of values, there is actually an entire data set supporting each value that contains 10,000 samples from the posterior distribution. What we are seeing are the mean and standard deviation of those distributions.</p>
 <pre class="r"><code>r &lt;- as_draws_rvars(fit_pool$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
 r</code></pre>
 <pre><code>## # A draws_rvars: 2500 iterations, 4 chains, and 3 variables
 ## $alpha: rvar&lt;2500,4&gt;[8] mean ± sd:
-## [1] -0.81 ± 0.51   0.17 ± 0.38  -0.53 ± 0.59  -0.29 ± 0.49   0.26 ± 0.56 
-## [6]  0.24 ± 0.42   0.48 ± 0.65  -0.11 ± 0.47 
+## [1] -1.365 ± 0.48   0.290 ± 0.43  -1.076 ± 0.81  -0.478 ± 0.62   0.704 ± 0.76 
+## [6]  0.465 ± 0.47   1.288 ± 0.84  -0.081 ± 0.62 
 ## 
 ## $theta: rvar&lt;2500,4&gt;[8] mean ± sd:
-## [1] 0.8 ± 0.66  2.4 ± 0.52  1.7 ± 0.79  3.7 ± 0.72  2.4 ± 0.72  5.0 ± 0.68 
-## [7] 4.3 ± 0.88  4.4 ± 0.84 
+## [1] 1.3 ± 0.63  2.3 ± 0.56  1.9 ± 0.85  3.9 ± 0.80  2.0 ± 0.85  4.8 ± 0.71 
+## [7] 4.2 ± 0.92  4.3 ± 0.92 
 ## 
 ## $sigma: rvar&lt;2500,4&gt;[1] mean ± sd:
 ## [1] 1.9 ± 0.12</code></pre>
@@ -229,31 +229,31 @@ df$alpha_hat &lt;- r$alpha[dd$grp]
 df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)</code></pre>
 <p>Here are the first ten rows (out of the 150 individual records):</p>
 <pre class="r"><code>head(df, 10)</code></pre>
-<pre><code>##    id a b c rx theta     y grp  theta_hat    alpha_hat       mu_hat
-## 1   1 1 0 1  0     5  0.14   6 5.0 ± 0.68  0.24 ± 0.42  0.24 ± 0.42
-## 2   2 1 1 0  0     2  1.57   5 2.4 ± 0.72  0.26 ± 0.56  0.26 ± 0.56
-## 3   3 0 0 0  0     0  0.36   1 0.8 ± 0.66 -0.81 ± 0.51 -0.81 ± 0.51
-## 4   4 1 1 0  1     2  1.39   5 2.4 ± 0.72  0.26 ± 0.56  2.65 ± 0.51
-## 5   5 1 1 1  0     5 -2.97   8 4.4 ± 0.84 -0.11 ± 0.47 -0.11 ± 0.47
-## 6   6 1 1 1  0     5 -0.73   8 4.4 ± 0.84 -0.11 ± 0.47 -0.11 ± 0.47
-## 7   7 1 1 0  0     2  2.73   5 2.4 ± 0.72  0.26 ± 0.56  0.26 ± 0.56
-## 8   8 1 1 0  1     2 -0.16   5 2.4 ± 0.72  0.26 ± 0.56  2.65 ± 0.51
-## 9   9 0 0 1  1     4  2.42   4 3.7 ± 0.72 -0.29 ± 0.49  3.44 ± 0.59
-## 10 10 1 0 0  1     2  4.53   2 2.4 ± 0.52  0.17 ± 0.38  2.54 ± 0.43</code></pre>
+<pre><code>##    id a b c rx theta     y grp  theta_hat     alpha_hat        mu_hat
+## 1   1 1 0 1  0     5  0.14   6 4.8 ± 0.71  0.465 ± 0.47  0.465 ± 0.47
+## 2   2 1 1 0  0     2  1.57   5 2.0 ± 0.85  0.704 ± 0.76  0.704 ± 0.76
+## 3   3 0 0 0  0     0  0.36   1 1.3 ± 0.63 -1.365 ± 0.48 -1.365 ± 0.48
+## 4   4 1 1 0  1     2  1.39   5 2.0 ± 0.85  0.704 ± 0.76  2.680 ± 0.50
+## 5   5 1 1 1  0     5 -2.97   8 4.3 ± 0.92 -0.081 ± 0.62 -0.081 ± 0.62
+## 6   6 1 1 1  0     5 -0.73   8 4.3 ± 0.92 -0.081 ± 0.62 -0.081 ± 0.62
+## 7   7 1 1 0  0     2  2.73   5 2.0 ± 0.85  0.704 ± 0.76  0.704 ± 0.76
+## 8   8 1 1 0  1     2 -0.16   5 2.0 ± 0.85  0.704 ± 0.76  2.680 ± 0.50
+## 9   9 0 0 1  1     4  2.42   4 3.9 ± 0.80 -0.478 ± 0.62  3.384 ± 0.60
+## 10 10 1 0 0  1     2  4.53   2 2.3 ± 0.56  0.290 ± 0.43  2.592 ± 0.43</code></pre>
 <p>We can add a column of predicted “values” to the data frame.</p>
 <pre class="r"><code>df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
 head(df[,c(&quot;id&quot;, &quot;grp&quot;, &quot;mu_hat&quot;, &quot;pred&quot;)], 10)</code></pre>
-<pre><code>##    id grp       mu_hat       pred
-## 1   1   6  0.24 ± 0.42  0.216 ± 2
-## 2   2   5  0.26 ± 0.56  0.261 ± 2
-## 3   3   1 -0.81 ± 0.51 -0.807 ± 2
-## 4   4   5  2.65 ± 0.51  2.644 ± 2
-## 5   5   8 -0.11 ± 0.47 -0.092 ± 2
-## 6   6   8 -0.11 ± 0.47 -0.071 ± 2
-## 7   7   5  0.26 ± 0.56  0.294 ± 2
-## 8   8   5  2.65 ± 0.51  2.622 ± 2
-## 9   9   4  3.44 ± 0.59  3.398 ± 2
-## 10 10   2  2.54 ± 0.43  2.528 ± 2</code></pre>
+<pre><code>##    id grp        mu_hat         pred
+## 1   1   6  0.465 ± 0.47  0.442 ± 2.0
+## 2   2   5  0.704 ± 0.76  0.711 ± 2.0
+## 3   3   1 -1.365 ± 0.48 -1.357 ± 2.0
+## 4   4   5  2.680 ± 0.50  2.683 ± 1.9
+## 5   5   8 -0.081 ± 0.62 -0.083 ± 2.0
+## 6   6   8 -0.081 ± 0.62 -0.085 ± 2.0
+## 7   7   5  0.704 ± 0.76  0.690 ± 2.1
+## 8   8   5  2.680 ± 0.50  2.662 ± 2.0
+## 9   9   4  3.384 ± 0.60  3.374 ± 2.0
+## 10 10   2  2.592 ± 0.43  2.613 ± 2.0</code></pre>
 <p>But note that we don’t just have a single value for each of the 150 individuals, but 10,000 samples for each of the 150 individuals (for a total 1.5 million predicted values.) Here is a little bit of evidence that this is the case, as you can see that this is an <code>rvar</code> of dimension <span class="math inline">\(2500 \text{ samples} \times 4 \text{ chains}\)</span>, or <span class="math inline">\(10,000\)</span> predicted values:</p>
 <pre class="r"><code>df[9, &quot;pred&quot;]</code></pre>
 <pre><code>## rvar&lt;2500,4&gt;[1] mean ± sd:
@@ -269,7 +269,7 @@ head(df[,c(&quot;id&quot;, &quot;grp&quot;, &quot;mu_hat&quot;, &quot;pred&quot;
 effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), est_effects))
 effects</code></pre>
 <pre><code>## rvar&lt;2500,4&gt;[6] mean ± sd:
-## [1] 2.0 ± 0.67  3.2 ± 0.55  2.6 ± 0.51  3.0 ± 0.75  1.9 ± 0.57  4.3 ± 0.67</code></pre>
+## [1] 2.2 ± 0.68  3.1 ± 0.55  2.7 ± 0.52  2.9 ± 0.76  2.0 ± 0.58  4.2 ± 0.69</code></pre>
 <p>We can also get the distribution of the overall (marginal) treatment effect by sub-setting by <span class="math inline">\(rx\)</span> only. The last step is to create a summary table for the <em>pooled</em> model. Remember, the <code>effects</code> table is really a table of distributions, and we can extract summary statistics from those distributions for reporting or plotting. Here, we are extracting the <span class="math inline">\(2.5\%\)</span>, <span class="math inline">\(50\%\)</span>, and <span class="math inline">\(97.5\%\)</span> quantiles to show the median and a <span class="math inline">\(95\%\)</span> interval.</p>
 <pre class="r"><code>mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred))
 overall &lt;- mean_pred[[&quot;1&quot;]] - mean_pred[[&quot;0&quot;]]
@@ -288,7 +288,7 @@ sumstats_pooled &lt;- data.table(
 <h3>Comparing model estimates</h3>
 <p>Now to take a look at the distribution of effect sizes based on the different models. (I didn’t show it, but I also created a table called <code>sumstats_unpooled</code> using the same process I just walked you through.) Below is a plot of the effect estimates for each of the subgroups as well as the overall (marginal) effect estimates. The <code>lm</code> plot shows the point estimate with a <span class="math inline">\(95\%\)</span> confidence interval. The other two plots show the medians of the posterior distributions for the subgroup effects along with <span class="math inline">\(95\%\)</span> intervals.</p>
 <p>Two important things to see in the plot, which will be very important when I write next time about “Type 1” errors, are the relative length of the intervals and the apparent shrinkage of some of the estimates. In all the cases, the length of the interval for the standard linear regression model is smaller than the two Bayesian models, reflecting less uncertainty. The <em>pooled</em> model also appears to have slightly less uncertainty compared to the <em>unpooled</em> model.</p>
-<p>The second point is that the point estimates for the linear regression model and the median estimates for the <em>unpooled</em> model are quite close, while the <em>pooled</em> medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the <span class="math inline">\(\tau\)</span>’s) that are shifting things around. It appears that the effects of the subgroups <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=1\)</span>, and <span class="math inline">\(c=1\)</span> are being pulled towards each other, and maybe the same can be said for the group defined by <span class="math inline">\(a=0\)</span>, <span class="math inline">\(b=0\)</span>, and <span class="math inline">\(c=0\)</span>.</p>
+<p>The second point is that the point estimates for the linear regression model and the median estimates for the <em>unpooled</em> model are quite close, while the <em>pooled</em> medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the <span class="math inline">\(\tau\)</span>’s) that are shifting things around. It appears that the effects of the subgroups <span class="math inline">\(a=0\)</span>, <span class="math inline">\(b=0\)</span>, and <span class="math inline">\(c=0\)</span> are being pulled towards each other, and the same appears to be true for the group defined by <span class="math inline">\(a=1\)</span>, <span class="math inline">\(b=1\)</span>, and <span class="math inline">\(c=1\)</span>. This seems right as we know that the underlying parameters <span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span> are being pulled towards each other.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
 <p>If we were using the <em>pooled</em> model to draw conclusions, I would say that it appears that subgroups defined by <span class="math inline">\(c\)</span> seem to have heterogeneous treatment effects, though I would probably want to have more data to confirm, as the intervals are still quite wide. If we use the results from the linear regression model, we might want to proceed with caution, because the intervals are likely too narrow, we have not adjusted for multiple testing. We will see this next time when I look at a case where there are no underlying treatment effects in the data generation process.</p>
 <p>

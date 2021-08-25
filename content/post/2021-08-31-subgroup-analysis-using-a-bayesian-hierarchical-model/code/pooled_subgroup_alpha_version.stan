@@ -15,10 +15,11 @@ parameters {
   real delta_x;
   
   real<lower=0> sigma;
+  real<lower=0> sigma_a;
   real<lower=0> sigma_m;
   real<lower=0> sigma_x;
   
-  real alpha[8]; // subgroup-specific intercept
+  real z_alpha[8]; // subgroup-specific intercept
 
   real t_0;
   real z_a;
@@ -44,6 +45,11 @@ transformed parameters {
   real theta[8]; // subgroup-specific effect
   
   real yhat[N];
+  real alpha[8];
+  
+  for (i in 1:8) {
+    alpha[i] = sigma_a * z_alpha[i] + delta_a;
+  }
   
   theta[1] = t_0;
   theta[2] = t_0 + t_a;
@@ -62,9 +68,10 @@ transformed parameters {
 
 model {
   
-  alpha ~ normal(0, 10);
+  z_alpha ~ std_normal();
   
   sigma ~ normal(0, 10);
+  sigma_a ~ normal(0, 10);
   sigma_m ~ normal(0, 1);
   sigma_x ~ normal(0, 1);
 

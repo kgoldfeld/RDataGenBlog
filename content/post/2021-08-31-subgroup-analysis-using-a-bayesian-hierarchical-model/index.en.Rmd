@@ -166,24 +166,22 @@ The treatment effect parameter $\theta_j$ can be further parameterized as functi
 
 #### Pooled model
 
-So far, the parameterization for the *pooled* and *unpooled* models are the same. And this is where the models diverge. The idea behind the *pooled* model is that the *main effects* of $a$, $b$, $c$ ($\tau_a$, $\tau_b$, and $\tau_c$, respectively) are drawn from the same distribution centered around $\delta_m$ with a standard deviation $\sigma_m$, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects ($\tau_{ab}$, $\tau_{ac}$ and $\tau_{bc}$) are independent of the main effects, but they share a common distribution to be estimated from the data. (In this case, the $\alpha_j$ intercepts are also pooled, but we could just as easily relax this, as we are not particularly interested in these parameters.)
+So far, the parameterization for the *pooled* and *unpooled* models are the same. And this is where the models diverge. The idea behind the *pooled* model is that the *main effects* of $a$, $b$, $c$ ($\tau_a$, $\tau_b$, and $\tau_c$, respectively) are drawn from the same distribution centered around $\delta_m$ with a standard deviation $\sigma_m$, both of which will be estimated from the data. This means that the effect of one covariate will inform to some extent the effect of the others. Of course, as the number of observations increases, the extent of pooling will be reduced. The three 2-level interaction effects ($\tau_{ab}$, $\tau_{ac}$ and $\tau_{bc}$) are independent of the main effects, but they share a common distribution to be estimated from the data. (In this case we have only a single three-way interaction term $\tau_{abc}$, but if we had 4 covariates rather than 3, we would have 4 three-way interaction terms, which could all share the same prior distribution. At some point, it might be reasonable to exclude higher order interactions, such as four- or five-way interactions.)
 
 \begin{aligned}
-  \alpha_j &\sim N(\mu = \delta_\alpha, \sigma = \sigma_\alpha) \\
   \tau_a, \tau_b, \tau_c &\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
   \tau_{ab}, \tau_{ac}, \tau_{bc} &\sim N(\mu = \delta_x, \sigma = \sigma_x) \\
 \end{aligned}
 
-With the exception of $\sigma_0$ and $\sigma_\alpha$, the prior distributions for the model parameters are quite conservative/pessimistic, centered pretty closely around 0. (It would certainly be wise to explore how these prior assumptions impact the findings, but since this is just an illustrative example, I won't dwell too much on these particular assumptions).
+With the exception of $\alpha_j$ and $\sigma_0$, the prior distributions for the model parameters are quite conservative/pessimistic, centered pretty closely around 0. (It would certainly be wise to explore how these prior assumptions impact the findings, but since this is just an illustrative example, I won't dwell too much on these particular assumptions).
 
 \begin{aligned}
+  \alpha_j &\sim N(\mu = 0, \sigma = 10), \ \ \ j \in \{1,\dots,8\}  \\
   \tau_0 &\sim N(\mu=0, \sigma = 2) \\
   \tau_{abc} &\sim N(\mu = 0, \sigma = 2) \\
-  \delta_\alpha  &\sim N(\mu = 0, \sigma = 2) \\
   \delta_m  &\sim N(\mu = 0, \sigma = 2) \\
   \delta_x  &\sim N(\mu = 0, \sigma = 2) \\
   \sigma_0 &\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
-  \sigma_\alpha &\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_\alpha \ge 0 \\
   \sigma_m  &\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_m \ge 0 \\
   \sigma_x  &\sim N(\mu = 0, \sigma = 1), \ \ \ \sigma_x \ge 0 \\
 \end{aligned}
@@ -195,8 +193,8 @@ In the unpooled model, the $\tau$'s (and $\alpha$'s) are not jointly parameteriz
 \begin{aligned}
   \alpha_j &\sim N(\mu=0, \sigma = 10), \ \ \ j \in \{1,\dots,8\} \\
   \tau_0 &\sim N(\mu=0, \sigma = 10) \\
-  \tau_m &\sim N(\mu=0, \sigma = 10), \ \ \ m \in \{a, b, c\} \\
-  \tau_x &\sim N(\mu=0, \sigma = 10), \ \ \ x \in \{ab, ac, bc\} \\
+  \tau_q &\sim N(\mu=0, \sigma = 10), \ \ \ q \in \{a, b, c\} \\
+  \tau_{qq} &\sim N(\mu=0, \sigma = 10), \ \ \ qq \in \{ab, ac, bc\} \\
   \tau_{abc} &\sim N(\mu = 0, \sigma = 10) \\
   \sigma_0 &\sim N(\mu = 0, \sigma = 10), \ \ \ \sigma_0 \ge 0 \\
 \end{aligned}
@@ -230,7 +228,8 @@ fit_pool <- model_pool$sample(
     iter_warmup = 500,
     iter_sampling = 2500,
     adapt_delta = 0.99,
-    max_treedepth = 20
+    max_treedepth = 20,
+    seed = 898171
 )
 
 fit_unpool <- model_unpool$sample(
@@ -241,11 +240,12 @@ fit_unpool <- model_unpool$sample(
     iter_warmup = 500,
     iter_sampling = 2500,
     adapt_delta = 0.99,
-    max_treedepth = 20
+    max_treedepth = 20,
+    seed = 18717
 )
 ```
 
-### Extracting data
+### Extracting posterior probabilities
 
 In this case, I am actually not directly interested in the effect parameters $\theta_j$, but actually in the estimated treatment effects for the six subgroups defined by $a=0$, $a=1$, $b=0$, $b=1$, $c=0$, and $c=1$. (These groups are not distinct from one another, as each individual has measures for each of $a$, $b$, and $c$.) I will step through the process of how I get these estimates, and then will plot a summary of the estimates.
 
@@ -322,7 +322,7 @@ Now to take a look at the distribution of effect sizes based on the different mo
 
 Two important things to see in the plot, which will be very important when I write next time about "Type 1" errors, are the relative length of the intervals and the apparent shrinkage of some of the estimates. In all the cases, the length of the interval for the standard linear regression model is smaller than the two Bayesian models, reflecting less uncertainty. The *pooled* model also appears to have slightly less uncertainty compared to the *unpooled* model.
 
-The second point is that the point estimates for the linear regression model and the median estimates for the *unpooled* model are quite close, while the *pooled* medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the $\tau$'s) that are shifting things around. It appears that the effects of the subgroups $a=1$, $b=1$, and $c=1$ are being pulled towards each other, and maybe the same can be said for the group defined by $a=0$, $b=0$, and $c=0$.
+The second point is that the point estimates for the linear regression model and the median estimates for the *unpooled* model are quite close, while the *pooled* medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the $\tau$'s) that are shifting things around. It appears that the effects of the subgroups $a=0$, $b=0$, and $c=0$ are being pulled towards each other, and the same appears to be true for the group defined by $a=1$, $b=1$, and $c=1$. This seems right as we know that the underlying parameters $\tau_a$, $\tau_b$, and $\tau_c$ are being pulled towards each other.
 
 ```{r, echo = FALSE}
 r <- as_draws_rvars(fit_unpool$draws(variables = c("alpha","theta","sigma")))
