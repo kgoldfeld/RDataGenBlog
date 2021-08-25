@@ -1,0 +1,83 @@
+---
+title: 
+  'Drawing the wrong conclusion: a comparison of Bayes and frequentist methods'
+author: Package Build
+date: '2021-09-07'
+slug: []
+categories: []
+tags:
+  - Bayesian model
+  - Stan
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+options(digits = 2)
+```
+
+```{r, echo = FALSE, fig.width=7}
+
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(cmdstanr)
+library(posterior)
+
+load("data/sub_0.rda")
+
+res <- rbindlist(res)
+res[, subgroup := variable]
+
+res[, effect.pool := as.numeric(!between(0, p.025, p.975))]
+res[, effect.nopool := as.numeric(!between(0, n.025, n.975))]
+res[, effect.lm := as.numeric(!between(0, lm.025, lm.975))]
+
+res[, .(pooled = mean(effect.pool), 
+        unpooled = mean(effect.nopool), 
+        lm = mean(effect.lm)), 
+    keyby = subgroup]
+
+res[, .(sum(effect.pool), 
+        sum(effect.nopool),
+        sum(effect.lm)), keyby = x][, .(pooled = mean(V1 > 0), 
+                                        unpooled = mean(V2 > 0), 
+                                        lm = mean(V3 > 0))]
+
+###
+
+cis <- res[, .(index =x, grp = variable, p.025, p.975, n.025, n.975, lm.025, lm.975)]
+
+dp <- melt(data = cis, 
+     id.vars = c("index", "grp"),
+     measure.vars = list(c("p.025", "n.025", "lm.025"), c("p.975","n.975", "lm.975")), 
+     value.name = c("l", "u"),
+     variable.factor = TRUE, 
+     variable.name = "method"
+)
+
+dp[, method := factor(method, labels = c("pooled", "unpooled", "lm"))]
+
+set.seed(8376251)
+samp_index <- sample(2500, 80, replace = FALSE)
+ds <- dp[index %in% samp_index]
+ds[, includes_0 := between(0, l, u)]
+
+ggplot(data= ds, aes(x = l, xend = u, y = factor(index), yend = factor(index))) +
+  geom_vline(xintercept = 0, color = "grey85") +
+  geom_segment(aes(size = includes_0, color = includes_0)) +
+  facet_grid(method ~ grp) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid = element_blank(),
+        legend.position = "none"
+  ) +
+  scale_color_manual(values = c("#b30003", "grey50")) +
+  scale_size_manual(values = c(.25, .1)) +
+  xlab("effect size")
+```
