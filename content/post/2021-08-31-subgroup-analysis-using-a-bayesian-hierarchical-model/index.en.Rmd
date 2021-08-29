@@ -45,14 +45,29 @@ In the data generation process, the treatment effect will be a parameter $\theta
 d <- defData(varname = "a", formula = 0.6, dist="binary")
 d <- defData(d, varname = "b", formula = 0.3, dist="binary")
 d <- defData(d, varname = "c", formula = 0.4, dist="binary")
-  
-drx <- defDataAdd(varname = "theta", formula = "0 + 2*a  + 4*c - 1*a*c", 
-  dist = "nonrandom")
-drx <- defDataAdd(drx, varname = "y", formula = "0 + theta*rx", variance = 16,
-  dist = "normal")
+d <- defData(d, varname = "theta", formula = "0 + 2*a  + 4*c - 1*a*c", dist = "nonrandom")
+
+drx <- defDataAdd(varname = "y", formula = "0 + theta*rx", variance = 16, dist = "normal")
 ```
 
 In the data generation process, I am assigning eight group identifiers based on the covariates that will be relevant for the Bayes model (described further below).
+
+```{r}
+setgrp <- function(a, b, c) {
+  
+  if (a==0 & b==0 & c==0) return(1)
+  if (a==1 & b==0 & c==0) return(2)
+  if (a==0 & b==1 & c==0) return(3)
+  if (a==0 & b==0 & c==1) return(4)
+  if (a==1 & b==1 & c==0) return(5)
+  if (a==1 & b==0 & c==1) return(6)
+  if (a==0 & b==1 & c==1) return(7)
+  if (a==1 & b==1 & c==1) return(8)
+  
+}
+```
+
+To generate the data:
 
 ```{r}
 set.seed(3871598)
@@ -60,15 +75,8 @@ set.seed(3871598)
 dd <- genData(150, d)
 dd <- trtAssign(dd, grpName = "rx")
 dd <- addColumns(drx, dd)
-  
-dd[a==0 & b==0 & c==0, grp := 1]
-dd[a==1 & b==0 & c==0, grp := 2]
-dd[a==0 & b==1 & c==0, grp := 3]
-dd[a==0 & b==0 & c==1, grp := 4]
-dd[a==1 & b==1 & c==0, grp := 5]
-dd[a==1 & b==0 & c==1, grp := 6]
-dd[a==0 & b==1 & c==1, grp := 7]
-dd[a==1 & b==1 & c==1, grp := 8]
+
+dd[, grp:= setgrp(a, b, c), keyby = id]
 
 dd
 ```

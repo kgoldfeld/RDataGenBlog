@@ -33,42 +33,46 @@ library(posterior)</code></pre>
 <pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 0.6, dist=&quot;binary&quot;)
 d &lt;- defData(d, varname = &quot;b&quot;, formula = 0.3, dist=&quot;binary&quot;)
 d &lt;- defData(d, varname = &quot;c&quot;, formula = 0.4, dist=&quot;binary&quot;)
-  
-drx &lt;- defDataAdd(varname = &quot;theta&quot;, formula = &quot;0 + 2*a  + 4*c - 1*a*c&quot;, 
-  dist = &quot;nonrandom&quot;)
-drx &lt;- defDataAdd(drx, varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 16,
-  dist = &quot;normal&quot;)</code></pre>
+d &lt;- defData(d, varname = &quot;theta&quot;, formula = &quot;0 + 2*a  + 4*c - 1*a*c&quot;, dist = &quot;nonrandom&quot;)
+
+drx &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 16, dist = &quot;normal&quot;)</code></pre>
 <p>In the data generation process, I am assigning eight group identifiers based on the covariates that will be relevant for the Bayes model (described further below).</p>
+<pre class="r"><code>setgrp &lt;- function(a, b, c) {
+  
+  if (a==0 &amp; b==0 &amp; c==0) return(1)
+  if (a==1 &amp; b==0 &amp; c==0) return(2)
+  if (a==0 &amp; b==1 &amp; c==0) return(3)
+  if (a==0 &amp; b==0 &amp; c==1) return(4)
+  if (a==1 &amp; b==1 &amp; c==0) return(5)
+  if (a==1 &amp; b==0 &amp; c==1) return(6)
+  if (a==0 &amp; b==1 &amp; c==1) return(7)
+  if (a==1 &amp; b==1 &amp; c==1) return(8)
+  
+}</code></pre>
+<p>To generate the data:</p>
 <pre class="r"><code>set.seed(3871598)
 
 dd &lt;- genData(150, d)
 dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
 dd &lt;- addColumns(drx, dd)
-  
-dd[a==0 &amp; b==0 &amp; c==0, grp := 1]
-dd[a==1 &amp; b==0 &amp; c==0, grp := 2]
-dd[a==0 &amp; b==1 &amp; c==0, grp := 3]
-dd[a==0 &amp; b==0 &amp; c==1, grp := 4]
-dd[a==1 &amp; b==1 &amp; c==0, grp := 5]
-dd[a==1 &amp; b==0 &amp; c==1, grp := 6]
-dd[a==0 &amp; b==1 &amp; c==1, grp := 7]
-dd[a==1 &amp; b==1 &amp; c==1, grp := 8]
+
+dd[, grp:= setgrp(a, b, c), keyby = id]
 
 dd</code></pre>
-<pre><code>##       id a b c rx theta     y grp
-##   1:   1 1 0 1  0     5  0.28   6
-##   2:   2 1 1 0  0     2  3.14   5
-##   3:   3 0 0 0  0     0  0.73   1
-##   4:   4 1 1 0  1     2  0.78   5
-##   5:   5 1 1 1  0     5 -5.94   8
+<pre><code>##       id a b c theta rx     y grp
+##   1:   1 1 0 1     5  0  0.28   6
+##   2:   2 1 1 0     2  0  3.14   5
+##   3:   3 0 0 0     0  0  0.73   1
+##   4:   4 1 1 0     2  1  0.78   5
+##   5:   5 1 1 1     5  0 -5.94   8
 ##  ---                             
-## 146: 146 1 1 0  1     2  4.68   5
-## 147: 147 0 0 1  0     4  3.10   4
-## 148: 148 1 0 0  0     2  5.88   2
-## 149: 149 1 1 1  1     5  4.22   8
-## 150: 150 0 1 1  1     4  4.76   7</code></pre>
+## 146: 146 1 1 0     2  1  4.68   5
+## 147: 147 0 0 1     4  0  3.10   4
+## 148: 148 1 0 0     2  0  5.88   2
+## 149: 149 1 1 1     5  1  4.22   8
+## 150: 150 0 1 1     4  1  4.76   7</code></pre>
 <p>Here is a plot of the average outcome <span class="math inline">\(Y\)</span> for each of the subgroups with and without treatment. The treatment effect for a particular subgroup is the difference of the <span class="math inline">\(Y\)</span> values for each segment. Now, it appears that there is a treatment effect for the two subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, yet <span class="math inline">\(B\)</span> was not supposed to have any impact on the overall effect size, which is <span class="math inline">\(0\)</span>. Just in case this is at all confusing, this is due to the fact that these patients have characteristics <span class="math inline">\(A\)</span> and <span class="math inline">\(C\)</span>, which <em>do</em> influence the effect size. Indeed, if you compare the subgroups <span class="math inline">\(B=0\)</span> and <span class="math inline">\(B=1\)</span>, it appears that the effect size could be the same, which is consistent with the fact that <span class="math inline">\(B\)</span> has no impact on effect size. This is definitely not the case when comparing <span class="math inline">\(C=0\)</span> and <span class="math inline">\(C=1\)</span>. I point this out, because when I report the estimated effect sizes from the models, I will be reporting the subgroup-specific effects shown here, rather than parameter estimates of <span class="math inline">\(\theta\)</span>.</p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="768" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
 </div>
 <div id="subgroup-analysis-using-simple-linear-regression" class="section level3">
 <h3>Subgroup analysis using simple linear regression</h3>
@@ -175,14 +179,14 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 1.5 seconds.
-## Chain 1 finished in 1.5 seconds.
-## Chain 3 finished in 1.7 seconds.
-## Chain 4 finished in 1.9 seconds.
+## Chain 1 finished in 1.2 seconds.
+## Chain 2 finished in 1.2 seconds.
+## Chain 3 finished in 1.4 seconds.
+## Chain 4 finished in 1.5 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 1.6 seconds.
-## Total execution time: 2.1 seconds.</code></pre>
+## Mean chain execution time: 1.3 seconds.
+## Total execution time: 1.8 seconds.</code></pre>
 <pre class="r"><code>fit_unpool &lt;- model_unpool$sample(
     data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y=dd[,y], prior_sigma=10),
     refresh = 0,
@@ -198,12 +202,12 @@ model_unpool &lt;- cmdstan_model(&quot;code/unpooled_subgroup.stan&quot;)</code>
 ## 
 ## Chain 3 finished in 1.4 seconds.
 ## Chain 2 finished in 1.5 seconds.
-## Chain 4 finished in 1.8 seconds.
-## Chain 1 finished in 2.1 seconds.
+## Chain 4 finished in 1.7 seconds.
+## Chain 1 finished in 2.2 seconds.
 ## 
 ## All 4 chains finished successfully.
 ## Mean chain execution time: 1.7 seconds.
-## Total execution time: 2.3 seconds.</code></pre>
+## Total execution time: 3.0 seconds.</code></pre>
 </div>
 <div id="extracting-posterior-probabilities" class="section level3">
 <h3>Extracting posterior probabilities</h3>
@@ -230,17 +234,17 @@ df$alpha_hat &lt;- r$alpha[dd$grp]
 df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)</code></pre>
 <p>Here are the first ten rows (out of the 150 individual records):</p>
 <pre class="r"><code>head(df, 10)</code></pre>
-<pre><code>##    id a b c rx theta     y grp  theta_hat    alpha_hat       mu_hat
-## 1   1 1 0 1  0     5  0.28   6 4.2 ± 1.17  1.06 ± 0.89  1.06 ± 0.89
-## 2   2 1 1 0  0     2  3.14   5 2.6 ± 1.31  0.93 ± 1.30  0.93 ± 1.30
-## 3   3 0 0 0  0     0  0.73   1 2.1 ± 1.03 -2.42 ± 0.89 -2.42 ± 0.89
-## 4   4 1 1 0  1     2  0.78   5 2.6 ± 1.31  0.93 ± 1.30  3.52 ± 0.96
-## 5   5 1 1 1  0     5 -5.94   8 3.6 ± 1.72 -0.18 ± 1.19 -0.18 ± 1.19
-## 6   6 1 1 1  0     5 -1.45   8 3.6 ± 1.72 -0.18 ± 1.19 -0.18 ± 1.19
-## 7   7 1 1 0  0     2  5.47   5 2.6 ± 1.31  0.93 ± 1.30  0.93 ± 1.30
-## 8   8 1 1 0  1     2 -2.33   5 2.6 ± 1.31  0.93 ± 1.30  3.52 ± 0.96
-## 9   9 0 0 1  1     4  0.84   4 3.6 ± 1.11 -0.88 ± 1.09  2.69 ± 1.06
-## 10 10 1 0 0  1     2  7.05   2 2.8 ± 0.89  0.49 ± 0.79  3.26 ± 0.78</code></pre>
+<pre><code>##    id a b c theta rx     y grp  theta_hat    alpha_hat       mu_hat
+## 1   1 1 0 1     5  0  0.28   6 4.2 ± 1.17  1.06 ± 0.89  1.06 ± 0.89
+## 2   2 1 1 0     2  0  3.14   5 2.6 ± 1.31  0.93 ± 1.30  0.93 ± 1.30
+## 3   3 0 0 0     0  0  0.73   1 2.1 ± 1.03 -2.42 ± 0.89 -2.42 ± 0.89
+## 4   4 1 1 0     2  1  0.78   5 2.6 ± 1.31  0.93 ± 1.30  3.52 ± 0.96
+## 5   5 1 1 1     5  0 -5.94   8 3.6 ± 1.72 -0.18 ± 1.19 -0.18 ± 1.19
+## 6   6 1 1 1     5  0 -1.45   8 3.6 ± 1.72 -0.18 ± 1.19 -0.18 ± 1.19
+## 7   7 1 1 0     2  0  5.47   5 2.6 ± 1.31  0.93 ± 1.30  0.93 ± 1.30
+## 8   8 1 1 0     2  1 -2.33   5 2.6 ± 1.31  0.93 ± 1.30  3.52 ± 0.96
+## 9   9 0 0 1     4  1  0.84   4 3.6 ± 1.11 -0.88 ± 1.09  2.69 ± 1.06
+## 10 10 1 0 0     2  1  7.05   2 2.8 ± 0.89  0.49 ± 0.79  3.26 ± 0.78</code></pre>
 <p>We can add a column of predicted “values” to the data frame.</p>
 <pre class="r"><code>df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
 head(df[,c(&quot;id&quot;, &quot;grp&quot;, &quot;mu_hat&quot;, &quot;pred&quot;)], 10)</code></pre>
@@ -290,7 +294,7 @@ sumstats_pooled &lt;- data.table(
 <p>Now to take a look at the distribution of effect sizes based on the different models. (I didn’t show it, but I also created a table called <code>sumstats_unpooled</code> using the same process I just walked you through.) Below is a plot of the effect estimates for each of the subgroups as well as the overall (marginal) effect estimates. The <code>lm</code> plot shows the point estimate with a <span class="math inline">\(95\%\)</span> confidence interval. The other two plots show the medians of the posterior distributions for the subgroup effects along with <span class="math inline">\(95\%\)</span> intervals.</p>
 <p>Two important things to see in the plot, which will be very important when I write next time about “Type 1” errors, are the relative length of the intervals and the apparent shrinkage of some of the estimates. In all the cases, the length of the interval for the standard linear regression model is smaller than the two Bayesian models, reflecting less uncertainty. The <em>pooled</em> model also appears to have slightly less uncertainty compared to the <em>unpooled</em> model.</p>
 <p>The second point is that the point estimates for the linear regression model and the median estimates for the <em>unpooled</em> model are quite close, while the <em>pooled</em> medians appear to be pulled away. The direction of the shrinkage is not coherent, because there is a mixture of main effects and interaction effects (the <span class="math inline">\(\tau\)</span>’s) that are shifting things around. It appears that the effects of the subgroups <span class="math inline">\(a=0,\)</span> <span class="math inline">\(b=0,\)</span> and <span class="math inline">\(c=0\)</span> are being pulled towards each other, and the same appears to be true for the group defined by <span class="math inline">\(a=1,\)</span> <span class="math inline">\(b=1,\)</span> and <span class="math inline">\(c=1.\)</span> This seems right as we know that the underlying parameters <span class="math inline">\(\tau_a\)</span>, <span class="math inline">\(\tau_b\)</span>, and <span class="math inline">\(\tau_c\)</span> are shrinking towards each other.</p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-19-1.png" width="672" /></p>
 <p>If we were using the <em>pooled</em> model to draw conclusions, I would say that it appears that subgroups defined by <span class="math inline">\(c\)</span> seem to have heterogeneous treatment effects, though I would probably want to have more data to confirm, as the intervals are still quite wide. If we use the results from the linear regression model, we might want to proceed with caution, because the intervals are likely too narrow, we have not adjusted for multiple testing. We will see this next time when I look at a case where there are no underlying treatment effects in the data generation process.</p>
 <p>
 <p><small><font color="darkkhaki"></p>

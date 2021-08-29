@@ -20,26 +20,42 @@ knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
 options(digits = 2)
 ```
 
-```{r, eval = FALSE}
+```{r}
 library(cmdstanr)
 library(simstudy)
 library(posterior)
 library(data.table)
 library(slurmR)
 
+setgrp <- function(a, b, c) {
+  
+  if (a==0 & b==0 & c==0) return(1)
+  if (a==1 & b==0 & c==0) return(2)
+  if (a==0 & b==1 & c==0) return(3)
+  if (a==0 & b==0 & c==1) return(4)
+  if (a==1 & b==1 & c==0) return(5)
+  if (a==1 & b==0 & c==1) return(6)
+  if (a==0 & b==1 & c==1) return(7)
+  if (a==1 & b==1 & c==1) return(8)
+  
+}
+
 s_define <- function() {
   
   d <- defData(varname = "a", formula = 0.6, dist="binary")
   d <- defData(d, varname = "b", formula = 0.4, dist="binary")
   d <- defData(d, varname = "c", formula = 0.3, dist="binary")
-  
-  drx <- defDataAdd(
-    varname = "theta",
-    formula = "..t_0 + ..t_a * a  + ..t_b * b + ..t_c * c +
-               ..t_ab * a*b + ..t_ac * a*c + ..t_bc * b*c + ..t_abc * a*b*c", 
+  d <- defData(d, varname = "theta",
+    formula = "..tau[1] + ..tau[2]*a  + ..tau[3]*b + ..tau[4]*c +
+               ..tau[5]*a*b + ..tau[6]*a*c + ..tau[7]*b*c + ..tau[8]*a*b*c",
     dist = "nonrandom"
   )
-  drx <- defDataAdd(drx, varname = "y", formula = "0 + theta*rx", variance = 16, dist = "normal")
+  
+  drx <- defDataAdd(
+    varname = "y", formula = "0 + theta*rx", 
+    variance = 16, 
+    dist = "normal"
+  )
 
   return(list(d = d, drx = drx))
   
@@ -49,141 +65,51 @@ s_generate <- function(n, list_of_defs) {
   
   list2env(list_of_defs, envir = environment())
   
-  t_0 <- rnorm(1, 0, .5)
-  t_a <- rnorm(1, 0, .5)
-  t_b <- rnorm(1, 0, .5)
-  t_c <- rnorm(1, 0, .5)
-  t_ab <- rnorm(1, 0, .5)
-  t_ac <- rnorm(1, 0, .5)
-  t_bc <- rnorm(1, 0, .5)
-  t_abc <- rnorm(1, 0, .5)
+  tau <- rnorm(8, 0, .5)
   
   dd <- genData(n, d)
   dd <- trtAssign(dd, grpName = "rx")
   dd <- addColumns(drx, dd)
   
-  dd[a==0 & b==0 & c==0, grp:= 1]
-  dd[a==1 & b==0 & c==0, grp:= 2]
-  dd[a==0 & b==1 & c==0, grp:= 3]
-  dd[a==0 & b==0 & c==1, grp:= 4]
-  dd[a==1 & b==1 & c==0, grp:= 5]
-  dd[a==1 & b==0 & c==1, grp:= 6]
-  dd[a==0 & b==1 & c==1, grp:= 7]
-  dd[a==1 & b==1 & c==1, grp:= 8]
+  dd[, grp := setgrp(a, b, c), keyby = id]
   
   dd[]
   
 }
+```
 
+
+```{r}
+set.seed(298372)
+
+defs <- s_define()
+s_generate(10, defs)
+```
+
+
+```{r, eval=FALSE}
 s_model <- function(dd, mod_pool, mod_nopool) {
-  
-  df <- as.data.frame(dd)
-  
-  ### lm
-  
-  getparams <- function(dx) {
-    fit <- lm(y ~ rx, data = dx)
-    c(coef(fit)["rx"], confint(fit)[2,])
-  }
-  
-  
-  est_cis <- function(sub_grp) {
-    mean_pred <- lapply(split(df[,c(sub_grp, "y", "rx")], df[, c(sub_grp)]), 
-                        function(x) getparams(x)
-    )
-    do.call(rbind, mean_pred)
-  }
-  
-  cis <- do.call(rbind, lapply(c("a","b","c"), function(x) est_cis(x)))
-  ci <- getparams(dd)
-  cis <- data.table(rbind(cis, ci))
-  setnames(cis, c("lm.est","lm.025", "lm.975"))
-  
-  ### bayes
-  
-  fitbayes <- function(mod, dd) {
-    
-    fit <- mod$sample(
-      data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y]),
-      refresh = 0,
-      chains = 5L,
-      parallel_chains = 5L,
-      iter_warmup = 500,
-      iter_sampling = 3000,
-      adapt_delta = 0.99,
-      max_treedepth = 20
-    )
-    
-    r <- as_draws_rvars(fit$draws(variables = c("alpha","theta","sigma")))
-    
-    est_effects <- function(sub_grp) {
-      mean_pred <- lapply(split(df[,c(sub_grp, "rx","pred")], df[, c(sub_grp, "rx")]), function(x) rvar_mean(x$pred) )
-      c(mean_pred[["0.1"]] - mean_pred[["0.0"]], mean_pred[["1.1"]] - mean_pred[["1.0"]])
-    }
-    
-    df <- as.data.frame(dd)
-    
-    df$theta_hat <- r$theta[dd$grp]
-    df$alpha_hat <- r$alpha[dd$grp]
-    df$mu_hat <- with(df, alpha_hat + rx* theta_hat)
-    
-    df$pred <- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
-    effects <- do.call(c, lapply(c("a","b","c"), function(x) est_effects(x)))
-    
-    mean_pred <- lapply(split(df[,c("rx","pred")], df[, "rx"]), function(x) rvar_mean(x$pred) )
-    overall <- mean_pred[["1"]] - mean_pred[["0"]]
-    
-    effects <- c(effects, overall)
-    
-    sumstats <- data.table( 
-      p.025 = quantile(effects, 0.025),
-      p.50 = quantile(effects, 0.50),
-      p.975 = quantile(effects, 0.975)
-    )
-    
-    return(sumstats[])
-  }
-
-  bayes_pool <- fitbayes(mod_pool, dd)
-  bayes_nopool <- fitbayes(mod_nopool, dd)
-  
-  sumstats <-cbind(variable = c("a = 0", "a = 1", "b = 0", "b = 1", "c = 0", "c = 1", "overall"), 
-                   bayes_pool,
-                   bayes_nopool,
-                   cis)
-  
-  setnames(sumstats, c("variable", "p.025", "p.50", "p.975",
-                       "n.025", "n.50", "n.975",
-                       "lm.est", "lm.025", "lm.975"))
-  
-  return(sumstats[])
-  
+  ...
 }
 
 s_replicate <- function(x, n, mod_pool, mod_nopool) {
   
-  set_cmdstan_path(path = "/gpfs/share/apps/cmdstan/2.25.0")
+  set_cmdstan_path(path = "/.../cmdstan/2.25.0")
   
   defs <- s_define()
   generated_data <- s_generate(n, defs)
   estimates <- s_model(generated_data, mod_pool, mod_nopool)
-  
-  estimates[, x := x]
-  
+
   estimates[]
 }
+```
 
-### Estimate locally
 
-# mod_pool <- cmdstan_model("Presentations/subgroup/subs_pool_hpc.stan")
-# mod_nopool <- cmdstan_model("Presentations/subgroup/subs_nopool_hpc.stan")
-# lapply(1:2, function(x) s_replicate(x, 100, mod_pool, mod_nopool))
-
-###
-
+```{r, eval = FALSE, echo=TRUE}
 set_cmdstan_path(path = "/gpfs/share/apps/cmdstan/2.25.0")
-model_pool <- cmdstan_model("/gpfs/data/troxellab/ksg/r/subs_pool_hpc.stan")
-model_nopool <- cmdstan_model("/gpfs/data/troxellab/ksg/r/subs_nopool_hpc.stan")
+
+model_pool <- cmdstan_model("/.../subs_pool_hpc.stan")
+model_nopool <- cmdstan_model("/.../subs_nopool_hpc.stan")
 
 job <- Slurm_lapply(
   X = 1:2500, 
@@ -194,7 +120,7 @@ job <- Slurm_lapply(
   njobs = 50, 
   mc.cores = 5L,
   job_name = "i_subs",
-  tmp_path = "/gpfs/data/troxellab/ksg/scratch",
+  tmp_path = "/.../scratch",
   plan = "wait",
   sbatch_opt = list(time = "12:00:00", partition = "cpu_short", `mem-per-cpu` = "5G"),
   export = c("s_define", "s_generate", "s_model"),
@@ -204,7 +130,7 @@ job <- Slurm_lapply(
 job
 res <- Slurm_collect(job)
 
-save(res, file = "/gpfs/data/troxellab/ksg/r/sub_0.rda")
+save(res, file = "/.../sub_0.rda")
 ```
 
 ```{r, echo = FALSE, fig.width=7}
@@ -268,3 +194,6 @@ ggplot(data= ds, aes(x = l, xend = u, y = factor(index), yend = factor(index))) 
   scale_size_manual(values = c(.25, .1)) +
   xlab("effect size")
 ```
+
+[here](https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/){target="_blank"}
+[here](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"}

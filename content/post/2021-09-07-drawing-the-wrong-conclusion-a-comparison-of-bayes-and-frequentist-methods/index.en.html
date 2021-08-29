@@ -24,19 +24,35 @@ library(posterior)
 library(data.table)
 library(slurmR)
 
+setgrp &lt;- function(a, b, c) {
+  
+  if (a==0 &amp; b==0 &amp; c==0) return(1)
+  if (a==1 &amp; b==0 &amp; c==0) return(2)
+  if (a==0 &amp; b==1 &amp; c==0) return(3)
+  if (a==0 &amp; b==0 &amp; c==1) return(4)
+  if (a==1 &amp; b==1 &amp; c==0) return(5)
+  if (a==1 &amp; b==0 &amp; c==1) return(6)
+  if (a==0 &amp; b==1 &amp; c==1) return(7)
+  if (a==1 &amp; b==1 &amp; c==1) return(8)
+  
+}
+
 s_define &lt;- function() {
   
   d &lt;- defData(varname = &quot;a&quot;, formula = 0.6, dist=&quot;binary&quot;)
   d &lt;- defData(d, varname = &quot;b&quot;, formula = 0.4, dist=&quot;binary&quot;)
   d &lt;- defData(d, varname = &quot;c&quot;, formula = 0.3, dist=&quot;binary&quot;)
-  
-  drx &lt;- defDataAdd(
-    varname = &quot;theta&quot;,
-    formula = &quot;..t_0 + ..t_a * a  + ..t_b * b + ..t_c * c +
-               ..t_ab * a*b + ..t_ac * a*c + ..t_bc * b*c + ..t_abc * a*b*c&quot;, 
+  d &lt;- defData(d, varname = &quot;theta&quot;,
+    formula = &quot;..tau[1] + ..tau[2]*a  + ..tau[3]*b + ..tau[4]*c +
+               ..tau[5]*a*b + ..tau[6]*a*c + ..tau[7]*b*c + ..tau[8]*a*b*c&quot;,
     dist = &quot;nonrandom&quot;
   )
-  drx &lt;- defDataAdd(drx, varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, variance = 16, dist = &quot;normal&quot;)
+  
+  drx &lt;- defDataAdd(
+    varname = &quot;y&quot;, formula = &quot;0 + theta*rx&quot;, 
+    variance = 16, 
+    dist = &quot;normal&quot;
+  )
 
   return(list(d = d, drx = drx))
   
@@ -46,141 +62,50 @@ s_generate &lt;- function(n, list_of_defs) {
   
   list2env(list_of_defs, envir = environment())
   
-  t_0 &lt;- rnorm(1, 0, .5)
-  t_a &lt;- rnorm(1, 0, .5)
-  t_b &lt;- rnorm(1, 0, .5)
-  t_c &lt;- rnorm(1, 0, .5)
-  t_ab &lt;- rnorm(1, 0, .5)
-  t_ac &lt;- rnorm(1, 0, .5)
-  t_bc &lt;- rnorm(1, 0, .5)
-  t_abc &lt;- rnorm(1, 0, .5)
+  tau &lt;- rnorm(8, 0, .5)
   
   dd &lt;- genData(n, d)
   dd &lt;- trtAssign(dd, grpName = &quot;rx&quot;)
   dd &lt;- addColumns(drx, dd)
   
-  dd[a==0 &amp; b==0 &amp; c==0, grp:= 1]
-  dd[a==1 &amp; b==0 &amp; c==0, grp:= 2]
-  dd[a==0 &amp; b==1 &amp; c==0, grp:= 3]
-  dd[a==0 &amp; b==0 &amp; c==1, grp:= 4]
-  dd[a==1 &amp; b==1 &amp; c==0, grp:= 5]
-  dd[a==1 &amp; b==0 &amp; c==1, grp:= 6]
-  dd[a==0 &amp; b==1 &amp; c==1, grp:= 7]
-  dd[a==1 &amp; b==1 &amp; c==1, grp:= 8]
+  dd[, grp := setgrp(a, b, c), keyby = id]
   
   dd[]
   
-}
+}</code></pre>
+<pre class="r"><code>set.seed(298372)
 
-s_model &lt;- function(dd, mod_pool, mod_nopool) {
-  
-  df &lt;- as.data.frame(dd)
-  
-  ### lm
-  
-  getparams &lt;- function(dx) {
-    fit &lt;- lm(y ~ rx, data = dx)
-    c(coef(fit)[&quot;rx&quot;], confint(fit)[2,])
-  }
-  
-  
-  est_cis &lt;- function(sub_grp) {
-    mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;y&quot;, &quot;rx&quot;)], df[, c(sub_grp)]), 
-                        function(x) getparams(x)
-    )
-    do.call(rbind, mean_pred)
-  }
-  
-  cis &lt;- do.call(rbind, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_cis(x)))
-  ci &lt;- getparams(dd)
-  cis &lt;- data.table(rbind(cis, ci))
-  setnames(cis, c(&quot;lm.est&quot;,&quot;lm.025&quot;, &quot;lm.975&quot;))
-  
-  ### bayes
-  
-  fitbayes &lt;- function(mod, dd) {
-    
-    fit &lt;- mod$sample(
-      data = list(N = dd[,.N], rx = dd[,rx], sub_grp = dd[,grp], y = dd[,y]),
-      refresh = 0,
-      chains = 5L,
-      parallel_chains = 5L,
-      iter_warmup = 500,
-      iter_sampling = 3000,
-      adapt_delta = 0.99,
-      max_treedepth = 20
-    )
-    
-    r &lt;- as_draws_rvars(fit$draws(variables = c(&quot;alpha&quot;,&quot;theta&quot;,&quot;sigma&quot;)))
-    
-    est_effects &lt;- function(sub_grp) {
-      mean_pred &lt;- lapply(split(df[,c(sub_grp, &quot;rx&quot;,&quot;pred&quot;)], df[, c(sub_grp, &quot;rx&quot;)]), function(x) rvar_mean(x$pred) )
-      c(mean_pred[[&quot;0.1&quot;]] - mean_pred[[&quot;0.0&quot;]], mean_pred[[&quot;1.1&quot;]] - mean_pred[[&quot;1.0&quot;]])
-    }
-    
-    df &lt;- as.data.frame(dd)
-    
-    df$theta_hat &lt;- r$theta[dd$grp]
-    df$alpha_hat &lt;- r$alpha[dd$grp]
-    df$mu_hat &lt;- with(df, alpha_hat + rx* theta_hat)
-    
-    df$pred &lt;- rvar_rng(rnorm, nrow(df), df$mu_hat, r$sigma)
-    effects &lt;- do.call(c, lapply(c(&quot;a&quot;,&quot;b&quot;,&quot;c&quot;), function(x) est_effects(x)))
-    
-    mean_pred &lt;- lapply(split(df[,c(&quot;rx&quot;,&quot;pred&quot;)], df[, &quot;rx&quot;]), function(x) rvar_mean(x$pred) )
-    overall &lt;- mean_pred[[&quot;1&quot;]] - mean_pred[[&quot;0&quot;]]
-    
-    effects &lt;- c(effects, overall)
-    
-    sumstats &lt;- data.table( 
-      p.025 = quantile(effects, 0.025),
-      p.50 = quantile(effects, 0.50),
-      p.975 = quantile(effects, 0.975)
-    )
-    
-    return(sumstats[])
-  }
-
-  bayes_pool &lt;- fitbayes(mod_pool, dd)
-  bayes_nopool &lt;- fitbayes(mod_nopool, dd)
-  
-  sumstats &lt;-cbind(variable = c(&quot;a = 0&quot;, &quot;a = 1&quot;, &quot;b = 0&quot;, &quot;b = 1&quot;, &quot;c = 0&quot;, &quot;c = 1&quot;, &quot;overall&quot;), 
-                   bayes_pool,
-                   bayes_nopool,
-                   cis)
-  
-  setnames(sumstats, c(&quot;variable&quot;, &quot;p.025&quot;, &quot;p.50&quot;, &quot;p.975&quot;,
-                       &quot;n.025&quot;, &quot;n.50&quot;, &quot;n.975&quot;,
-                       &quot;lm.est&quot;, &quot;lm.025&quot;, &quot;lm.975&quot;))
-  
-  return(sumstats[])
-  
+defs &lt;- s_define()
+s_generate(10, defs)</code></pre>
+<pre><code>##     id a b c theta rx     y grp
+##  1:  1 0 0 1  0.34  0 -3.45   4
+##  2:  2 1 0 1  0.78  1  3.20   6
+##  3:  3 0 0 0 -0.28  1  7.29   1
+##  4:  4 0 1 0 -0.37  1  2.76   3
+##  5:  5 0 0 0 -0.28  0 -0.48   1
+##  6:  6 1 0 0 -0.25  0  1.09   2
+##  7:  7 0 0 0 -0.28  0 -1.45   1
+##  8:  8 0 0 1  0.34  1 -5.78   4
+##  9:  9 1 0 0 -0.25  1  2.97   2
+## 10: 10 1 0 0 -0.25  0 -1.25   2</code></pre>
+<pre class="r"><code>s_model &lt;- function(dd, mod_pool, mod_nopool) {
+  ...
 }
 
 s_replicate &lt;- function(x, n, mod_pool, mod_nopool) {
   
-  set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
+  set_cmdstan_path(path = &quot;/.../cmdstan/2.25.0&quot;)
   
   defs &lt;- s_define()
   generated_data &lt;- s_generate(n, defs)
   estimates &lt;- s_model(generated_data, mod_pool, mod_nopool)
-  
-  estimates[, x := x]
-  
+
   estimates[]
-}
+}</code></pre>
+<pre class="r"><code>set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
 
-### Estimate locally
-
-# mod_pool &lt;- cmdstan_model(&quot;Presentations/subgroup/subs_pool_hpc.stan&quot;)
-# mod_nopool &lt;- cmdstan_model(&quot;Presentations/subgroup/subs_nopool_hpc.stan&quot;)
-# lapply(1:2, function(x) s_replicate(x, 100, mod_pool, mod_nopool))
-
-###
-
-set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
-model_pool &lt;- cmdstan_model(&quot;/gpfs/data/troxellab/ksg/r/subs_pool_hpc.stan&quot;)
-model_nopool &lt;- cmdstan_model(&quot;/gpfs/data/troxellab/ksg/r/subs_nopool_hpc.stan&quot;)
+model_pool &lt;- cmdstan_model(&quot;/.../subs_pool_hpc.stan&quot;)
+model_nopool &lt;- cmdstan_model(&quot;/.../subs_nopool_hpc.stan&quot;)
 
 job &lt;- Slurm_lapply(
   X = 1:2500, 
@@ -191,7 +116,7 @@ job &lt;- Slurm_lapply(
   njobs = 50, 
   mc.cores = 5L,
   job_name = &quot;i_subs&quot;,
-  tmp_path = &quot;/gpfs/data/troxellab/ksg/scratch&quot;,
+  tmp_path = &quot;/.../scratch&quot;,
   plan = &quot;wait&quot;,
   sbatch_opt = list(time = &quot;12:00:00&quot;, partition = &quot;cpu_short&quot;, `mem-per-cpu` = &quot;5G&quot;),
   export = c(&quot;s_define&quot;, &quot;s_generate&quot;, &quot;s_model&quot;),
@@ -201,7 +126,7 @@ job &lt;- Slurm_lapply(
 job
 res &lt;- Slurm_collect(job)
 
-save(res, file = &quot;/gpfs/data/troxellab/ksg/r/sub_0.rda&quot;)</code></pre>
+save(res, file = &quot;/.../sub_0.rda&quot;)</code></pre>
 <pre><code>##    subgroup pooled unpooled    lm
 ## 1:    a = 0 0.0012    0.011 0.083
 ## 2:    a = 1 0.0280    0.039 0.147
@@ -212,4 +137,6 @@ save(res, file = &quot;/gpfs/data/troxellab/ksg/r/sub_0.rda&quot;)</code></pre>
 ## 7:  overall 0.0404    0.050 0.158</code></pre>
 <pre><code>##    pooled unpooled   lm
 ## 1:  0.051     0.11 0.37</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p><a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">here</a>
+<a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">here</a></p>
