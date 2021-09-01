@@ -18,14 +18,15 @@ draft: true
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>In the previous post [include a link], I simulated data from a hypothetical RCT that had heterogeneous treatment effects across subgroups. I presented two Bayesian models, a strongly <em>pooled</em> model and an <em>unpooled</em> version, that could be used estimate all the subgroup effects in a single model. I compared the estimates to a set of linear regression models that were estimated for each subgroup separately. My goal in doing these comparisons is to investigate how often we draw the wrong conclusion about subgroup effects when we conduct these types of analyses. In a typical frequentist framework, the probability of making a mistake is usually considerably greater than the 5% error rate that we allow ourselves, because if we conduct multiple tests we have more chances to make a mistake. By using Bayesian hierarchical models that share information across subgroups, I wanted to see if we can reduce the chances of drawing the wrong conclusions. This follow-up shows the results this quick investigation.</p>
+<p>In the previous <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">post</a>, I simulated data from a hypothetical RCT that had heterogeneous treatment effects across subgroups defined by three covariates. I presented two Bayesian models, a strongly <em>pooled</em> model and an <em>unpooled</em> version, that could be used estimate all the subgroup effects in a single model. I compared the estimates to a set of linear regression models that were estimated for each subgroup separately.</p>
+<p>My goal in doing these comparisons is to see how often we might draw the wrong conclusion about subgroup effects when we conduct these types of analyses. In a typical frequentist framework, the probability of making a mistake is usually considerably greater than the 5% error rate that we allow ourselves, because conducting multiple tests gives us more chances to make a mistake. By using Bayesian hierarchical models that share information across subgroups and more reasonably measure uncertainty, I wanted to see if we can reduce the chances of drawing the wrong conclusions.</p>
 <div id="simulation-framework" class="section level3">
 <h3>Simulation framework</h3>
-<p>The simulations used here are based on the same general process I used to generate a single data set the last time around (and feel free to take a look for more details). The key difference this time around is that I want to understand the operating characteristics of the models, and this requires us to generate many data sets and fit models for each of them. Since much of the modeling is similar to last time, I’m only showing the code that is different this time around. (If you want the detailed code, let me know.)</p>
-<p>This is a pretty computing intensive exercise. While the models don’t take too long to fit, especially with only 150 observations per data set, fitting 2500 sets of models can take some time. As I do for all the simulations that require repeated Bayesian estimation, I executed all of this on a high-performance computer. I used a framework similar to what I’ve described for conducting <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">power analyses</a> and <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">exploring</a> the operating characteristics of Bayesian models.</p>
+<p>The simulations used here are based on the same general process I used to generate a single data set the <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">last time around</a>. The key difference that I now want to understand the operating characteristics of the models, and this requires many data sets (and their model fits). Since much of the modeling is similar to last time, I’m only showing the code here that is different. (If you want to see the detailed code, let me know.)</p>
+<p>This is a pretty computing intensive exercise. While the models don’t take too long to fit, especially with only 150 observations per data set, fitting 2500 sets of models can take some time. As I do for all the simulations that require repeated Bayesian estimation, I executed all of this on a high-performance computer. I used a framework similar to what I’ve described for conducting <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">power analyses</a> and <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">exploring the operating characteristics</a> of Bayesian models.</p>
 <div id="definitions" class="section level4">
 <h4>Definitions</h4>
-<p>The definitions are the same, except I’ve made the generation of <code>theta</code> more flexible. Last time around, I fixed the coefficients at specific values. Here, the coefficients can vary from iteration to iteration. Even though I am generating data with no treatment effect, I am taking a Bayesian point of view on this - so that the treatment effect parameters will have a distribution that is centered around 0 with very low variance.</p>
+<p>The definitions of the data generation process are the same as in the previous post, except I’ve made the generation of <code>theta</code> more flexible. Last time, I fixed the coefficients at specific values. Here, the coefficients can vary from iteration to iteration. Even though I am generating data with no treatment effect, I am taking a Bayesian point of view on this - so that the treatment effect parameters will have a distribution that is centered around 0 with very low variance.</p>
 <pre class="r"><code>library(cmdstanr)
 library(simstudy)
 library(posterior)
@@ -118,7 +119,7 @@ s_replicate &lt;- function(x, n, mod_pool, mod_nopool) {
 
   estimates[]
 }</code></pre>
-<p>This is the code splits the task up so that 50 multi-core computing nodes each run 50 replications. There’s actually parallelization in parallel, as each of the nodes has multiple processors so that each Bayes model can be esimated using parallel chains:</p>
+<p>This is the code splits the task up so that 50 multi-core computing nodes each runs 50 replications. There’s actually parallelization in parallel, as each of the nodes has multiple processors so the Bayesian models can be estimated with parallel chains:</p>
 <pre class="r"><code>set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
 
 model_pool &lt;- cmdstan_model(&quot;/.../subs_pool_hpc.stan&quot;)
@@ -144,10 +145,14 @@ job
 res &lt;- Slurm_collect(job)
 
 save(res, file = &quot;/.../sub_0.rda&quot;)</code></pre>
-<p>The figure shows the results from 80 models. Each column is a different subgroup (and the last is the overall treatment effect estimate). The intervals are the 95% credible intervals from the Bayes model, and the 95% confidence interval from the linear regression model. The intervals are color coded based on whether the interval includes 0 (grey) or not (red). The cases with red intervals are ones we might conclude incorrectly that there is indeed some sort of effect. It is apparent, that there are many more red lines for the linear regression estimates compared to either of the Bayesian models</p>
+</div>
+</div>
+<div id="results" class="section level3">
+<h3>Results</h3>
+<p>The figure shows the results from 80 models. Each column is a different subgroup (and the last is the overall treatment effect estimate). The intervals are the 95% credible intervals from the Bayesian models, and the 95% confidence interval from the linear regression model. The intervals are color coded based on whether the interval includes 0 (grey) or not (red). The red intervals are cases where we might incorrectly conclude that there is indeed some sort of effect. There are many more red lines for the linear regression estimates compared to either of the Bayesian models:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
-<p>For the full set of 2500 replications, here are the proportion of cases where at least one of the subgroup (or overall) intervals did not include 0. The <em>pooled</em> Bayes model, even without any kind of adjustment for multiple testing, was about 5%:</p>
+<p>For the full set of 2500 replications, about 5% of the intervals from the <em>pooled</em> Bayes did not include 0, lower than the <em>unpooled</em> model, and far below the approach using individual subgroup regression models:</p>
 <pre><code>##    pooled unpooled   lm
 ## 1:  0.051     0.11 0.37</code></pre>
-</div>
+<p>I’m not sure that the journal reviewers would buy this argument, but it seems that pooling estimates across subgroups provides a viable way to guard against making overly strong statements about effect sizes when they are not really justified.</p>
 </div>
