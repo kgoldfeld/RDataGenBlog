@@ -1,0 +1,469 @@
+---
+title: Analyzing a factorial trial with a Bayesian model
+author: Package Build
+date: '2021-09-21'
+slug: []
+categories: []
+tags:
+  - Bayesian model
+  - Stan
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+A few years ago, I [described](https://www.rdatagen.net/post/testing-many-interventions-in-a-single-experiment/){target="_blank"} a soon-to-be implemented`simstudy` function `genMultiFac` that facilitates the generation of multi-factorial study data. I [followed up](https://www.rdatagen.net/post/so-how-efficient-are-multifactorial-experiments-part/){target="_blank"} that post with a description of how we can use these types of efficient designs to answer multiple questions in the context of a single study. 
+
+Fast forward three years, and I am thinking about these designs again for a new grant application that proposes simultaneously studying three interventions to reduce emergency department (ED) use for people living with dementia. The primary interest is to evaluate each intervention on its own terms, but also to assess whether any combinations seem to be particularly effective. While this will be a fairly large cluster randomized trial with about 80 EDs being randomized to one of the 8 possible combinations, I was concerned about our ability to estimate the interaction effects of multiple interventions with sufficient precision to draw useful conclusions, particularly if the combined effects of two or three interventions are less than additive. (That is, two interventions may be better than one, but not twice as good.)
+
+I am thinking that a null hypothesis testing framework might not be so useful here, given the likelihood of uncertainty in the measures, not to mention the multiple statistical tests that we would need to conduct (and presumably adjust for). Rather, a Bayesian approach that pools estimates across interventions and provides posterior probability distributions may provide more insight into how the interventions interact could be a better way to go.
+
+With this in mind, I went to the literature, and I found these papers by [*Kassler et al*](https://journals.sagepub.com/doi/full/10.1177/0193841X18818903){target="_blank"} and [*Gelman*](https://projecteuclid.org/journals/annals-of-statistics/volume-33/issue-1/Analysis-of-variancewhy-it-is-more-important-than-ever/10.1214/009053604000001048.full){target="_blank"}. They both describe a way of thinking about interaction estimation that emphasizes variation rather than point estimates. I went ahead and tested out the idea with simulated data, and am showing that here.  Ultimately, I decided that this approach will not work so well for our study, and I came up with a pretty simple solution that I will share next time, really more to contrast with this solution than because it is intrinsically interesting.
+
+### Identifying interaction through variance
+
+The scenarios described by both papers involves studies that may be evaluating many possible interventions or exposures, each of which may have two or more levels. If we are dealing with a normally distributed (continuous) outcome measure, we can model that outcome as 
+
+$$
+y_{i} \sim N\left(\mu = \tau_0 + \tau^1_{j_{1_i}} + \dots + \tau^k_{j_{k_i}} + \tau^{12}_{j_{12_i}} + \dots + \tau^{k-1, k}_{j_{k-1,k_i}} + \tau^{123}_{123_i} + \dots + \tau^{k-2, k-1, k}_{k-2, k-1, k_i} + \dots, \ \sigma = \sigma_0\right),
+$$
+
+where there are $K$ interventions, and intervention $k$ has $j_k$ levels. (So, if intervention $3$ has 4 levels, $j_3 = 4.$) $\tau_0$ is effectively the grand mean. $\tau^k_1, \tau^k_2, \dots, \tau^k_{j_k},$  are the mean contributions for the $k$th, and we constrain $\sum_{m=1}^{j_k} \tau^k_m = 0.$ (Again, for intervention $3$, we have $\tau^3_1 \dots, \tau^3_4,$ with $\sum_{m=1}^{4} \tau^3_m = 0.$)
+
+The adjustments made for the two-way interactions are represented by the $\tau^{12}$'s through the $\tau^{k-1,k}$'s. If intervention 5 has $2$ levels then for the interaction between interventions 3 and 5 we have $\tau^{35}_{11}, \tau^{35}_{12}, \tau^{35}_{21}, \dots, \tau^{35}_{42}$ and $\sum_{m=1}^4 \sum_{n=1}^2 \tau^{35}_{m,n} = 0.$
+
+This pattern continues for higher orders of interaction (i.e. 3-way, 4-way, etc.).
+
+In the Bayesian model, each set of $\tau_k$'s shares a common prior distribution with mean 0 and standard deviation $\sigma_k$:
+
+$$
+\tau^k_1, \dots, \tau^k_{j_k}, \sim N(\mu = 0, \sigma = \sigma_k),
+$$
+where $\sigma_k$ is a hyperparameter that will be estimated from the data. The same is true for the interaction terms for interventions $k$ and $l$:
+
+$$
+\tau^{kl}_{11}, \dots, \tau^{kl}_{j_k, j_l}, \sim N(\mu = 0, \sigma = \sigma_{kl}), \ \ \text{where } k < l
+$$
+
+To assess whether there is interaction between the interventions (i.e. the effects are not merely additive), we are actually interested the variance parameters of the interaction $\tau\text{'s}$. If, for example there is no interaction between different levels of interventions of 3 and 5, then $\sigma_{35}$ should be close to $0$, implying that $\tau^{35}_{11} \approx \tau^{35}_{12} \approx \dots \approx \tau^{35}_{42} \approx 0$. On the other hand, if there is some interaction effect, then  $\sigma_{35} > 0,$ implying that at least one $\tau^{35} > 0.$
+
+One advantage of the proposed Bayesian model is that we can use partial pooling to get more precise estimates of the variance terms. By this, I mean that we can use information from each $\sigma^{kl}$ to inform the others. So, in the case of 2-way interaction, the prior probability assumption would suggest that the the variance terms were drawn from a common distribution:
+
+$$
+\sigma^{12}, \sigma^{13}, \dots, \sigma^{k-1,k} \sim N(\mu = 0, \sigma = \sigma_{\text{2-way}}) 
+$$
+
+We can impose more structure (and hopefully precision) by doing the same for the main effects:
+
+$$
+\sigma^{1}, \sigma^{2}, \dots, \sigma^{k} \sim N(\mu = 0, \sigma = \sigma_{\text{main}}) 
+$$
+
+Of course, for each higher order interaction (above 2-way), we could impose the same structure:
+
+$$
+\sigma^{123}, \dots, \sigma^{12k}, \dots, \sigma^{k-2, k-1, k} \sim N(\mu = 0, \sigma = \sigma_{\text{3-way}}) 
+$$
+
+And so on. Though at some point, we might want to assume that there is no interaction and exclude from the model; in most cases, we could stop at 2- or 3-way interaction and probably not sacrifice too much.
+
+### Example from simulation
+
+When I set out to explore this model, I started relatively simple, using only two interventions with four levels each. In this case, the factorial study would have 16 total arms $(4 \times 4)$. (Since I am using only 2 interventions, I am changing the notation slightly, using interventions $a$ and $b$ rather than $1$ and $2$.) Individual $i$ is randomized to one level in $a$ and one level $b$, and $a_i \in \{1,2,3,4\}$ and $b_i\in \{1,2,3,4\}$, and $ab_i \in \{11, 12, 13, 14, 21, 22, \dots, 44\}.$ In this case, the outcome $y$ is a continuous measure. Using the same general model from above, here is the specific model for $y$:
+
+$$
+y_{i} \sim N\left(\mu = \tau_0 + \tau^a_{a_i} + \tau^b_{b_i} + \tau^{ab}_{ab_i}, \ \sigma = \sigma_0\right)
+$$
+
+<br>
+
+Take note that we only have a single set of 2-way interactions since there are only two groups of interventions. Because of this, there is no need for a $\sigma_{\text{2-way}}$ hyperparameter; however, there is a hyperparameter $\sigma_{\text{main}}$ to pool across the main effects of $a$ and $b$.  Here are the prior distribution assumptions:  
+
+\begin{aligned}
+  \tau_0 &\sim N(0, 5) \\
+  \tau^a_1, \tau^a_2, \tau^a_3, \tau^a_4 &\sim N(0, \sigma_a) \\
+  \tau^b_1, \tau^b_2, \tau^b_3, \tau^b_4 &\sim N(0, \sigma_b) \\
+  \tau^{ab}_{11}, \tau^{ab}_{12}, \dots \tau^{ab}_{44} &\sim N(0, \sigma_{ab}) \\
+  \sigma_a, \sigma_b &\sim N(0, \sigma_\text{main}) \\
+  \sigma_{ab} &\sim N(0, 5) \\
+  \sigma_\text{main} &\sim N(0, 5) \\
+  \sigma &\sim N(0,5)
+\end{aligned}
+
+In order to ensure identifiability, we have the following constraints:
+
+\begin{aligned}
+  \tau^a_1 + \tau^a_2 + \tau^a_3 + \tau^a_4 &= 0 \\
+  \tau^b_1 + \tau^b_2 + \tau^b_3 + \tau^b_4 &= 0 \\
+  \tau^{ab}_{11} + \tau^{ab}_{12} + \dots + \tau^{ab}_{43} + \tau^{ab}_{44} &= 0 
+\end{aligned}
+
+
+The model as implemented in Stan using a *non-centered* parameterization, so will be slightly different from what is shown here. This does not dramatically change the estimates, but eliminates [divergent](https://www.rdatagen.net/post/diagnosing-and-dealing-with-estimation-issues-in-the-bayesian-meta-analysis/){target="_blank"} chains, improving sampling behavior.
+
+### Required libraries
+
+```{r, message=FALSE, warning-FALSE}
+library(simstudy)
+library(data.table)
+library(cmdstanr)
+library(caret)
+library(posterior)
+library(bayesplot)
+library(ggdist)
+library(glue)
+```
+
+
+### Data generation
+
+The parameters $\tau_0, \tau_a, \tau_b, \text{ and } \tau_{ab}$ are set so that there is greater variation in treatment $a$ compared to treatment $b$. In both cases, the sum of the parameters is set to $0$.
+
+```{r}
+t_0 <- 0
+t_a <- c(-8, -1, 3, 6)
+t_b <- c(-3, -1, 0, 4)
+```
+
+The interaction is set in this case so that there is an added effect when both $a=2 \text{ & } b=2$ and $a=3 \text{ & } b=2$. Again, the parameters are set so that the *sum-to-zero* constraint is maintained.
+
+```{r}
+x <- c(4, 3) 
+nox <- - sum(x) / (16 - length(x))
+
+t_ab <- matrix(c(nox, nox, nox, nox,
+                 nox,   4, nox, nox,
+                 nox,   3, nox, nox,
+                 nox, nox, nox, nox), nrow = 4, byrow = TRUE)
+```
+
+The data definitions for the arm assignments and the outcome $y$ are established using the `simstudy` package:
+
+```{r}
+d1 <- defDataAdd(varname = "y", formula = "mu", variance = 16, dist = "normal")
+```
+
+Now we are ready to generate the data:
+
+```{r}
+set.seed(110)
+
+dd <- genMultiFac(nFactors = 2, levels = 4, each = 30, colNames = c("a", "b"))
+dd[, mu := t_0 + t_a[a] + t_b[b] + t_ab[a, b], keyby = id]
+dd <- addColumns(d1, dd)
+```
+
+<br>
+
+#### Plot of $\bar{y}$ by arm
+
+```{r, echo=FALSE, fig.height = 3, message=FALSE}
+library(paletteer)
+
+dsum <- dd[, .(yhat = mean(y)), keyby = .(a, b)]
+
+ggplot(data = dsum, aes(x=b, y = yhat)) +
+  geom_vline(aes(xintercept = b), color = "white", size = .25) +
+  geom_line(color = "#06295e", size =1.25) +
+ # geom_point(color = "white", size = 2.5) +
+  facet_grid(.~a, labeller = labeller(a = label_both)) +
+  theme(panel.grid = element_blank())  + 
+  scale_color_brewer()
+
+# ggplot(data = dsum, aes(x = factor(b), y = yhat)) +
+#   geom_point(aes(color = factor(a)), size = 2) +
+#   geom_line(color ) +
+#   xlab("arm b") +
+#   ylab("average y") +
+#   theme(panel.grid = element_blank()) +
+#   scale_color_paletteer_d("wesanderson::Moonrise2",
+#       name = "arm a",
+#       guide = guide_legend(reverse = TRUE) )
+```
+
+### Stan code
+
+The implementation of the model described above in Stan uses *non-centered* parameterization, so that the parameters $tau$ are a function of a set of $z$ parameters, which are standard normal parameters.
+
+```{stan, output.var="mod", eval=FALSE}
+data {
+  
+  int<lower=1> N;        // # of observations
+  int<lower=1> I;        // # of interventions
+  int<lower=1> X2;       // # of 2-way interactions
+  int main[N, I];        // interventions
+  int x[N, X2];          // interactions
+  vector[N] y;           // outcome
+  
+}
+
+parameters {
+  
+  real t_0;
+  
+  vector[3] z_raw[I];
+  vector[15] z_x_raw[X2];
+  
+  real<lower=0> sigma;
+  real<lower=0> sigma_m[I];
+  real<lower=0> sigma_x[X2];
+  
+  real<lower=0> sigma_main;
+
+}
+
+transformed parameters {
+  
+  // constrain parameters to sum to 0
+  
+  vector[4] z[I]; 
+  vector[16] z_x[X2]; 
+  
+  vector[4] t[I];
+  vector[16] t_x[X2];
+  
+  vector[N] yhat;
+  
+  for (i in 1:I) {
+    z[i] = append_row(z_raw[i], -sum(z_raw[i]));    
+  }
+  
+  for (i in 1:X2) {
+    z_x[i] = append_row(z_x_raw[i], -sum(z_x_raw[i]));    
+  }
+
+  for (i in 1:I) 
+     for (j in 1:4) 
+        t[i, j] = sigma_m[i] * z[i, j];
+        
+  for (i in 1:X2) 
+     for (j in 1:16) 
+        t_x[i, j] = sigma_x[i] * z_x[i, j];
+     
+  // yhat
+  
+  for (n in 1:N) {
+    real ytemp; 
+    ytemp = t_0;
+    for (i in 1:I) ytemp = ytemp + t[i, main[n, i]]; // 2 sets of main effects
+    for (i in 1:X2) ytemp = ytemp + t_x[i, x[n, i]]; // 1 set of interaction effects
+    yhat[n] = ytemp;
+  }
+}
+
+model {
+  
+  sigma ~ normal(0, 5);
+  sigma_m ~ normal(0, sigma_main);
+  sigma_x ~ normal(0, 5);
+  
+  sigma_main ~ normal(0, 5);
+  
+  t_0 ~ normal(0, 5);
+
+  for (i in 1:I) z_raw[i] ~ std_normal();
+  for (i in 1:X2) z_x_raw[i] ~ std_normal();
+
+  y ~ normal(yhat, sigma);
+
+}
+
+
+```
+
+### Sampling from the posterior
+
+This first function simply generates the data needed by the `Stan` code. The most important element is the conversion of the $tau_{ab}$ design matrix of 0's and 1's to a single vector with values ranging from 1 to 16.
+
+```{r, message=FALSE, warning=FALSE}
+dt_to_list <- function(dx) {
+  
+  dx[, a_f := factor(a)]
+  dx[, b_f := factor(b)]
+  
+  dv <- dummyVars(~ b_f:a_f , data = dx, n = c(4, 4))
+  dp <- predict(dv, dx )
+  
+  N <- nrow(dx)                               ## number of observations 
+  I <- 2
+  X2 <- 1
+  
+  main <- as.matrix(dx[,.(a,b)])
+
+  ab <- as.vector(dp %*% c(1:16))  
+  x <- as.matrix(ab, nrow = N, ncol = X2)
+  
+  y <- dx[, y]
+  
+  list(N=N, I=I, X2=X2, main=main, x=x, y=y)
+  
+}
+```
+
+
+```{r, eval = FALSE}
+mod <- cmdstan_model("code/model_4_factors_alt.stan", force_recompile = TRUE)
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500,
+  adapt_delta = 0.99,
+  step_size = .05,
+  max_treedepth = 20,
+  seed = 1721
+)
+```
+
+```{r, echo = FALSE}
+if (file.exists("code/model_4_factors_alt")) unlink("code/model_4_factors_alt")
+
+mod <- cmdstan_model("code/model_4_factors_alt.stan", force_recompile = TRUE)
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500,
+  adapt_delta = 0.99,
+  step_size = .05,
+  max_treedepth = 20,
+  show_messages = FALSE
+)
+```
+
+### Diagnostic checks
+
+I am showing just one set of trace plots to indicate that the sampling went quite well - the variables not shown are equally well-behaved.
+
+```{r, fig.height = 3, fig.width=6}
+posterior <- as_draws_array(fit$draws())
+mcmc_trace(posterior, pars = glue("t[{1},{1:4}]"))
+```
+
+Likewise, the `rhat` estimates are very close to 1:
+
+```{r}
+fit$summary(variables = c("t_0", "t"))
+```
+
+### Look at posterior distributions
+
+An examination of the posterior distributions indicate that the model might not be too bad. For $\tau^a$ the values were $\{-8, -1, 3, 6\}$, and the sample medians were $\{-8.4, -0.3, 3.4, 5.3\}$, not too bad. However,for $\tau^b$, the true parameters were $\{-3, -1, 0, 4\}$, and the medians from the sample were $\{-3.2, 0.4, -0.5, 3.2\}$, maybe also not too bad. There is quite a bit more variability in the samples of the $\tau^{ab}$'s, so it is a bit harder to assess. While $\tau^{ab}_{22}$ (t_ab[6]) and $\tau^{ab}_{23}$ (t_ab[10]) seem reasonable, the parameters that do not include any true interaction seem a bit too variable - but this may just be unavoidable. 
+
+```{r, fig.width = 6, fig.height = 4}
+mcmc_intervals(posterior, pars = c(glue("t[{1},{1:4}]"), glue("t[{2},{1:4}]")))
+
+mcmc_intervals(posterior, pars = glue("t_x[1,{1:16}]"))
+
+mcmc_intervals(posterior, pars = c(glue("sigma_m[{1:2}]"), "sigma_x[1]"))
+```
+
+This final figure shows medians of the expected mean for $a/b$ pair (dashed line) on top of the observed means - a virtually perfect fit. So, even though there is considerable variability in the individual parameter estimates, the overall "cell" estimates appear to be spot on.
+
+```{r, echo = FALSE, fig.height=3}
+r <- as_draws_rvars(fit$draws(variables = c("t_0","t", "t_x")))
+
+dnew <- data.frame(genMultiFac(nFactors = 2, levels = 4, each = 1, colNames = c("b", "a")))
+dnew$yhat <- with(r, rep(t_0, 16) + rep(t[1, ], each = 4) + rep(t[2, ], times = 4) + t(t_x))
+
+ggplot(data = dnew, aes(x=b, dist = yhat)) +
+  geom_vline(aes(xintercept = b), color = "white", size = .25) +
+  stat_dist_lineribbon() +
+  geom_point(data = dsum, aes(y = yhat), color = "white", size = 2) +
+  facet_grid(.~a, labeller = labeller(a = label_both)) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank())  + 
+  scale_fill_brewer()
+```
+
+### Only one treatment effect and no interaction
+
+```{r}
+t_0 <- 0
+t_a <- c(-8, -1, 3, 6)
+t_b <- c(0, 0, 0, 0)
+t_ab <- matrix(0, nrow = 4, ncol = 4)
+```
+
+```{r, echo=FALSE, fig.height = 3, message=FALSE}
+set.seed(110)
+
+dd <- genMultiFac(nFactors = 2, levels = 4, each = 30, colNames = c("a", "b"))
+dd[, mu := t_0 + t_a[a] + t_b[b] + t_ab[a, b], keyby = id]
+dd <- addColumns(d1, dd)
+
+dsum <- dd[, .(yhat = mean(y)), keyby = .(a, b)]
+
+ggplot(data = dsum, aes(x=b, y = yhat)) +
+  geom_vline(aes(xintercept = b), color = "white", size = .25) +
+  geom_line(color = "#06295e", size =1.25) +
+  facet_grid(.~a, labeller = labeller(a = label_both)) +
+  theme(panel.grid = element_blank())  + 
+  scale_color_brewer()
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 500,
+  iter_sampling = 2500,
+  adapt_delta = 0.99,
+  step_size = .05,
+  max_treedepth = 20,
+  show_messages = FALSE
+)
+
+posterior <- as_draws_array(fit$draws())
+```
+
+```{r, echo=FALSE, fig.width = 6, fig.height = 4}
+mcmc_intervals(posterior, pars = c(glue("t[{1},{1:4}]"), glue("t[{2},{1:4}]")))
+
+mcmc_intervals(posterior, pars = glue("t_x[1,{1:16}]"))
+
+mcmc_intervals(posterior, pars = c(glue("sigma_m[{1:2}]"), "sigma_x[1]"))
+```
+
+```{r, echo = FALSE, fig.height=3}
+r <- as_draws_rvars(fit$draws(variables = c("t_0","t", "t_x")))
+
+dnew <- data.frame(genMultiFac(nFactors = 2, levels = 4, each = 1, colNames = c("b", "a")))
+dnew$yhat <- with(r, rep(t_0, 16) + rep(t[1, ], each = 4) + rep(t[2, ], times = 4) + t(t_x))
+
+ggplot(data = dnew, aes(x=b, dist = yhat)) +
+  geom_vline(aes(xintercept = b), color = "white", size = .25) +
+  stat_dist_lineribbon() +
+  geom_point(data = dsum, aes(y = yhat), color = "white", size = 2) +
+  facet_grid(.~a, labeller = labeller(a = label_both)) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major = element_blank())  + 
+  scale_fill_brewer()
+```
+
+
+Didn't work with small number of interventions that only had 2 levels each, so didn't do a more thorough investigation with more interventions with a variety of levels, as described in the papers.
+
+<p><small><font color="darkkhaki">
+
+References:
+
+Gelman, Andrew. "Analysis of variance—why it is more important than ever." *The annals of statistics* 33, no. 1 (2005): 1-53.
+
+Kassler, Daniel, Ira Nichols-Barrer, and Mariel Finucane. "Beyond “treatment versus control”: How Bayesian analysis makes factorial experiments feasible in education research." *Evaluation review* 44, no. 4 (2020): 238-261.
+
+</font></small></p>
+
