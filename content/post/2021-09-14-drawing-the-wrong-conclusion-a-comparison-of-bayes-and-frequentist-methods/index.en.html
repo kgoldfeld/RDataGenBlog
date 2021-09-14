@@ -1,8 +1,8 @@
 ---
 title: 
   'Drawing the wrong conclusion about subgroups: a comparison of Bayes and frequentist methods'
-author: Package Build
-date: '2021-09-07'
+author:
+date: '2021-09-14'
 slug: []
 categories: []
 tags:
@@ -12,21 +12,20 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>In the previous <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">post</a>, I simulated data from a hypothetical RCT that had heterogeneous treatment effects across subgroups defined by three covariates. I presented two Bayesian models, a strongly <em>pooled</em> model and an <em>unpooled</em> version, that could be used estimate all the subgroup effects in a single model. I compared the estimates to a set of linear regression models that were estimated for each subgroup separately.</p>
+<p>In the previous <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">post</a>, I simulated data from a hypothetical RCT that had heterogeneous treatment effects across subgroups defined by three covariates. I presented two Bayesian models, a strongly <em>pooled</em> model and an <em>unpooled</em> version, that could be used to estimate all the subgroup effects in a single model. I compared the estimates to a set of linear regression models that were estimated for each subgroup separately.</p>
 <p>My goal in doing these comparisons is to see how often we might draw the wrong conclusion about subgroup effects when we conduct these types of analyses. In a typical frequentist framework, the probability of making a mistake is usually considerably greater than the 5% error rate that we allow ourselves, because conducting multiple tests gives us more chances to make a mistake. By using Bayesian hierarchical models that share information across subgroups and more reasonably measure uncertainty, I wanted to see if we can reduce the chances of drawing the wrong conclusions.</p>
 <div id="simulation-framework" class="section level3">
 <h3>Simulation framework</h3>
-<p>The simulations used here are based on the same general process I used to generate a single data set the <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">last time around</a>. The key difference that I now want to understand the operating characteristics of the models, and this requires many data sets (and their model fits). Since much of the modeling is similar to last time, I’m only showing the code here that is different. (If you want to see the detailed code, let me know.)</p>
+<p>The simulations used here are based on the same general process I used to generate a single data set the <a href="https://www.rdatagen.net/post/2021-08-31-subgroup-analysis-using-a-bayesian-hierarchical-model/" target="_blank">last time around</a>. The key difference is that I now want to understand the operating characteristics of the models, and this requires many data sets (and their model fits). Much of the modeling is similar to last time, so I’m primarily showing new code.</p>
 <p>This is a pretty computing intensive exercise. While the models don’t take too long to fit, especially with only 150 observations per data set, fitting 2500 sets of models can take some time. As I do for all the simulations that require repeated Bayesian estimation, I executed all of this on a high-performance computer. I used a framework similar to what I’ve described for conducting <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">power analyses</a> and <a href="https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/" target="_blank">exploring the operating characteristics</a> of Bayesian models.</p>
 <div id="definitions" class="section level4">
 <h4>Definitions</h4>
-<p>The definitions of the data generation process are the same as in the previous post, except I’ve made the generation of <code>theta</code> more flexible. Last time, I fixed the coefficients at specific values. Here, the coefficients can vary from iteration to iteration. Even though I am generating data with no treatment effect, I am taking a Bayesian point of view on this - so that the treatment effect parameters will have a distribution that is centered around 0 with very low variance.</p>
+<p>The definitions of the data generation process are the same as in the previous post, except I’ve made the generation of <code>theta</code> more flexible. Last time, I fixed the coefficients (<span class="math inline">\(\tau\)</span>’s) at specific values. Here, the <span class="math inline">\(\tau\)</span>’s can vary from iteration to iteration. Even though I am generating data with no treatment effect, I am taking a Bayesian point of view on this - so that the treatment effect parameters will have a distribution that is centered around 0 with very low variance.</p>
 <pre class="r"><code>library(cmdstanr)
 library(simstudy)
 library(posterior)
@@ -69,7 +68,7 @@ s_define &lt;- function() {
 </div>
 <div id="data-generation" class="section level4">
 <h4>Data generation</h4>
-<p>Nothing has really changed here, except that I am now generating 8 values of <code>tau</code> for each iteration from a <span class="math inline">\(N(\mu = 0, \sigma = 0.5)\)</span> distribution.</p>
+<p>We are generating the eight values of <code>tau</code> for each iteration from a <span class="math inline">\(N(\mu = 0, \sigma = 0.5)\)</span> distribution before generating <code>theta</code> and the outcome <code>y</code>:</p>
 <pre class="r"><code>s_generate &lt;- function(n, list_of_defs) {
   
   list2env(list_of_defs, envir = environment())
@@ -85,7 +84,7 @@ s_define &lt;- function() {
   dd[]
   
 }</code></pre>
-<p>Here is a single data set - we can see that <code>theta</code> is close to 0 but not exactly 0 as we would typically do in simulation using a frequentist framework (where the parameters are presumed known).</p>
+<p>Looking at a single data set, we can see that <code>theta</code> is close to, but is not exactly 0, as we would typically do in simulation using a frequentist framework (where the parameters are presumed known).</p>
 <pre class="r"><code>set.seed(298372)
 
 defs &lt;- s_define()
@@ -104,7 +103,7 @@ s_generate(10, defs)</code></pre>
 </div>
 <div id="model-fitting" class="section level4">
 <h4>Model fitting</h4>
-<p>The models here are precisely how I defined it in the last post. The code is a bit involved, so I opted to exclude it. For each data set, I fit a set of subgroup-specific linear regression models (as well as an overall model that ignored the subgroups), in addition to the two Bayesian models described in the previous post. Each replication defines the data, generates a new data set, and estimates the three different models before returning the results.</p>
+<p>The models here are precisely how I defined it in the last post. The code is a bit involved, so I’m not including it - let me know if you’d like to see it. For each data set, I fit a set of subgroup-specific linear regression models (as well as an overall model that ignored the subgroups), in addition to the two Bayesian models described in the previous post. Each replication defines the data, generates a new data set, and estimates the three different models before returning the results.</p>
 <pre class="r"><code>s_model &lt;- function(dd, mod_pool, mod_nopool) {
   ...
 }
@@ -119,7 +118,7 @@ s_replicate &lt;- function(x, n, mod_pool, mod_nopool) {
 
   estimates[]
 }</code></pre>
-<p>This is the code splits the task up so that 50 multi-core computing nodes each runs 50 replications. There’s actually parallelization in parallel, as each of the nodes has multiple processors so the Bayesian models can be estimated with parallel chains:</p>
+<p>The computation is split up so that 50 multi-core computing nodes run 50 replications. There’s actually parallelization in parallel, as each of the nodes has multiple processors so the Bayesian models can be estimated with parallel chains:</p>
 <pre class="r"><code>set_cmdstan_path(path = &quot;/gpfs/share/apps/cmdstan/2.25.0&quot;)
 
 model_pool &lt;- cmdstan_model(&quot;/.../subs_pool_hpc.stan&quot;)
