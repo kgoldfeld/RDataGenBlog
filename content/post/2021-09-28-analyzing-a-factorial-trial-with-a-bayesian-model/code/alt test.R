@@ -59,7 +59,7 @@ dt_to_list <- function(dx) {
 }
 
 
-dir <- "/Users/keith/git R projects/rdatagen/content/post/2021-09-21-analyzing-a-factorial-trial-with-a-bayesian-model"
+dir <- "/Users/keith/git R projects/rdatagen/content/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model"
 if (getwd() != dir) setwd(dir)
 
 if (file.exists("code/model_4_factors_alt")) unlink("code/model_4_factors_alt")
