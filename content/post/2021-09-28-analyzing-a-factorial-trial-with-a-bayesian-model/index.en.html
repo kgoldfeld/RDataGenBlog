@@ -17,7 +17,7 @@ draft: true
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>A few years ago, I <a href="https://www.rdatagen.net/post/testing-many-interventions-in-a-single-experiment/" target="_blank">described</a> a soon-to-be implemented<code>simstudy</code> function <code>genMultiFac</code> that facilitates the generation of multi-factorial study data. I <a href="https://www.rdatagen.net/post/so-how-efficient-are-multifactorial-experiments-part/" target="_blank">followed up</a> that post with a description of how we can use these types of efficient designs to answer multiple questions in the context of a single study.</p>
+<p>Way back in 2018, long before the pandemic, I <a href="https://www.rdatagen.net/post/testing-many-interventions-in-a-single-experiment/" target="_blank">described</a> a soon-to-be implemented <code>simstudy</code> function <code>genMultiFac</code> that facilitates the generation of multi-factorial study data. I <a href="https://www.rdatagen.net/post/so-how-efficient-are-multifactorial-experiments-part/" target="_blank">followed up</a> that post with a description of how we can use these types of efficient designs to answer multiple questions in the context of a single study.</p>
 <p>Fast forward three years, and I am thinking about these designs again for a new grant application that proposes simultaneously studying three interventions to reduce emergency department (ED) use for people living with dementia. The primary interest is to evaluate each intervention on its own terms, but also to assess whether any combinations seem to be particularly effective. While this will be a fairly large cluster randomized trial with about 80 EDs being randomized to one of the 8 possible combinations, I was concerned about our ability to estimate the interaction effects of multiple interventions with sufficient precision to draw useful conclusions, particularly if the combined effects of two or three interventions are less than additive. (That is, two interventions may be better than one, but not twice as good.)</p>
 <p>I am thinking that a null hypothesis testing framework might not be so useful here, given the likelihood of uncertainty in the measures, not to mention the multiple statistical tests that we would need to conduct (and presumably adjust for). Rather, a Bayesian approach that pools estimates across interventions and provides posterior probability distributions may provide more insight into how the interventions interact could be a better way to go.</p>
 <p>With this in mind, I went to the literature, and I found these papers by <a href="https://journals.sagepub.com/doi/full/10.1177/0193841X18818903" target="_blank"><em>Kassler et al</em></a> and <a href="https://projecteuclid.org/journals/annals-of-statistics/volume-33/issue-1/Analysis-of-variancewhy-it-is-more-important-than-ever/10.1214/009053604000001048.full" target="_blank"><em>Gelman</em></a>. They both describe a way of thinking about interaction estimation that emphasizes variation rather than point estimates. I went ahead and tested out the idea with simulated data, and am showing that here. Ultimately, I decided that this approach will not work so well for our study, and I came up with a pretty simple solution that I will share next time, really more to contrast with this solution than because it is intrinsically interesting.</p>
@@ -169,14 +169,14 @@ fit &lt;- mod$sample(
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 15.4 seconds.
-## Chain 1 finished in 17.6 seconds.
-## Chain 3 finished in 19.9 seconds.
-## Chain 4 finished in 22.7 seconds.
+## Chain 2 finished in 15.2 seconds.
+## Chain 1 finished in 17.3 seconds.
+## Chain 3 finished in 19.6 seconds.
+## Chain 4 finished in 22.5 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 18.9 seconds.
-## Total execution time: 22.9 seconds.</code></pre>
+## Mean chain execution time: 18.6 seconds.
+## Total execution time: 22.7 seconds.</code></pre>
 </div>
 <div id="diagnostic-checks" class="section level3">
 <h3>Diagnostic checks</h3>
@@ -187,7 +187,7 @@ mcmc_trace(posterior, pars = glue(&quot;t[{1},{1:4}]&quot;))</code></pre>
 </div>
 <div id="variance-estimates" class="section level3">
 <h3>Variance estimates</h3>
-<p>Since we are focused on the possibility of 2-way interaction, the primary parameter of interest is <span class="math inline">\(\sigma_{ab},\)</span> the variation of the interaction effects. (In the <code>Stan</code> model specification this variance parameter is <em>sigma_x</em>, as in interaction.) The plot shows the 95% credible intervals for each of the main effect variance parameters as well as the interaction parameter.</p>
+<p>Since we are focused on the possibility of 2-way interaction, the primary parameter of interest is <span class="math inline">\(\sigma_{ab},\)</span> the variation of the interaction effects. (In the <code>Stan</code> model specification this variance parameter is <em>sigma_x</em>, as in interaction.) The plot shows the 95% credible intervals for each of the main effect variance parameters as well as the interaction variance parameter.</p>
 <p>The fact that the two main effect variance parameters (<span class="math inline">\(\sigma_a\)</span> and <span class="math inline">\(\sigma_b\)</span>) are greater than zero supports the data generation process which assumed different outcomes for different levels of interventions <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>, respectively.</p>
 <p>And the credible interval for <span class="math inline">\(\sigma_{ab}\)</span> (<em>sigma_x</em>), likewise is shifted away from zero, suggesting there might be some interaction between <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> at certain levels of each.</p>
 <pre class="r"><code>mcmc_intervals(posterior, pars = c(glue(&quot;sigma_m[{1:2}]&quot;), &quot;sigma_x[1]&quot;))</code></pre>
@@ -195,7 +195,7 @@ mcmc_trace(posterior, pars = glue(&quot;t[{1},{1:4}]&quot;))</code></pre>
 <p>We can hone in a bit more on the specifc estimates of the <span class="math inline">\(\tau_{ab}\)</span>’s to see where those interactions might be occurring. It appears that <em>t_x[1,6]</em> (representing <span class="math inline">\(\tau_{22}\)</span>) is an important interaction term - which is consistent with the data generation process. However, <span class="math inline">\(\tau_{32}\)</span>, represented by <em>t_x[1,10]</em> is not obviously important. Perhaps we need more data.</p>
 <pre class="r"><code>mcmc_intervals(posterior, pars = glue(&quot;t_x[1,{1:16}]&quot;))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
-<p>This final plot shows medians of the expected mean for <span class="math inline">\(a/b\)</span> pair (dashed line) on top of the observed means - a virtually perfect fit. The overall “cell” estimates appear to be spot on.</p>
+<p>This final plot shows medians of the expected mean for each <span class="math inline">\(a/b\)</span> pair (dashed line) on top of the observed means - a pretty good fit. The overall “cell” estimates appear to be spot on.</p>
 <pre class="r"><code>r &lt;- as_draws_rvars(fit$draws(variables = c(&quot;t_0&quot;,&quot;t&quot;, &quot;t_x&quot;)))
 
 dnew &lt;- data.frame(
@@ -216,29 +216,33 @@ ggplot(data = dnew, aes(x=b, dist = yhat)) +
 </div>
 <div id="only-one-treatment-effect-and-no-interaction" class="section level3">
 <h3>Only one treatment effect and no interaction</h3>
+<p>Perhaps the rationale for focusing on the variance can be best appreciated by looking at a contrasting scenario where there is only a single main effect (for intervention <span class="math inline">\(a\)</span>) and no interaction. Here we would expect the estimates for the intervention <span class="math inline">\(b\)</span> main effects variance as well as the variance of the interaction terms to be close to zero.</p>
 <pre class="r"><code>t_0 &lt;- 0
 t_a &lt;- c(-8, -1, 3, 6)
 t_b &lt;- c(0, 0, 0, 0)
 t_ab &lt;- matrix(0, nrow = 4, ncol = 4)</code></pre>
-<p>The plot of the observed means is consistent with a main effect only for intervention <span class="math inline">\(a\)</span>, but no effect for <span class="math inline">\(b\)</span> and no interaction:</p>
+<p>The plot of the observed means is consistent with the data generation process:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 10.9 seconds.
-## Chain 1 finished in 11.4 seconds.
-## Chain 4 finished in 11.7 seconds.
-## Chain 3 finished in 23.5 seconds.
+## Chain 2 finished in 9.3 seconds.
+## Chain 1 finished in 9.9 seconds.
+## Chain 4 finished in 10.1 seconds.
+## Chain 3 finished in 21.4 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 14.4 seconds.
-## Total execution time: 23.6 seconds.</code></pre>
-<p>The posterior distribution for <span class="math inline">\(\sigma_{ab}\)</span> (<em>sigma_x</em>) is now very close to zero …</p>
+## Mean chain execution time: 12.7 seconds.
+## Total execution time: 21.5 seconds.</code></pre>
+<p>And yes, the posterior distribution for <span class="math inline">\(\sigma_{ab}\)</span> (<em>sigma_x</em>) is now very close to zero …</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="576" /></p>
 <p>and the effect parameters are all centered around zero:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="576" /></p>
 <p>Once again, the predicted values are quite close to the observed means - indicating the model is a good fit:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
-<p>Didn’t work with small number of interventions that only had 2 levels each, so didn’t do a more thorough investigation with more interventions with a variety of levels, as described in the papers.</p>
+</div>
+<div id="next-steps" class="section level3">
+<h3>Next steps</h3>
+<p>In the application that is motivating this, there are three different interventions, but each one has only two levels (yes or no). In this case, the level mean and across-level variance parameters were poorly estimated, probably because there are so few levels. This forced me to take a more traditional approach, where I estimate the means of each randomization arm. I’ll share that next time.</p>
 <p>
 <p><small><font color="darkkhaki"></p>
 <p>References:</p>
