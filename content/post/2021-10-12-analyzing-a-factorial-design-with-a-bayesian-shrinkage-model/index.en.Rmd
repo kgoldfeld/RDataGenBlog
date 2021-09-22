@@ -1,0 +1,278 @@
+---
+title: A Bayesian analysis of a factorial design focusing on effect size estimates
+author:
+date: '2021-10-12'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+
+This is a continuation of my [discussion](){target="_blank"} on alternative ways to analyze data and present findings for a factorial study design where we are interested in whether applying multiple interventions is beneficial. Last time, I presented an approach that focused on variance estimation, and used an example of 2 interventions with 4 different levels for each, implying a study of 16 arms. This time around, I am considering a study that has 3 different interventions, but only 2 levels for each (i.e., yes or no), for a total of 8 arms. Under these assumptions, the posterior distributions based on the variance-based model are bi-modal in shape, making it quite difficult to interpret the findings. So, I decided to turn the focus away from variance and emphasize the effect size estimates for each arm compared to control.
+
+### Bayesian model specification
+
+There are three interventions ($a$, $b$, and $c$), each with two levels; the full factorial design will have 8 arms. ED $j$ is randomized to one level in each of $a$, $b$, and $c$, and $a_j \in \{0,1\}$, $b_j\in \{0,1\}$, and $c_j\in \{0,1\}$. $\boldsymbol{Z_{j}}$ is a vector of $m$ ED-specific factors, including those that are used for stratification as well as time. $\boldsymbol{X_{ij}}$ is a vector of $k$ patient level characteristics, including at least age, race, and gender.
+
+Here is the model for outcome $y$, a binary measure:
+
+$$
+y_{i} \sim \text{binomial}\left(p_{i}\right)
+$$
+$$
+\text{log}\left( \frac{p_{i}}{1-p_{i}}\right) =  \tau_0 + \tau_a a_i + \tau_b b_i + \tau_c c_i + \tau_{ab} a_i b_i +  \tau_{ac} a_i c_i + \tau_{bc} b_i c_i + \tau_{abc}a_i b_i c_i
+$$
+
+The parameters $\tau_a, \tau_b, \text{ and } \tau_{c}$ are the log odds ratios associated with the level of treatment $a$, $b$, and $c$, respectively. $\tau_{ab}, \tau_{ac}, \text{and } \tau_{bc}$ are the combined effects of the pairs, and $\tau_{abc}$ is the added effect of implementing all three interventions simultaneously.
+
+Here are the prior distribution assumptions:  
+
+\begin{aligned}
+  \tau_0 &\sim N(\mu=0, \sigma = 1) \\
+  \tau_a, \tau_b, \tau_c &\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
+  \tau_{ab}, \tau_{ac}, \tau_{bc} &\sim N(\mu = \delta_x, \sigma = \sigma_x) \\
+  \tau_{abc} &\sim N(\mu = 0, \sigma = 1) \\
+  \delta_m  &\sim N(\mu = 0, \sigma = 1) \\
+  \sigma_m &\sim t_\text{student}(\text{df}=3, \mu=0, \sigma = 2.5), \ \sigma_m \ge 0 \\
+  \delta_x  &\sim N(0, 1) \\
+  \sigma_x &\sim t_\text{student}(\text{df}=3, \mu = 0, \sigma = 2.5), \ \sigma_x \ge 0 \\
+\end{aligned}
+
+The estimates for the main effects $\tau_a, \ \tau_b, \text{ and } \tau_c$ are partially pooled because their prior distributions share a common mean $\delta_m$ and standard deviation $\sigma_m$. Likewise the prior distributions for the pair-wise interaction effects share a common mean $\delta_x$ and standard deviation $\sigma_x$. These four *hyperparameters* are estimated from the data. The prior distributions for the intervention effects $\delta_m$ and $\delta_x$ are specified with the aim towards conservativism or skepticism, with a large portion of the distribution centered around 0. The priors for the variance parameters are more diffuse (using a $t$-distribution with 3-degrees of freedom, a compromise between a *Cauchy* distribution with very broad tails and a *normal* distribution with more constrained tails).
+
+### Inference
+
+Statistical inference will be based on an examination of the posterior distributions for the log odds ratios comparing each of the treatment combinations with the control arm where none of the interventions are implemented. We can also compare across different combinations to assess if one particular combination seems to be stronger than another. Since we are not using a null-hypothesis testing framework and the effect estimates are pooled across the interventions, adjustments for multiple testing are not necessary.
+
+The figure below is *forest plot* based on simulated data that shows how the posterior distributions will be represented. Each line represents a combination of interventions. In this case, it appears that each of the interventions is effect alone (i.e. P(lOR < 0) = 1), but it seems that combining interventions *A* and *B* is a good option. We could conduct further analysis to assess the probability that this combination is more effective than either of the interventions alone. Finally, it does not appear that applying all three interventions is necessary.
+
+### Data definition and generation
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(cowplot)
+library(magick)
+library(paletteer)
+library(ggplot2)
+library(data.table)
+library(ggpubr)
+library(cmdstanr)
+library(posterior)
+library(ggdist)
+library(glue)
+```
+
+```{r}
+f <- "..t_0 + ..t_a*a + ..t_b*b + ..t_c*c + 
+      ..t_ab*a*b + ..t_ac*a*c + ..t_bc*b*c + ..t_abc*a*b*c"
+
+defY <- defDataAdd(varname = "y", formula = f, dist = "binary", link="logit")
+
+t_0 <-  -1.4
+
+t_a <-   0.5
+t_b <-   0.6
+t_ab <- -0.2
+
+t_c <- t_ac <- t_bc <- t_abc <- 0.0
+
+dt_to_list <- function(dx) {
+  
+  N <- nrow(dx)                               ## number of observations 
+  x_abc <- model.matrix(~a*b*c, data = dx)
+  y <- dx[, y]
+  
+  list(N = N, x_abc = x_abc, y = y)
+}
+```
+
+
+```{r}
+set.seed(73961)
+
+dd <- genData(8*1000) # for final version use 1000
+dd <- addMultiFac(dd, nFactors = 3, colNames = c("a", "b", "c"))
+dd <- addColumns(defY, dd)
+```
+
+### Model fitting
+
+```{r, eval = FALSE}
+mod <- cmdstan_model("code/model_ind.stan")
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 1000,
+  iter_sampling = 2500,
+  adapt_delta = 0.98,
+  max_treedepth = 20,
+  show_messages = FALSE,
+  seed = 29817
+)
+
+posterior <- data.frame(as_draws_rvars(fit$draws(variables = "lOR")))
+```
+
+```{r, echo = FALSE}
+if (file.exists("code/model_ind")) unlink("code/model_ind")
+mod <- cmdstan_model("code/model_ind.stan")
+
+fit <- mod$sample(
+  data = dt_to_list(dd),
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 1000,
+  iter_sampling = 2500,
+  adapt_delta = 0.98,
+  max_treedepth = 20,
+  show_messages = FALSE,
+  seed = 29817
+)
+
+posterior <- data.frame(as_draws_rvars(fit$draws(variables = "lOR")))
+```
+
+### Presenting the results
+
+```{r, fig.height = 4}
+pcts <- c(.025, 0.25, .50, 0.75, .975)
+sumstats <- data.table(t(quantile(posterior$lOR, pcts)))
+setnames(sumstats, glue("p{pcts}"))
+sumstats$var <- glue("lOR[{1:7}]") 
+
+p <- ggplot(data = sumstats, aes(y = var, yend = var)) +
+  geom_vline(xintercept = 0, color = "grey85") +
+  geom_segment(aes(x = p0.025, xend = p0.975)) +
+  geom_segment(aes(x = p0.25, xend = p0.75), size = 1.25, color = "#9a0000") +
+  geom_point(aes(x = p0.5), size = 2.5) +
+  theme(panel.grid = element_blank(),
+        axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.title.y = element_text(margin = margin(t = 0, r = -12, b = 0, l = 0)),
+        plot.title = element_text(size = 10, face = "bold")
+  ) +
+  ylab("treatment assignments (three interventions)") +
+  xlab("log odds ratio") +
+  xlim(-.5, 1.5) +
+  ggtitle("Posterior distribution of log OR by treatment assignment")
+
+pimage <- axis_canvas(p, axis = 'y') +
+  draw_image("r_icons/r111.png", y = 6.5, scale = 0.35) +
+  draw_image("r_icons/r011.png", y = 5.5, scale = 0.35) +
+  draw_image("r_icons/r101.png", y = 4.5, scale = 0.35) +
+  draw_image("r_icons/r110.png", y = 3.5, scale = 0.35) +
+  draw_image("r_icons/r001.png", y = 2.5, scale = 0.35) +
+  draw_image("r_icons/r010.png", y = 1.5, scale = 0.35) +
+  draw_image("r_icons/r100.png", y = 0.5, scale = 0.35)
+
+ggdraw(insert_yaxis_grob(p, pimage, position = "left", width = grid::unit(.17, "null")))
+```
+
+```{r, fig.height = 4}
+data <- with(posterior, data.frame(
+  x = c("ab vs a", 
+        "ab vs b", 
+        "abc vs bc",
+        "abc vs ab"),
+  diff = c(lOR[4] - lOR[1], 
+           lOR[4] - lOR[2], 
+           lOR[7] - lOR[6], 
+           lOR[7] - lOR[4])
+))
+
+ggplot(data = data, aes(dist = diff, x = x)) +
+  geom_hline(yintercept = 0, color = "grey80", size = .3) +
+  stat_dist_eye(fill = "pink", position="dodge") +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank()) +
+  ylab("difference")
+```
+
+
+<a name="addendum"></a>  
+
+### Addendum
+
+```{stan, output.var="mod", eval=FALSE}
+data {
+  
+  int<lower=0> N;                       // number patients
+  matrix<lower=0, upper=1>[N, 8] x_abc;
+  int<lower=0,upper=1> y[N];            // outcome for individual i
+  
+}
+
+parameters {
+  
+  vector[8] z;
+
+  real delta_m;
+  real<lower = 0> sigma_m;
+  
+  real delta_x;
+  real<lower=0> sigma_x;
+  
+}
+
+transformed parameters {
+  
+  vector[8] tau;
+  
+  tau[1] = z[1];
+  
+  for (i in 2:4){
+    tau[i] = sigma_m * z[i] + delta_m;
+  }
+  
+  for (i in 5:7){
+    tau[i] = sigma_x * z[i] + delta_x;
+  }
+  
+  tau[8] = z[8];
+  
+  
+}
+
+model {
+  
+  sigma_m ~ student_t(3, 0, 2.5);
+  sigma_x ~ student_t(3, 0, 2.5);
+
+  delta_m ~ normal(0, 1);
+  delta_x ~ normal(0, 1);
+  
+  z ~ std_normal();
+
+  y ~ bernoulli_logit(x_abc * tau);
+  
+}
+
+generated quantities {
+  
+  real lOR[7];
+  
+  lOR[1] = tau[2];                                            //  a=1, b=0, c=0
+  lOR[2] = tau[3];                                            //  a=0, b=1, c=0
+  lOR[3] = tau[4];                                            //  a=0, b=0, c=1
+  lOR[4] = tau[2] + tau[3] + tau[5];                          //  a=1, b=1, c=0
+  lOR[5] = tau[2] + tau[4] + tau[6];                          //  a=1, b=0, c=1
+  lOR[6] = tau[3] + tau[4] + tau[7];                          //  a=0, b=1, c=1
+  lOR[7] = tau[2]+tau[3]+tau[4]+tau[5]+tau[6]+tau[7]+tau[8];  //  a=1, b=1, c=1
+  
+}
+```
