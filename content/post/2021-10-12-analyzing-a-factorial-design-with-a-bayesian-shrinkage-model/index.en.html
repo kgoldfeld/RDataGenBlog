@@ -16,19 +16,43 @@ draft: true
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>This is a continuation of my <a href="" target="_blank">discussion</a> on alternative ways to analyze data and present findings for a factorial study design where we are interested in whether applying multiple interventions is beneficial. Last time, I presented an approach that focused on variance estimation, and used an example of 2 interventions with 4 different levels for each, implying a study of 16 arms. This time around, I am considering a study that has 3 different interventions, but only 2 levels for each (i.e., yes or no), for a total of 8 arms. Under these assumptions, the posterior distributions based on the variance-based model are bi-modal in shape, making it quite difficult to interpret the findings. So, I decided to turn the focus away from variance and emphasize the effect size estimates for each arm compared to control.</p>
-<div id="bayesian-model-specification" class="section level3">
-<h3>Bayesian model specification</h3>
-<p>There are three interventions (<span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>), each with two levels; the full factorial design will have 8 arms. ED <span class="math inline">\(j\)</span> is randomized to one level in each of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>, and <span class="math inline">\(a_j \in \{0,1\}\)</span>, <span class="math inline">\(b_j\in \{0,1\}\)</span>, and <span class="math inline">\(c_j\in \{0,1\}\)</span>. <span class="math inline">\(\boldsymbol{Z_{j}}\)</span> is a vector of <span class="math inline">\(m\)</span> ED-specific factors, including those that are used for stratification as well as time. <span class="math inline">\(\boldsymbol{X_{ij}}\)</span> is a vector of <span class="math inline">\(k\)</span> patient level characteristics, including at least age, race, and gender.</p>
-<p>Here is the model for outcome <span class="math inline">\(y\)</span>, a binary measure:</p>
+<p>This is a continuation of my <a href="" target="_blank">discussion</a> on alternative ways to analyze data and present findings for a factorial study design where we are interested in whether applying multiple interventions is beneficial. Last time, I presented an approach that focused on variance estimation, and used an example of 2 interventions with 4 different levels for each, implying a study of 16 arms. This time around, I am considering a study that has 3 different interventions, but only 2 levels for each (i.e., yes or no), for a total of 8 arms. Under these assumptions, the posterior distributions based on the variance-based model turn out to be bi-modal in shape, making it quite difficult to interpret the findings. So, I decided to turn the focus away from variance and emphasize the effect size estimates for each arm compared to control.</p>
+<div id="model-specification" class="section level3">
+<h3>Model specification</h3>
+<p>As I mentioned, this is a case with three interventions (<span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>), each of which has two levels; the full factorial design will have 8 arms:</p>
+<span class="math display">\[\begin{aligned}
+(1) \ a&amp;=0, \ b=0, \ c=0 \\ 
+(2) \ a&amp;=1, \ b=0, \ c=0 \\
+(3) \ a&amp;=0, \ b=1, \ c=0 \\
+(4) \ a&amp;=0, \ b=0, \ c=1 \\
+(5) \ a&amp;=1, \ b=1, \ c=0 \\
+(6) \ a&amp;=1, \ b=0, \ c=1 \\
+(7) \ a&amp;=0, \ b=1, \ c=1 \\
+(8) \ a&amp;=1, \ b=1, \ c=1 \\
+\end{aligned}\]</span>
+<p>Although the proposed study is a cluster randomized trial, where each participating site will be assigned to one of the eight arms, I am simplifying things a bit by assuming each individual patient <span class="math inline">\(i\)</span> will be randomized to each of <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>, and <span class="math inline">\(a_i \in \{0,1\}\)</span>, <span class="math inline">\(b_i\in \{0,1\}\)</span>, and <span class="math inline">\(c_i\in \{0,1\}\)</span>. Also, in a real-world setting, I would typically assume that the outcome is, at least in part, predicted by patient-level characteristics, but will ignore that here.</p>
+<p>Here is a model for outcome <span class="math inline">\(y_i\)</span>, a binary measure <span class="math inline">\((y_i \in {0,1})\)</span>, where the log-odds of the outcome for each patient is a function of the random assignment:</p>
 <p><span class="math display">\[
 y_{i} \sim \text{binomial}\left(p_{i}\right)
-\]</span>
-<span class="math display">\[
+\]</span></p>
+<p><span class="math display">\[
 \text{log}\left( \frac{p_{i}}{1-p_{i}}\right) =  \tau_0 + \tau_a a_i + \tau_b b_i + \tau_c c_i + \tau_{ab} a_i b_i +  \tau_{ac} a_i c_i + \tau_{bc} b_i c_i + \tau_{abc}a_i b_i c_i
 \]</span></p>
-<p>The parameters <span class="math inline">\(\tau_a, \tau_b, \text{ and } \tau_{c}\)</span> are the log odds ratios associated with the level of treatment <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, and <span class="math inline">\(c\)</span>, respectively. <span class="math inline">\(\tau_{ab}, \tau_{ac}, \text{and } \tau_{bc}\)</span> are the combined effects of the pairs, and <span class="math inline">\(\tau_{abc}\)</span> is the added effect of implementing all three interventions simultaneously.</p>
-<p>Here are the prior distribution assumptions:</p>
+<p>This is just a standard logistic model specification, where the parameters can be interpreted as log-odds ratios. For example, <span class="math inline">\(\lambda_b = \tau_b\)</span> is the log odds ratio comparing patients randomized to receive only <span class="math inline">\(b\)</span> (group 3 from above) with the control arm where patients receive none of the interventions (group 1), and <span class="math inline">\(\lambda_{ac} = \tau_a + \tau_c \tau_{ac}\)</span> is the log odds ratio comparing patients randomized to only <span class="math inline">\(a\)</span> and <span class="math inline">\(c\)</span> but not <span class="math inline">\(b\)</span> (group 6) compared with the control patients (group 1). This is the full set of log odds ratios for this design:</p>
+<span class="math display">\[\begin{aligned}
+  \lambda_a &amp;= \tau_a \\
+  \lambda_b &amp;= \tau_b \\
+  \lambda_c &amp;= \tau_c \\
+  \lambda_{ab}  &amp;= \tau_a + \tau_b + \tau_{ab} \\
+  \lambda_{ac}  &amp;= \tau_a + \tau_c + \tau_{ac} \\
+  \lambda_{bc}  &amp;= \tau_b + \tau_c + \tau_{bc} \\
+  \lambda_{abc} &amp;= \tau_a + \tau_b + \tau_c + \tau_{ab} + \tau_{ac} + \tau_{bc} + \tau_{abc} \\
+\end{aligned}\]</span>
+<p>The focus of the analysis is to estimate posterior probability distributions for the <span class="math inline">\(\lambda\text{&#39;s}\)</span>, and possibly to compare across the <span class="math inline">\(\lambda\text{&#39;s}\)</span> (also using posterior distributions) to assess whether combining multiple interventions seems beneficial.</p>
+</div>
+<div id="prior-distribution-assumptions" class="section level3">
+<h3>Prior distribution assumptions</h3>
+<p>Here are the prior distribution assumptions for the parameters:</p>
 <span class="math display">\[\begin{aligned}
   \tau_0 &amp;\sim N(\mu=0, \sigma = 1) \\
   \tau_a, \tau_b, \tau_c &amp;\sim N(\mu = \delta_m, \sigma = \sigma_m) \\
@@ -39,26 +63,31 @@ y_{i} \sim \text{binomial}\left(p_{i}\right)
   \delta_x  &amp;\sim N(0, 1) \\
   \sigma_x &amp;\sim t_\text{student}(\text{df}=3, \mu = 0, \sigma = 2.5), \ \sigma_x \ge 0 \\
 \end{aligned}\]</span>
-<p>The estimates for the main effects <span class="math inline">\(\tau_a, \ \tau_b, \text{ and } \tau_c\)</span> are partially pooled because their prior distributions share a common mean <span class="math inline">\(\delta_m\)</span> and standard deviation <span class="math inline">\(\sigma_m\)</span>. Likewise the prior distributions for the pair-wise interaction effects share a common mean <span class="math inline">\(\delta_x\)</span> and standard deviation <span class="math inline">\(\sigma_x\)</span>. These four <em>hyperparameters</em> are estimated from the data. The prior distributions for the intervention effects <span class="math inline">\(\delta_m\)</span> and <span class="math inline">\(\delta_x\)</span> are specified with the aim towards conservativism or skepticism, with a large portion of the distribution centered around 0. The priors for the variance parameters are more diffuse (using a <span class="math inline">\(t\)</span>-distribution with 3-degrees of freedom, a compromise between a <em>Cauchy</em> distribution with very broad tails and a <em>normal</em> distribution with more constrained tails).</p>
-</div>
-<div id="inference" class="section level3">
-<h3>Inference</h3>
-<p>Statistical inference will be based on an examination of the posterior distributions for the log odds ratios comparing each of the treatment combinations with the control arm where none of the interventions are implemented. We can also compare across different combinations to assess if one particular combination seems to be stronger than another. Since we are not using a null-hypothesis testing framework and the effect estimates are pooled across the interventions, adjustments for multiple testing are not necessary.</p>
-<p>The figure below is <em>forest plot</em> based on simulated data that shows how the posterior distributions will be represented. Each line represents a combination of interventions. In this case, it appears that each of the interventions is effect alone (i.e. P(lOR &lt; 0) = 1), but it seems that combining interventions <em>A</em> and <em>B</em> is a good option. We could conduct further analysis to assess the probability that this combination is more effective than either of the interventions alone. Finally, it does not appear that applying all three interventions is necessary.</p>
+<p>While the focus of this model estimation is different from the approach I discussed <a href="" target="_blank">last time</a>, the prior distributions here share a key element with the earlier model. The priors for the main effects <span class="math inline">\(\tau_a, \ \tau_b, \text{ and } \tau_c\)</span> share a common mean <span class="math inline">\(\delta_m\)</span> and standard deviation <span class="math inline">\(\sigma_m\)</span>. Likewise the prior distributions for the pair-wise interaction effects share a common mean <span class="math inline">\(\delta_x\)</span> and standard deviation <span class="math inline">\(\sigma_x\)</span>. These four <em>hyperparameters</em> are estimated from the data. The prior distributions for the mean intervention effects <span class="math inline">\(\delta_m\)</span> and <span class="math inline">\(\delta_x\)</span> are specified with the aim towards conservativism or skepticism, with a large portion of the distribution centered around 0. The priors for the variance parameters are more diffuse (using a <span class="math inline">\(t\)</span>-distribution with 3-degrees of freedom, a compromise between a <em>Cauchy</em> distribution with very broad tails and a <em>normal</em> distribution with more constrained tails).</p>
+<p>Statistical inference will be based on an examination of the posterior distributions for the log odds ratios comparing each of the treatment combinations with the control arm where none of the interventions are implemented. We can also compare across different combinations to assess if one particular combination seems to be stronger than another. Since we are not using a null-hypothesis testing framework and the effect estimates are pooled across the interventions, adjustments for multiple testing are not necessary. (In the future, I can show results of the experiments where I explored the operating characteristics of these models. Because of the pooling and shrinkage that is built into the model, there are no inflated type 1 errors, analogous to the situation where I <a href="https://www.rdatagen.net/post/2021-09-14-drawing-the-wrong-conclusion-a-comparison-of-bayes-and-frequentist-methods/" target="_blank">evaluated</a> Bayesian methods for subgroup analysis.</p>
 </div>
 <div id="data-definition-and-generation" class="section level3">
 <h3>Data definition and generation</h3>
+<p>Here are the libraries needed for the simulation, model estimation, and presentation of results:</p>
 <pre class="r"><code>library(simstudy)
-library(cowplot)
-library(magick)
-library(paletteer)
-library(ggplot2)
 library(data.table)
-library(ggpubr)
 library(cmdstanr)
 library(posterior)
+library(glue)
+library(ggplot2)
+library(cowplot)
 library(ggdist)
-library(glue)</code></pre>
+library(paletteer)</code></pre>
+<p>In this scenario, the log odds for the outcome is -1.4, corresponding to odds = exp(-1.4) = 0.25, and probability of outcome = 1/(1+exp(1.4) = 0.20. Here are the log-odds for each of the different arms with at least one treatment assignment:</p>
+<span class="math display">\[\begin{aligned}
+  \lambda_a &amp;= 0.5 \\
+  \lambda_b &amp;= 0.6 \\
+  \lambda_c &amp;= 0.0 \\
+  \lambda_{ab}  &amp;= 0.5 + 0.6 - 0.2 = 0.9 \\
+  \lambda_{ac}  &amp;= 0.5 + 0.0 + 0.0 = 0.5 \\
+  \lambda_{bc}  &amp;= 0.6 + 0.0 + 0.0 = 0.6 \\
+  \lambda_{abc} &amp;= 0.5 + 0.6 + 0.0 - 0.2 + 0.0 + 0.0 + 0.0 = 0.9 \\
+\end{aligned}\]</span>
 <pre class="r"><code>f &lt;- &quot;..t_0 + ..t_a*a + ..t_b*b + ..t_c*c + 
       ..t_ab*a*b + ..t_ac*a*c + ..t_bc*b*c + ..t_abc*a*b*c&quot;
 
@@ -67,28 +96,46 @@ defY &lt;- defDataAdd(varname = &quot;y&quot;, formula = f, dist = &quot;binary&
 t_0 &lt;-  -1.4
 
 t_a &lt;-   0.5
-t_b &lt;-   0.6
-t_ab &lt;- -0.2
+t_b &lt;-   0.7
+t_ab &lt;- -0.3
 
-t_c &lt;- t_ac &lt;- t_bc &lt;- t_abc &lt;- 0.0
+t_c &lt;- t_ac &lt;- t_bc &lt;- t_abc &lt;- 0.0</code></pre>
+<p>4000 patients will be randomized to the eight arms, 500 in each:</p>
+<pre class="r"><code>set.seed(37159) # 73961 43969
 
-dt_to_list &lt;- function(dx) {
+dd &lt;- genData(8*500) # for final version use 1000
+dd &lt;- addMultiFac(dd, nFactors = 3, colNames = c(&quot;a&quot;, &quot;b&quot;, &quot;c&quot;))
+dd &lt;- addColumns(defY, dd)
+
+dd</code></pre>
+<pre><code>##         id a b c y
+##    1:    1 1 0 0 0
+##    2:    2 1 0 0 0
+##    3:    3 1 0 0 1
+##    4:    4 1 0 0 0
+##    5:    5 0 0 1 0
+##   ---             
+## 3996: 3996 1 1 1 0
+## 3997: 3997 1 1 0 0
+## 3998: 3998 1 0 1 0
+## 3999: 3999 0 0 1 0
+## 4000: 4000 0 1 0 1</code></pre>
+<p>Here are the observed averages by treatment arm:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+</div>
+<div id="model-fitting" class="section level3">
+<h3>Model fitting</h3>
+<p>The Bayesian sampling will use four chains of length 2500 (following 1000 warm-up iterations for each), so the posterior distribution will be estimated with 10000 total samples. The code for the <code>Stan</code> model can be found in the <a href="#addendum">addendum</a>. You can see there how the <span class="math inline">\(\lambda\text{&#39;s}\)</span> are derived from the <span class="math inline">\(\tau\text{&#39;s}\)</span>.</p>
+<pre class="r"><code>dt_to_list &lt;- function(dx) {
   
   N &lt;- nrow(dx)                               ## number of observations 
   x_abc &lt;- model.matrix(~a*b*c, data = dx)
   y &lt;- dx[, y]
   
   list(N = N, x_abc = x_abc, y = y)
-}</code></pre>
-<pre class="r"><code>set.seed(73961)
+}
 
-dd &lt;- genData(8*1000) # for final version use 1000
-dd &lt;- addMultiFac(dd, nFactors = 3, colNames = c(&quot;a&quot;, &quot;b&quot;, &quot;c&quot;))
-dd &lt;- addColumns(defY, dd)</code></pre>
-</div>
-<div id="model-fitting" class="section level3">
-<h3>Model fitting</h3>
-<pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/model_ind.stan&quot;)
+mod &lt;- cmdstan_model(&quot;code/model_ind.stan&quot;)
 
 fit &lt;- mod$sample(
   data = dt_to_list(dd),
@@ -101,30 +148,24 @@ fit &lt;- mod$sample(
   max_treedepth = 20,
   show_messages = FALSE,
   seed = 29817
-)
-
-posterior &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;lOR&quot;)))</code></pre>
+)</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 1 finished in 195.6 seconds.
-## Chain 4 finished in 214.3 seconds.
-## Chain 3 finished in 236.6 seconds.
-## Chain 2 finished in 252.2 seconds.
+## Chain 1 finished in 94.7 seconds.
+## Chain 3 finished in 103.9 seconds.
+## Chain 4 finished in 106.7 seconds.
+## Chain 2 finished in 111.6 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 224.7 seconds.
-## Total execution time: 252.7 seconds.</code></pre>
-<pre><code>## 
-## Warning: 11 of 10000 (0.0%) transitions ended with a divergence.
-## This may indicate insufficient exploration of the posterior distribution.
-## Possible remedies include: 
-##   * Increasing adapt_delta closer to 1 (default is 0.8) 
-##   * Reparameterizing the model (e.g. using a non-centered parameterization)
-##   * Using informative or weakly informative prior distributions</code></pre>
+## Mean chain execution time: 104.2 seconds.
+## Total execution time: 111.8 seconds.</code></pre>
 </div>
 <div id="presenting-the-results" class="section level3">
 <h3>Presenting the results</h3>
-<pre class="r"><code>pcts &lt;- c(.025, 0.25, .50, 0.75, .975)
+<p>Here is the code for the first plot - the primary analysis, showing the distribution of effect sizes (on the log-odds scale) for each of the intervention arms. I’ve extracted the samples using the <code>posterior</code> package function <code>as_draw_rvars</code>, which I <a href="https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/" target="_blank">recently described</a>.</p>
+<pre class="r"><code>posterior &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;lOR&quot;)))
+
+pcts &lt;- c(.025, 0.25, .50, 0.75, .975)
 sumstats &lt;- data.table(t(quantile(posterior$lOR, pcts)))
 setnames(sumstats, glue(&quot;p{pcts}&quot;))
 sumstats$var &lt;- glue(&quot;lOR[{1:7}]&quot;) 
@@ -132,7 +173,8 @@ sumstats$var &lt;- glue(&quot;lOR[{1:7}]&quot;)
 p &lt;- ggplot(data = sumstats, aes(y = var, yend = var)) +
   geom_vline(xintercept = 0, color = &quot;grey85&quot;) +
   geom_segment(aes(x = p0.025, xend = p0.975)) +
-  geom_segment(aes(x = p0.25, xend = p0.75), size = 1.25, color = &quot;#9a0000&quot;) +
+  geom_segment(aes(x = p0.25, xend = p0.75), 
+    size = 1.25, color = palettes_d$wesanderson$Moonrise2[2]) +
   geom_point(aes(x = p0.5), size = 2.5) +
   theme(panel.grid = element_blank(),
         axis.text.y = element_blank(),
@@ -152,28 +194,38 @@ pimage &lt;- axis_canvas(p, axis = &#39;y&#39;) +
   draw_image(&quot;r_icons/r110.png&quot;, y = 3.5, scale = 0.35) +
   draw_image(&quot;r_icons/r001.png&quot;, y = 2.5, scale = 0.35) +
   draw_image(&quot;r_icons/r010.png&quot;, y = 1.5, scale = 0.35) +
-  draw_image(&quot;r_icons/r100.png&quot;, y = 0.5, scale = 0.35)
-
-ggdraw(insert_yaxis_grob(p, pimage, position = &quot;left&quot;, width = grid::unit(.17, &quot;null&quot;)))</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+  draw_image(&quot;r_icons/r100.png&quot;, y = 0.5, scale = 0.35)</code></pre>
+<p>Looking at the figure, it is apparent that that <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> likely had an effect, while <span class="math inline">\(c\)</span> probably did not. It also appears that the combination of <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> might be an improvement, both with and without <span class="math inline">\(c\)</span>:</p>
+<pre class="r"><code>ggdraw(insert_yaxis_grob(p, pimage, position = &quot;left&quot;, width = grid::unit(.17, &quot;null&quot;)))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<p>In this last plot, I am showing the the posterior distributions for the differences between the estimated log-odds ratios. In this particular data set, <span class="math inline">\(a\)</span> does not look any different from <span class="math inline">\(b\)</span>, but the combination of <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> does indeed look superior to either alone, regardless of whether <span class="math inline">\(c\)</span> is involved:</p>
 <pre class="r"><code>data &lt;- with(posterior, data.frame(
-  x = c(&quot;ab vs a&quot;, 
-        &quot;ab vs b&quot;, 
-        &quot;abc vs bc&quot;,
-        &quot;abc vs ab&quot;),
-  diff = c(lOR[4] - lOR[1], 
-           lOR[4] - lOR[2], 
-           lOR[7] - lOR[6], 
-           lOR[7] - lOR[4])
+  x = c(
+    &quot;(1) b vs a&quot;,
+    &quot;(2) ab vs a&quot;, 
+    &quot;(3) ab vs b&quot;, 
+    &quot;(4) abc vs ab&quot;,
+    &quot;(5) abc vs ac&quot;,
+    &quot;(6) abc vs bc&quot;
+  ),
+  diff = c(
+    lOR[2] - lOR[1], 
+    lOR[4] - lOR[1], 
+    lOR[4] - lOR[2], 
+    lOR[7] - lOR[4],
+    lOR[7] - lOR[5], 
+    lOR[7] - lOR[6]
+  )
 ))
 
 ggplot(data = data, aes(dist = diff, x = x)) +
   geom_hline(yintercept = 0, color = &quot;grey80&quot;, size = .3) +
-  stat_dist_eye(fill = &quot;pink&quot;, position=&quot;dodge&quot;) +
+  stat_dist_eye(fill = palettes_d$wesanderson$Moonrise2[1], position=&quot;dodge&quot;) +
   theme(panel.grid = element_blank(),
-        axis.title.x = element_blank()) +
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank()) +
   ylab(&quot;difference&quot;)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
 <p><a name="addendum"></a></p>
 </div>
 <div id="addendum" class="section level3">
