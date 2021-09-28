@@ -1,0 +1,206 @@
+---
+title: Sample size requirements for a factorial study design
+author: Package Build
+date: '2021-10-26'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+We used simulation studies to determine the number of ED sites to be included in the study. Since the precision of the posterior distribution determines the range of probable effect sizes, we used the expected standard deviation ($\sigma$) as the criterion for sample size selection. 
+
+To determine the target level of precision, we assessed the width of the posterior distributions under different standard deviations. In particular, we identified the posterior probabilities with a mean OR = 0.80 (log OR = -0.22) where $P(log(OR) < 0) \ge 0.95$. Based on this, our target standard deviation was 0.135, as can be seen in the figure. The right hand side of each interval in the figure represents the 95th percentile of the distribution. For those distributions where $\sigma \le 0.135$,  $P(log(OR) < 0) \ge 0.95.$
+
+```{r, message = FALSE, warning=FALSE}
+library(data.table)
+library(ggplot2)
+```
+
+```{r, , echo = FALSE, warning=FALSE, message=FALSE, fig.height = 4, fig.width = 4.5}
+sds <- data.table(sd = seq(.10, .16, by = .005))
+
+sds[, `:=`(
+  q05 = qnorm(.05, -0.223, sd),
+  q25 = qnorm(.25, -0.223, sd),
+  q50 = qnorm(.5, -0.223, sd),
+  q75 = qnorm(.75, -0.223, sd),
+  q95 = qnorm(.95, -0.223, sd)
+)]
+
+arrow = arrow(angle=15, type = "closed", length = unit(.10, "inches"))
+
+ggplot(data = sds, aes(y = sd, yend = sd)) +
+  geom_vline(xintercept = 0, color = "grey85") +
+  geom_segment(aes(x = q05, xend = q95)) +
+  geom_segment(aes(x = q25, xend = q75), size = 1.25, color = "#9a0000") +
+  geom_point(aes(x = q50), size = 2.5) +
+  theme(panel.grid = element_blank(),  
+        plot.title = element_text(size = 10, face = "bold")
+  ) +
+  annotate("segment", x = .15, xend = 0.05, y = .135, yend = .135, arrow=arrow, color ="grey60") +
+  scale_y_continuous(breaks = seq(0.10, 0.16, by = .01), name = "standard deviation") +
+  scale_x_continuous(limits = c(-.5, .15), breaks = seq(-.5, .10, by = .25), name = "log odds ratio") +
+  ggtitle("Posterior distribution of log OR")
+```
+
+```{r, fig.width=5, fig.height=4}
+load("code/post_ss.rda")
+
+res <- rbindlist(res)[var == "lOR[4]", .(n, sd)]
+sum <- res[, .(sd = mean(sd)), keyby = n]
+
+ggplot() +
+  geom_hline(yintercept = 0.135, size = .5, color = "grey80") +
+  geom_jitter(data = res, aes(x = n, y = sd), width = .5, color = "grey75", size = .4) +
+  geom_line(data = sum, aes(x = n, y = sd), size = 1) +
+  scale_y_continuous(limits = c(0.11, 0.18), breaks = seq(0.11, 0.18, by = 0.01), 
+                     name ="sd of posterior distribution") +
+  theme(panel.grid = element_blank(),  
+        plot.title = element_text(size = 10, face = "bold")) +
+  ggtitle("Distribution of standard deviations")
+```
+
+### Addendum
+
+```{r, eval=FALSE}
+library(cmdstanr)
+library(simstudy)
+library(data.table)
+library(posterior)
+library(slurmR)
+library(glue)
+
+s_define <- function() {
+  
+  #--- data definition code ---#
+  
+  f <- "..t_0 + ..t_a*a + ..t_b*b + ..t_c*c + 
+      ..t_ab*a*b + ..t_ac*a*c + ..t_bc*b*c + ..t_abc*a*b*c"
+  
+  defY <- defDataAdd(varname = "y", formula = f, dist = "binary", link="logit")
+  
+  return(list(defY = defY)) 
+  
+}
+
+s_generate <- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  t_0 <- mu_int
+  t_a <- rnorm(1, mu_a, .10)
+  t_b <- rnorm(1, mu_b, .10)
+  t_c <- rnorm(1, mu_c, .10)
+  t_ab <- rnorm(1, mu_ab, .10)
+  t_ac <- rnorm(1, mu_ac, .10)
+  t_bc <- rnorm(1, mu_bc, .10)
+  t_abc <- mu_abc
+  
+  dd <- genData(8 * n)
+  dd <- addMultiFac(dd, nFactors = 3, colNames = c("a", "b", "c"))
+  dd <- addColumns(defY, dd)
+  
+  return(dd)
+  
+}
+
+s_model <- function(generated_data, mod) {
+  
+  dt_to_list <- function(dx) {
+    
+    N <- nrow(dx)                               
+    x_abc <- model.matrix(~a*b*c, data = dx)
+    y <- dx[, y]
+    
+    list(N = N, x_abc = x_abc, y = y)
+  }
+  
+  fit <- mod$sample(
+    data = dt_to_list(generated_data),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.98,
+    max_treedepth = 20,
+    show_messages = FALSE
+  )
+  
+  posterior <- data.frame(as_draws_rvars(fit$draws(variables = "lOR")))
+  
+  pcts <- c(.025, 0.25, .50, 0.75, .975)
+  sumstats <- data.table(t(quantile(posterior$lOR, pcts)))
+  setnames(sumstats, glue("p{pcts}"))
+  sumstats$sd <- sd(posterior$lOR)
+  sumstats$var <- glue("lOR[{1:7}]") 
+  
+  return(sumstats) # model_results is a data.table
+  
+}
+
+s_replicate <- function(argsvec, mod) {
+  
+  set_cmdstan_path(path = "/gpfs/.../cmdstan/2.25.0")
+  
+  list_of_defs <- s_define()
+  generated_data <- s_generate(list_of_defs, argsvec)
+  model_results <- s_model(generated_data, mod)
+  
+  #--- summary statistics ---#
+  
+  summary_stats <- data.table(t(argsvec), model_results)
+  
+  return(summary_stats) # summary_stats is a data.table
+}
+
+#--- Set arguments ---#
+
+scenario_list <- function(...) {
+  argmat <- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+n <- c(400, 450, 500, 550, 600, 650)
+
+mu_int <- -1.4
+mu_m <- 0.5
+mu_x <- -0.3
+mu_abc <- 0.3
+
+scenarios <- scenario_list(n = n,
+  mu_int = mu_int, mu_a = mu_m, mu_b = mu_m, mu_c = mu_m, 
+  mu_ab = mu_x, mu_ac = mu_x, mu_bc = mu_x, mu_abc = mu_abc)
+
+scenarios <- rep(scenarios, each = 250)
+
+#--- run on HPC ---#
+
+set_cmdstan_path(path = "/gpfs/.../cmdstan/2.25.0")
+smodel <- cmdstan_model("/gpfs/.../model_ind.stan")
+
+job <- Slurm_lapply(
+  X = scenarios, 
+  FUN = s_replicate, 
+  mod = smodel,
+  njobs = min(90L, length(scenarios)), 
+  mc.cores = 4L,
+  job_name = "i_ss",
+  tmp_path = "/gpfs/.../scratch",
+  plan = "wait",
+  sbatch_opt = list(time = "12:00:00", partition = "cpu_short", `mem-per-cpu` = "4G"),
+  export = c("s_define", "s_generate", "s_model"),
+  overwrite = TRUE
+)
+
+res <- Slurm_collect(job)
+
+save(res, file = "/gpfs/.../post_ss.rda")
+```

@@ -1,0 +1,175 @@
+---
+title: Sample size requirements for a factorial study design
+author: Package Build
+date: '2021-10-26'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>We used simulation studies to determine the number of ED sites to be included in the study. Since the precision of the posterior distribution determines the range of probable effect sizes, we used the expected standard deviation (<span class="math inline">\(\sigma\)</span>) as the criterion for sample size selection.</p>
+<p>To determine the target level of precision, we assessed the width of the posterior distributions under different standard deviations. In particular, we identified the posterior probabilities with a mean OR = 0.80 (log OR = -0.22) where <span class="math inline">\(P(log(OR) &lt; 0) \ge 0.95\)</span>. Based on this, our target standard deviation was 0.135, as can be seen in the figure. The right hand side of each interval in the figure represents the 95th percentile of the distribution. For those distributions where <span class="math inline">\(\sigma \le 0.135\)</span>, <span class="math inline">\(P(log(OR) &lt; 0) \ge 0.95.\)</span></p>
+<pre class="r"><code>library(data.table)
+library(ggplot2)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="432" /></p>
+<pre class="r"><code>load(&quot;code/post_ss.rda&quot;)
+
+res &lt;- rbindlist(res)[var == &quot;lOR[4]&quot;, .(n, sd)]
+sum &lt;- res[, .(sd = mean(sd)), keyby = n]
+
+ggplot() +
+  geom_hline(yintercept = 0.135, size = .5, color = &quot;grey80&quot;) +
+  geom_jitter(data = res, aes(x = n, y = sd), width = .5, color = &quot;grey75&quot;, size = .4) +
+  geom_line(data = sum, aes(x = n, y = sd), size = 1) +
+  scale_y_continuous(limits = c(0.11, 0.18), breaks = seq(0.11, 0.18, by = 0.01), 
+                     name =&quot;sd of posterior distribution&quot;) +
+  theme(panel.grid = element_blank(),  
+        plot.title = element_text(size = 10, face = &quot;bold&quot;)) +
+  ggtitle(&quot;Distribution of standard deviations&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="480" /></p>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<pre class="r"><code>library(cmdstanr)
+library(simstudy)
+library(data.table)
+library(posterior)
+library(slurmR)
+library(glue)
+
+s_define &lt;- function() {
+  
+  #--- data definition code ---#
+  
+  f &lt;- &quot;..t_0 + ..t_a*a + ..t_b*b + ..t_c*c + 
+      ..t_ab*a*b + ..t_ac*a*c + ..t_bc*b*c + ..t_abc*a*b*c&quot;
+  
+  defY &lt;- defDataAdd(varname = &quot;y&quot;, formula = f, dist = &quot;binary&quot;, link=&quot;logit&quot;)
+  
+  return(list(defY = defY)) 
+  
+}
+
+s_generate &lt;- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  t_0 &lt;- mu_int
+  t_a &lt;- rnorm(1, mu_a, .10)
+  t_b &lt;- rnorm(1, mu_b, .10)
+  t_c &lt;- rnorm(1, mu_c, .10)
+  t_ab &lt;- rnorm(1, mu_ab, .10)
+  t_ac &lt;- rnorm(1, mu_ac, .10)
+  t_bc &lt;- rnorm(1, mu_bc, .10)
+  t_abc &lt;- mu_abc
+  
+  dd &lt;- genData(8 * n)
+  dd &lt;- addMultiFac(dd, nFactors = 3, colNames = c(&quot;a&quot;, &quot;b&quot;, &quot;c&quot;))
+  dd &lt;- addColumns(defY, dd)
+  
+  return(dd)
+  
+}
+
+s_model &lt;- function(generated_data, mod) {
+  
+  dt_to_list &lt;- function(dx) {
+    
+    N &lt;- nrow(dx)                               
+    x_abc &lt;- model.matrix(~a*b*c, data = dx)
+    y &lt;- dx[, y]
+    
+    list(N = N, x_abc = x_abc, y = y)
+  }
+  
+  fit &lt;- mod$sample(
+    data = dt_to_list(generated_data),
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    adapt_delta = 0.98,
+    max_treedepth = 20,
+    show_messages = FALSE
+  )
+  
+  posterior &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;lOR&quot;)))
+  
+  pcts &lt;- c(.025, 0.25, .50, 0.75, .975)
+  sumstats &lt;- data.table(t(quantile(posterior$lOR, pcts)))
+  setnames(sumstats, glue(&quot;p{pcts}&quot;))
+  sumstats$sd &lt;- sd(posterior$lOR)
+  sumstats$var &lt;- glue(&quot;lOR[{1:7}]&quot;) 
+  
+  return(sumstats) # model_results is a data.table
+  
+}
+
+s_replicate &lt;- function(argsvec, mod) {
+  
+  set_cmdstan_path(path = &quot;/gpfs/.../cmdstan/2.25.0&quot;)
+  
+  list_of_defs &lt;- s_define()
+  generated_data &lt;- s_generate(list_of_defs, argsvec)
+  model_results &lt;- s_model(generated_data, mod)
+  
+  #--- summary statistics ---#
+  
+  summary_stats &lt;- data.table(t(argsvec), model_results)
+  
+  return(summary_stats) # summary_stats is a data.table
+}
+
+#--- Set arguments ---#
+
+scenario_list &lt;- function(...) {
+  argmat &lt;- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+n &lt;- c(400, 450, 500, 550, 600, 650)
+
+mu_int &lt;- -1.4
+mu_m &lt;- 0.5
+mu_x &lt;- -0.3
+mu_abc &lt;- 0.3
+
+scenarios &lt;- scenario_list(n = n,
+  mu_int = mu_int, mu_a = mu_m, mu_b = mu_m, mu_c = mu_m, 
+  mu_ab = mu_x, mu_ac = mu_x, mu_bc = mu_x, mu_abc = mu_abc)
+
+scenarios &lt;- rep(scenarios, each = 250)
+
+#--- run on HPC ---#
+
+set_cmdstan_path(path = &quot;/gpfs/.../cmdstan/2.25.0&quot;)
+smodel &lt;- cmdstan_model(&quot;/gpfs/.../model_ind.stan&quot;)
+
+job &lt;- Slurm_lapply(
+  X = scenarios, 
+  FUN = s_replicate, 
+  mod = smodel,
+  njobs = min(90L, length(scenarios)), 
+  mc.cores = 4L,
+  job_name = &quot;i_ss&quot;,
+  tmp_path = &quot;/gpfs/.../scratch&quot;,
+  plan = &quot;wait&quot;,
+  sbatch_opt = list(time = &quot;12:00:00&quot;, partition = &quot;cpu_short&quot;, `mem-per-cpu` = &quot;4G&quot;),
+  export = c(&quot;s_define&quot;, &quot;s_generate&quot;, &quot;s_model&quot;),
+  overwrite = TRUE
+)
+
+res &lt;- Slurm_collect(job)
+
+save(res, file = &quot;/gpfs/.../post_ss.rda&quot;)</code></pre>
+</div>
