@@ -1,5 +1,5 @@
 ---
-title: Analyzing a factorial trial with a Bayesian model
+title: Analyzing a factorial design by focusing on the variance of effect sizes
 author: Package Build
 date: '2021-09-28'
 slug: []
@@ -11,19 +11,18 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
 <p>Way back in 2018, long before the pandemic, I <a href="https://www.rdatagen.net/post/testing-many-interventions-in-a-single-experiment/" target="_blank">described</a> a soon-to-be implemented <code>simstudy</code> function <code>genMultiFac</code> that facilitates the generation of multi-factorial study data. I <a href="https://www.rdatagen.net/post/so-how-efficient-are-multifactorial-experiments-part/" target="_blank">followed up</a> that post with a description of how we can use these types of efficient designs to answer multiple questions in the context of a single study.</p>
-<p>Fast forward three years, and I am thinking about these designs again for a new grant application that proposes simultaneously studying three interventions to reduce emergency department (ED) use for people living with dementia. The primary interest is to evaluate each intervention on its own terms, but also to assess whether any combinations seem to be particularly effective. While this will be a fairly large cluster randomized trial with about 80 EDs being randomized to one of the 8 possible combinations, I was concerned about our ability to estimate the interaction effects of multiple interventions with sufficient precision to draw useful conclusions, particularly if the combined effects of two or three interventions are less than additive. (That is, two interventions may be better than one, but not twice as good.)</p>
-<p>I am thinking that a null hypothesis testing framework might not be so useful here, given the likelihood of uncertainty in the measures, not to mention the multiple statistical tests that we would need to conduct (and presumably adjust for). Rather, a Bayesian approach that pools estimates across interventions and provides posterior probability distributions may provide more insight into how the interventions interact could be a better way to go.</p>
-<p>With this in mind, I went to the literature, and I found these papers by <a href="https://journals.sagepub.com/doi/full/10.1177/0193841X18818903" target="_blank"><em>Kassler et al</em></a> and <a href="https://projecteuclid.org/journals/annals-of-statistics/volume-33/issue-1/Analysis-of-variancewhy-it-is-more-important-than-ever/10.1214/009053604000001048.full" target="_blank"><em>Gelman</em></a>. They both describe a way of thinking about interaction estimation that emphasizes variation rather than point estimates. I went ahead and tested out the idea with simulated data, and am showing that here. Ultimately, I decided that this approach will not work so well for our study, and I came up with a pretty simple solution that I will share next time, really more to contrast with this solution than because it is intrinsically interesting.</p>
+<p>Fast forward three years, and I am thinking about these designs again for a new grant application that proposes to study simultaneously three interventions aimed at reducing emergency department (ED) use for people living with dementia. The primary interest is to evaluate each intervention on its own terms, but also to assess whether any combinations seem to be particularly effective. While this will be a fairly large cluster randomized trial with about 80 EDs being randomized to one of the 8 possible combinations, I was concerned about our ability to estimate the interaction effects of multiple interventions with sufficient precision to draw useful conclusions, particularly if the combined effects of two or three interventions are less than additive. (That is, two interventions may be better than one, but not twice as good.)</p>
+<p>I am thinking that a null hypothesis testing framework might not be so useful here, given the that the various estimates could be highly uncertain, not to mention the multiple statistical tests that we would need to conduct (and presumably adjust for). Rather, a Bayesian approach that pools estimates across interventions and provides posterior probability distributions may provide more insight into how the interventions interact could be a better way to go.</p>
+<p>With this in mind, I went to the literature, and I found these papers by <a href="https://journals.sagepub.com/doi/full/10.1177/0193841X18818903" target="_blank"><em>Kassler et al</em></a> and <a href="https://projecteuclid.org/journals/annals-of-statistics/volume-33/issue-1/Analysis-of-variancewhy-it-is-more-important-than-ever/10.1214/009053604000001048.full" target="_blank"><em>Gelman</em></a>. They both describe a way of thinking about interaction that emphasizes the estimates of variance across effect estimands. I went ahead and tested the idea with simulated data, which I’m showing here. Ultimately, I decided that this approach will not work so well for our study, and I came up with a pretty simple solution that I will share next time.</p>
 <div id="identifying-interaction-through-variance" class="section level3">
 <h3>Identifying interaction through variance</h3>
-<p>The scenarios described by both papers involves studies that may be evaluating many possible interventions or exposures, each of which may have two or more levels. If we are dealing with a normally distributed (continuous) outcome measure, we can model that outcome as</p>
+<p>The scenarios described by both papers involve studies that may be evaluating many possible interventions or exposures, each of which may have two or more levels. If we are dealing with a normally distributed (continuous) outcome measure, we can model that outcome as</p>
 <p><span class="math display">\[
 y_{i} \sim N\left(\mu = \tau_0 + \tau^1_{j_{1_i}} + \dots + \tau^k_{j_{k_i}} + \tau^{12}_{j_{12_i}} + \dots + \tau^{k-1, k}_{j_{k-1,k_i}} + \tau^{123}_{123_i} + \dots + \tau^{k-2, k-1, k}_{k-2, k-1, k_i} + \dots, \ \sigma = \sigma_0\right),
 \]</span></p>
@@ -55,7 +54,7 @@ where <span class="math inline">\(\sigma_k\)</span> is a hyperparameter that wil
 </div>
 <div id="example-from-simulation" class="section level3">
 <h3>Example from simulation</h3>
-<p>When I set out to explore this model, I started relatively simple, using only two interventions with four levels each. In this case, the factorial study would have 16 total arms <span class="math inline">\((4 \times 4)\)</span>. (Since I am using only 2 interventions, I am changing the notation slightly, using interventions <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> rather than <span class="math inline">\(1\)</span> and <span class="math inline">\(2\)</span>.) Individual <span class="math inline">\(i\)</span> is randomized to one level in <span class="math inline">\(a\)</span> and one level <span class="math inline">\(b\)</span>, and <span class="math inline">\(a_i \in \{1,2,3,4\}\)</span> and <span class="math inline">\(b_i\in \{1,2,3,4\}\)</span>, and <span class="math inline">\(ab_i \in \{11, 12, 13, 14, 21, 22, \dots, 44\}.\)</span> In this case, the outcome <span class="math inline">\(y\)</span> is a continuous measure. Using the same general model from above, here is the specific model for <span class="math inline">\(y\)</span>:</p>
+<p>When I set out to explore this model, I started relatively simple, using only two interventions with four levels each. In this case, the factorial study would have 16 total arms <span class="math inline">\((4 \times 4)\)</span>. (Since I am using only 2 interventions, I am changing the notation slightly, using interventions <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> rather than <span class="math inline">\(1\)</span> and <span class="math inline">\(2\)</span>.) Individual <span class="math inline">\(i\)</span> is randomized to one level in <span class="math inline">\(a\)</span> and one level <span class="math inline">\(b\)</span>, and <span class="math inline">\(a_i \in \{1,2,3,4\}\)</span> and <span class="math inline">\(b_i\in \{1,2,3,4\}\)</span>, and <span class="math inline">\(ab_i \in \{11, 12, 13, 14, 21, 22, \dots, 44\}.\)</span> Using the same general model from above, here is the specific model for continuous <span class="math inline">\(y\)</span>:</p>
 <p><span class="math display">\[
 y_{i} \sim N\left(\mu = \tau_0 + \tau^a_{a_i} + \tau^b_{b_i} + \tau^{ab}_{ab_i}, \ \sigma = \sigma_0\right)
 \]</span></p>
@@ -129,7 +128,7 @@ dd &lt;- addColumns(d1, dd)</code></pre>
 </div>
 <div id="sampling-from-the-posterior" class="section level3">
 <h3>Sampling from the posterior</h3>
-<p>The <code>Stan</code> implementation is shown below in the <a href="#addendum">addendum</a>. The function shown here simply generates the data needed by <code>Stan</code>. The most important element is the conversion of the <span class="math inline">\(\tau_{ab}\)</span> design matrix of 0’s and 1’s to a single vector with values ranging from 1 to 16.</p>
+<p>The function shown next simply generates the data needed by <code>Stan</code>. (The <code>Stan</code> implementation is shown below in the <a href="#addendum">addendum</a>.) Take note that we convert the <span class="math inline">\(\tau_{ab}\)</span> design matrix of 0’s and 1’s to a single vector with values ranging from 1 to 16.</p>
 <pre class="r"><code>dt_to_list &lt;- function(dx) {
   
   dx[, a_f := factor(a)]
@@ -169,14 +168,14 @@ fit &lt;- mod$sample(
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 15.2 seconds.
-## Chain 1 finished in 17.3 seconds.
-## Chain 3 finished in 19.6 seconds.
-## Chain 4 finished in 22.5 seconds.
+## Chain 2 finished in 15.5 seconds.
+## Chain 1 finished in 17.7 seconds.
+## Chain 3 finished in 20.3 seconds.
+## Chain 4 finished in 23.3 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 18.6 seconds.
-## Total execution time: 22.7 seconds.</code></pre>
+## Mean chain execution time: 19.2 seconds.
+## Total execution time: 23.6 seconds.</code></pre>
 </div>
 <div id="diagnostic-checks" class="section level3">
 <h3>Diagnostic checks</h3>
@@ -192,10 +191,10 @@ mcmc_trace(posterior, pars = glue(&quot;t[{1},{1:4}]&quot;))</code></pre>
 <p>And the credible interval for <span class="math inline">\(\sigma_{ab}\)</span> (<em>sigma_x</em>), likewise is shifted away from zero, suggesting there might be some interaction between <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> at certain levels of each.</p>
 <pre class="r"><code>mcmc_intervals(posterior, pars = c(glue(&quot;sigma_m[{1:2}]&quot;), &quot;sigma_x[1]&quot;))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="576" /></p>
-<p>We can hone in a bit more on the specifc estimates of the <span class="math inline">\(\tau_{ab}\)</span>’s to see where those interactions might be occurring. It appears that <em>t_x[1,6]</em> (representing <span class="math inline">\(\tau_{22}\)</span>) is an important interaction term - which is consistent with the data generation process. However, <span class="math inline">\(\tau_{32}\)</span>, represented by <em>t_x[1,10]</em> is not obviously important. Perhaps we need more data.</p>
+<p>We can hone in a bit more on the specific estimates of the <span class="math inline">\(\tau_{ab}\)</span>’s to see where those interactions might be occurring. It appears that <em>t_x[1,6]</em> (representing <span class="math inline">\(\tau_{22}\)</span>) is an important interaction term - which is consistent with the data generation process. However, <span class="math inline">\(\tau_{32}\)</span>, represented by <em>t_x[1,10]</em> is not obviously important. Perhaps we need more data.</p>
 <pre class="r"><code>mcmc_intervals(posterior, pars = glue(&quot;t_x[1,{1:16}]&quot;))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
-<p>This final plot shows medians of the expected mean for each <span class="math inline">\(a/b\)</span> pair (dashed line) on top of the observed means - a pretty good fit. The overall “cell” estimates appear to be spot on.</p>
+<p>Below is a visual representation of how well the model fits the data by showing the interval of predicted cell counts for each <span class="math inline">\(a/b\)</span> pair. The observed means (shown as white dots) sit on top of the predictions (shown by the colored lines), suggesting the model is appropriate.</p>
 <pre class="r"><code>r &lt;- as_draws_rvars(fit$draws(variables = c(&quot;t_0&quot;,&quot;t&quot;, &quot;t_x&quot;)))
 
 dnew &lt;- data.frame(
@@ -225,14 +224,14 @@ t_ab &lt;- matrix(0, nrow = 4, ncol = 4)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 9.3 seconds.
+## Chain 2 finished in 9.4 seconds.
 ## Chain 1 finished in 9.9 seconds.
-## Chain 4 finished in 10.1 seconds.
-## Chain 3 finished in 21.4 seconds.
+## Chain 4 finished in 10.2 seconds.
+## Chain 3 finished in 21.8 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 12.7 seconds.
-## Total execution time: 21.5 seconds.</code></pre>
+## Mean chain execution time: 12.8 seconds.
+## Total execution time: 21.9 seconds.</code></pre>
 <p>And yes, the posterior distribution for <span class="math inline">\(\sigma_{ab}\)</span> (<em>sigma_x</em>) is now very close to zero …</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="576" /></p>
 <p>and the effect parameters are all centered around zero:</p>
@@ -242,7 +241,7 @@ t_ab &lt;- matrix(0, nrow = 4, ncol = 4)</code></pre>
 </div>
 <div id="next-steps" class="section level3">
 <h3>Next steps</h3>
-<p>In the application that is motivating this, there are three different interventions, but each one has only two levels (yes or no). In this case, the level mean and across-level variance parameters were poorly estimated, probably because there are so few levels. This forced me to take a more traditional approach, where I estimate the means of each randomization arm. I’ll share that next time.</p>
+<p>In the motivating application, there are actually <em>three</em> interventions, but each one has only two levels (yes or no). In this case, the level mean and across-level variance parameters were poorly estimated, probably because there are so few levels. This forced me to take a more traditional approach, where I estimate the means of each randomization arm. I’ll share that next time.</p>
 <p>
 <p><small><font color="darkkhaki"></p>
 <p>References:</p>
