@@ -19,7 +19,7 @@ options(digits = 3)
 ```
 
 
-This is a continuation of my [discussion](){target="_blank"} on alternative ways to analyze data and present findings for a factorial study design where we are interested in whether applying multiple interventions is beneficial. Last time, I presented an approach that focused on variance estimation, and used an example of 2 interventions with 4 different levels for each, implying a study of 16 arms. This time around, I am considering a study that has 3 different interventions, but only 2 levels for each (i.e., yes or no), for a total of 8 arms. Under these assumptions, the posterior distributions based on the variance-based model turn out to be bi-modal in shape, making it quite difficult to interpret the findings. So, I decided to turn the focus away from variance and emphasize the effect size estimates for each arm compared to control.
+Factorial study designs present a number of analytic challenges, not least of which is how to best understand whether simultaneously applying multiple interventions is beneficial. [Last time](https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/){target="_blank"} I presented a possible approach that focuses on estimating the variance of effect size estimates using a Bayesian model. The scenario I used there focused on a hypothetical study evaluating two interventions with four different levels each. This time around, I am considering a proposed study to reduce emergency department (ED) use for patients living with dementia that I am actually involved with. This study would have three different interventions, but only two levels for each (i.e., yes or no), for a total of 8 arms. In this case - the model I proposed previously does not seem like it would work well; the posterior distributions based on the variance-based model turn out to be bi-modal in shape, making it quite difficult to interpret the findings. So, I decided to turn the focus away from variance and emphasize the effect size estimates for each arm compared to control.
 
 ### Model specification
 
@@ -36,7 +36,7 @@ As I mentioned, this is a case with three interventions ($a$, $b$, and $c$), eac
 (8) \ a&=1, \ b=1, \ c=1 \\
 \end{aligned}
 
-Although the proposed study is a cluster randomized trial, where each participating site will be assigned to one of the eight arms, I am simplifying things a bit by assuming each individual patient $i$ will be randomized to each of $a$, $b$, and $c$, and $a_i \in \{0,1\}$, $b_i\in \{0,1\}$, and $c_i\in \{0,1\}$. Also, in a real-world setting, I would typically assume that the outcome is, at least in part, predicted by patient-level characteristics, but will ignore that here.
+Although the proposed study is a cluster randomized trial, where each participating site will be assigned to one of the eight arms, I am simplifying things here a bit by assuming each individual patient $i$ will be randomized to each of $a$, $b$, and $c$, and $a_i \in \{0,1\}$, $b_i\in \{0,1\}$, and $c_i\in \{0,1\}$.
 
 Here is a model for outcome $y_i$, a binary measure $(y_i \in {0,1})$, where the log-odds of the outcome for each patient is a function of the random assignment:
 
@@ -48,7 +48,7 @@ $$
 \text{log}\left( \frac{p_{i}}{1-p_{i}}\right) =  \tau_0 + \tau_a a_i + \tau_b b_i + \tau_c c_i + \tau_{ab} a_i b_i +  \tau_{ac} a_i c_i + \tau_{bc} b_i c_i + \tau_{abc}a_i b_i c_i
 $$
 
-This is just a standard logistic model specification, where the parameters can be interpreted as log-odds ratios. For example, $\lambda_b = \tau_b$ is the log odds ratio comparing patients randomized to receive only $b$ (group 3 from above) with the control arm  where patients receive none of the interventions (group 1), and $\lambda_{ac} = \tau_a + \tau_c \tau_{ac}$ is the log odds ratio comparing patients randomized to only $a$ and $c$ but not $b$ (group 6) compared with the control patients (group 1). This is the full set of log odds ratios for this design:
+This is just a standard logistic model specification, where the parameters can be interpreted as log-odds ratios. For example, $\lambda_b = \tau_b$ is the log odds ratio comparing patients randomized to receive only $b$ (group 3 from above) with the control arm  where patients receive none of the interventions (group 1), and $\lambda_{ac} = \tau_a + \tau_c + \tau_{ac}$ is the log odds ratio comparing patients randomized to only $a$ and $c$ but not $b$ (group 6) compared with the control patients (group 1). This is the full set of log odds ratios for this design:
 
 \begin{aligned}
   \lambda_a &= \tau_a \\
@@ -64,7 +64,7 @@ The focus of the analysis is to estimate posterior probability distributions for
 
 ### Prior distribution assumptions
 
-Here are the prior distribution assumptions for the parameters:  
+Since I am again using a Bayesian model, here are the prior distribution assumptions for the parameters:  
 
 \begin{aligned}
   \tau_0 &\sim N(\mu=0, \sigma = 1) \\
@@ -77,9 +77,9 @@ Here are the prior distribution assumptions for the parameters:
   \sigma_x &\sim t_\text{student}(\text{df}=3, \mu = 0, \sigma = 2.5), \ \sigma_x \ge 0 \\
 \end{aligned}
 
-While the focus of this model estimation is different from the approach I discussed [last time](){target="_blank"}, the prior distributions here share a key element with the earlier model. The priors for the main effects $\tau_a, \ \tau_b, \text{ and } \tau_c$  share a common mean $\delta_m$ and standard deviation $\sigma_m$. Likewise the prior distributions for the pair-wise interaction effects share a common mean $\delta_x$ and standard deviation $\sigma_x$. These four *hyperparameters* are estimated from the data. The prior distributions for the mean intervention effects $\delta_m$ and $\delta_x$ are specified with the aim towards conservativism or skepticism, with a large portion of the distribution centered around 0. The priors for the variance parameters are more diffuse (using a $t$-distribution with 3-degrees of freedom, a compromise between a *Cauchy* distribution with very broad tails and a *normal* distribution with more constrained tails).
+While the focus of this model estimation is different from the approach I discussed [last time](https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/){target="_blank"}, the prior distributions here share a key element with the earlier model. The priors for the main effects $\tau_a, \ \tau_b, \text{ and } \tau_c$  share a common mean $\delta_m$ and standard deviation $\sigma_m$. Likewise the prior distributions for the pair-wise interaction effects share a common mean $\delta_x$ and standard deviation $\sigma_x$. These four *hyperparameters* are estimated from the data. The prior distributions for the mean intervention effects $\delta_m$ and $\delta_x$ are specified with the aim towards conservativism or skepticism, with a large portion of the distribution centered around 0. The priors for the variance parameters are more diffuse (using a $t$-distribution with 3-degrees of freedom, a compromise between a *Cauchy* distribution with very broad tails and a *normal* distribution with more constrained tails).
 
-Statistical inference will be based on an examination of the posterior distributions for the log odds ratios comparing each of the treatment combinations with the control arm where none of the interventions are implemented. We can also compare across different combinations to assess if one particular combination seems to be stronger than another. Since we are not using a null-hypothesis testing framework and the effect estimates are pooled across the interventions, adjustments for multiple testing are not necessary. (In the future, I can show results of the experiments where I explored the operating characteristics of these models. Because of the pooling and shrinkage that is built into the model, there are no inflated type 1 errors, analogous to the situation where I [evaluated](https://www.rdatagen.net/post/2021-09-14-drawing-the-wrong-conclusion-a-comparison-of-bayes-and-frequentist-methods/){target="_blank"} Bayesian methods for subgroup analysis.
+Statistical inference will be based on an examination of the posterior distributions for the log odds ratios comparing each of the treatment combinations with the control arm where none of the interventions are implemented. We can also compare across different combinations to assess if one particular combination seems to be stronger than another. Since we are not using a null-hypothesis testing framework and the effect estimates are pooled across the interventions, adjustments for multiple testing are not necessary. (In the future, I can show results of the experiments where I explored the operating characteristics of these models. Because of the pooling and shrinkage that is built into the model, there are no inflated type 1 errors, analogous to the situation where I [evaluated](https://www.rdatagen.net/post/2021-09-14-drawing-the-wrong-conclusion-a-comparison-of-bayes-and-frequentist-methods/){target="_blank"} Bayesian methods for subgroup analysis.)
 
 ### Data definition and generation
 
@@ -97,16 +97,16 @@ library(ggdist)
 library(paletteer)
 ```
 
-In this scenario, the log odds for the outcome is -1.4, corresponding to odds = exp(-1.4) = 0.25, and probability of outcome = 1/(1+exp(1.4) = 0.20. Here are the log-odds for each of the different arms with at least one treatment assignment:
+In this simulation, the log odds for the outcome in the control group has been set at -1.4, corresponding to odds = exp(-1.4) = 0.25, and probability of outcome = 1/(1+exp(1.4) = 20\%. Here are the log-odds ratios that I assumed for each of the different arms with at least one treatment assignment:
 
 \begin{aligned}
   \lambda_a &= 0.5 \\
   \lambda_b &= 0.6 \\
   \lambda_c &= 0.0 \\
-  \lambda_{ab}  &= 0.5 + 0.6 - 0.2 = 0.9 \\
+  \lambda_{ab}  &= 0.5 + 0.7 - 0.3 = 0.9 \\
   \lambda_{ac}  &= 0.5 + 0.0 + 0.0 = 0.5 \\
-  \lambda_{bc}  &= 0.6 + 0.0 + 0.0 = 0.6 \\
-  \lambda_{abc} &= 0.5 + 0.6 + 0.0 - 0.2 + 0.0 + 0.0 + 0.0 = 0.9 \\
+  \lambda_{bc}  &= 0.7 + 0.0 + 0.0 = 0.7 \\
+  \lambda_{abc} &= 0.5 + 0.7 + 0.0 - 0.3 + 0.0 + 0.0 + 0.0 = 0.9 \\
 \end{aligned}
 
 ```{r}
@@ -127,16 +127,16 @@ t_c <- t_ac <- t_bc <- t_abc <- 0.0
 4000 patients will be randomized to the eight arms, 500 in each:
 
 ```{r}
-set.seed(37159) # 73961 43969
+set.seed(37159)
 
-dd <- genData(8*500) # for final version use 1000
+dd <- genData(8*500)
 dd <- addMultiFac(dd, nFactors = 3, colNames = c("a", "b", "c"))
 dd <- addColumns(defY, dd)
 
 dd
 ```
 
-Here are the observed averages by treatment arm:
+Here are the observed proportions by treatment arm. The fact that the two panels ($c = 0$ and $c = 1$) are pretty similar are an indication that intervention $c$ has no impact. And the fact that lines are not parallel in each panel are an indication that there is some interaction (in this case negative).
 
 ```{r, echo=FALSE, fig.height = 3, message=FALSE}
 dsum <- dd[, mean(y), keyby = .(a, b, c)]
@@ -145,7 +145,7 @@ ggplot(data = dsum, aes(x = factor(b), y = V1)) +
   geom_point(aes(color = factor(a)), size = 2) +
   geom_line(aes(group= factor(a), color = factor(a))) +
   xlab("arm b") +
-  ylab("average y") +
+  ylab("proportion") +
   theme(panel.grid = element_blank()) +
   scale_color_manual(values =  palettes_d$wesanderson$Moonrise2[3:4],
       name = "arm a",
@@ -155,12 +155,12 @@ ggplot(data = dsum, aes(x = factor(b), y = V1)) +
 
 ### Model fitting
 
-The Bayesian sampling will use four chains of length 2500 (following 1000 warm-up iterations for each), so the posterior distribution will be estimated with 10000 total samples. The code for the `Stan` model can be found in the  <a href="#addendum">addendum</a>. You can see there how the $\lambda\text{'s}$ are derived from the $\tau\text{'s}$.
+The Bayesian sampling is using four chains of length 2,500 (following 1,000 warm-up iterations for each), so the posterior distribution will be estimated with 10,000 total samples. The code for the `Stan` model can be found in the  <a href="#addendum">addendum</a>.
 
 ```{r, eval = FALSE}
 dt_to_list <- function(dx) {
   
-  N <- nrow(dx)                               ## number of observations 
+  N <- nrow(dx)                          
   x_abc <- model.matrix(~a*b*c, data = dx)
   y <- dx[, y]
   
@@ -212,7 +212,7 @@ fit <- mod$sample(
 
 ### Presenting the results
 
-Here is the code for the first plot - the primary analysis, showing the distribution of effect sizes (on the log-odds scale) for each of the intervention arms. I've extracted the samples using the `posterior` package function `as_draw_rvars`, which I [recently described](https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/){target="_blank"}.
+Here is the code for the first plot, which shows the distribution of effect sizes (on the log-odds scale) for each of the intervention arms. I've extracted the samples using the `posterior` package function `as_draw_rvars` that I recently described [here] (https://www.rdatagen.net/post/2021-08-10-fitting-your-model-is-only-the-begining-bayesian-posterior-probability-checks/){target="_blank"}.
 
 ```{r}
 posterior <- data.frame(as_draws_rvars(fit$draws(variables = "lOR")))
@@ -255,7 +255,7 @@ Looking at the figure, it is apparent that that $a$ and $b$ likely had an effect
 ggdraw(insert_yaxis_grob(p, pimage, position = "left", width = grid::unit(.17, "null")))
 ```
 
-In this last plot, I am showing the the posterior distributions for the differences between the estimated log-odds ratios. In this particular data set, $a$ does not look any different from $b$, but the combination of $a$ and $b$ does indeed look superior to either alone, regardless of whether $c$ is involved:
+In the next and last plot, my goal is to compare the log-odds ratios of the different arms. I am showing the the posterior distributions for the differences between the estimated log-odds ratios. In this particular data set, $a$ does not look any different from $b$, but the combination of $a$ and $b$ does indeed look superior to either alone, regardless of whether $c$ is involved:
 
 ```{r, fig.height = 4}
 data <- with(posterior, data.frame(
@@ -285,6 +285,10 @@ ggplot(data = data, aes(dist = diff, x = x)) +
         axis.ticks.x = element_blank()) +
   ylab("difference")
 ```
+
+Ultimately, how we present the data and draw our conclusions will depend on what we specify up front regarding the parameters and comparisons of interest. The great thing about a Bayesian model is that we have estimated everything in a single model, so there are no real concerns with multiple comparisons. However, reviewers still like to see results for analyses that were pre-specified. And if a decision is to be made based on those results, those decision rules should be pre-specified. But, my preference would be to show the findings and let readers decide if the results are compelling and/or determine if a more focused trial is needed.
+
+In the next (and most likely, for now at least, final) post on this topic, I plan on describing how I approached sample size estimation for this proposed study.
 
 <a name="addendum"></a>  
 
