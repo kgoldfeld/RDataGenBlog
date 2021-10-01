@@ -7,30 +7,48 @@ categories: []
 tags:
   - R
   - Bayesian model
+  - Stan
 type: ''
 subtitle: ''
 image: ''
 draft: true
 ---
 
-We used simulation studies to determine the number of ED sites to be included in the study. Since the precision of the posterior distribution determines the range of probable effect sizes, we used the expected standard deviation ($\sigma$) as the criterion for sample size selection. 
-
-To determine the target level of precision, we assessed the width of the posterior distributions under different standard deviations. In particular, we identified the posterior probabilities with a mean OR = 0.80 (log OR = -0.22) where $P(log(OR) < 0) \ge 0.95$. Based on this, our target standard deviation was 0.135, as can be seen in the figure. The right hand side of each interval in the figure represents the 95th percentile of the distribution. For those distributions where $\sigma \le 0.135$,  $P(log(OR) < 0) \ge 0.95.$
-
-```{r, message = FALSE, warning=FALSE}
-library(data.table)
-library(ggplot2)
+```{r, echo=FALSE}
+options(digits = 3)
 ```
 
-```{r, , echo = FALSE, warning=FALSE, message=FALSE, fig.height = 4, fig.width = 4.5}
+How do you determine sample size when the goal of a study is *not* to conduct a null hypothesis test but to provide an *estimate* of multiple effect sizes? I needed to get a handle on this for a recent grant submission, which I've been writing about over the past month, [here](https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/){target="_blank"} and [here](){target="_blank"}. (I provide a little more context for all of this in those earlier posts.) The statistical inference in the study will be based the estimated posterior distributions from a Bayesian model, so it seems like we'd like those distributions to be as informative as possible. This means that we need to set the sample size large enough to reduce the dispersion of those distributions to a helpful level.
+
+Once I determined that I wanted to target the variance of the posterior distributions, it was just a matter of figuring out what that target should be and then simulate data to see what sample sizes could give us that target. In short, I used the expected standard deviation ($\sigma$) as the criterion for sample size selection.
+
+### Setting the target
+
+To determine the target level of precision, I assessed the width of the posterior distributions under different standard deviations. In particular, I identified the posterior probabilities with a mean OR = 1.25 (log OR = 0.22) where $P(log(OR) > 0) \ge 0.95$. The target OR is somewhat arbitrary, but seemed like a meaningful effect size based on discussions with my collaborators. 
+
+I did a quick search for the standard deviation that would yield a 95\% threshold at or very close to 0. That is, 95\% of the distribution should lie to the right of 0. Assuming that the target posterior distribution will be approximately *normal* with a mean of 0.22, I used the `qnorm` function to find the 95\% thresholds for range of standard deviations between 0.10 and 0.15.
+
+```{r}
+sd <- seq(.15, .10, by = -0.005)
+cbind(sd, threshold = round(qnorm(.05, .22 , sd = sd), 3))
+```
+
+
+It looks like the target standard deviation should be close to 0.135, which is also apparent from the plot of the 95\% intervals centered at 0.22:
+
+```{r, echo = FALSE, warning=FALSE, message=FALSE, fig.height = 4, fig.width = 4.5}
+
+library(data.table)
+library(ggplot2)
+
 sds <- data.table(sd = seq(.10, .16, by = .005))
 
 sds[, `:=`(
-  q05 = qnorm(.05, -0.223, sd),
-  q25 = qnorm(.25, -0.223, sd),
-  q50 = qnorm(.5, -0.223, sd),
-  q75 = qnorm(.75, -0.223, sd),
-  q95 = qnorm(.95, -0.223, sd)
+  q05 = qnorm(.05, 0.223, sd),
+  q25 = qnorm(.25, 0.223, sd),
+  q50 = qnorm(.5,  0.223, sd),
+  q75 = qnorm(.75, 0.223, sd),
+  q95 = qnorm(.95, 0.223, sd)
 )]
 
 arrow = arrow(angle=15, type = "closed", length = unit(.10, "inches"))
@@ -43,30 +61,53 @@ ggplot(data = sds, aes(y = sd, yend = sd)) +
   theme(panel.grid = element_blank(),  
         plot.title = element_text(size = 10, face = "bold")
   ) +
-  annotate("segment", x = .15, xend = 0.05, y = .135, yend = .135, arrow=arrow, color ="grey60") +
+  annotate("segment", x = -.15, xend = -0.05, y = .135, yend = .135, 
+           arrow=arrow, color ="grey60") +
   scale_y_continuous(breaks = seq(0.10, 0.16, by = .01), name = "standard deviation") +
-  scale_x_continuous(limits = c(-.5, .15), breaks = seq(-.5, .10, by = .25), name = "log odds ratio") +
+  scale_x_continuous(limits = c(-.15, .5), breaks = seq(-.10, .5, by = .1), 
+                     name = "log odds ratio") +
   ggtitle("Posterior distribution of log OR")
 ```
 
-```{r, fig.width=5, fig.height=4}
-load("code/post_ss.rda")
+### Using simulation to establish sample size
 
+The final step was to repeatedly simulate data sets using different sample size assumptions, fitting models, and estimating the posterior distribution standard deviations for associated with each data set (and sample size). I evaluated sample sizes ranging from 400 to 650 individuals, increasing by 50. For each sample size, I generated 250 data sets, for a total of 1,500 data sets and model estimates. Given that each model estimation is quite resource intensive, I generated all the data and estimated the models using a high performance computing environment that provided me with 90 nodes and 4 processors on each node so that the Bayesian MCMC proccess could all run in parallel - so parallelization of parallel processes. In total, this took about 2 hours to run.
+
+I am including the code in the <a href="#addendum">addendum</a> below. The structure is similar to what I have [described](https://www.rdatagen.net/post/a-frequentist-bayesian-exploring-frequentist-properties-of-bayesian-models/){target="_blank"} in the past on how one might do these types of explorations with simulated data and Bayesian modelling.
+
+Below is the output for a single data set to provide an example of the data being generated by the simulations. We have estimated 7 log-odds ratios (see [here](){target="_blank"} for an explanation of why there are 7), and the simulation returns a summary of the posterior distribution for each: selected quantiles and the standard deviation.
+
+```{r, echo = FALSE}
+load("code/post_ss.rda")
+res[[1500]][, .(n, var, p0.025, p0.25, p0.5, p0.75, p0.975, sd)]
+```
+
+The plot below shows the estimated standard deviations for a single log-odds ratio (in this case $\lambda_4$), with a point for each of the 1,500 simulate data sets. At 550 subjects, the mean standard deviation (represented by the curve) is starting to get close to 0.135, but there is still quite a bit of uncertainty. To be safe, we might want to set the upper limit for the study to be 600 patients, because we are quite confident that the standard deviation will be low enough to meet our criteria (almost 90\% of the standard deviations from the simulations were below 0.135, though at 650 patients that proportion was over 98\%).
+
+```{r, fig.width=5, fig.height=4, echo=FALSE}
 res <- rbindlist(res)[var == "lOR[4]", .(n, sd)]
 sum <- res[, .(sd = mean(sd)), keyby = n]
 
 ggplot() +
   geom_hline(yintercept = 0.135, size = .5, color = "grey80") +
-  geom_jitter(data = res, aes(x = n, y = sd), width = .5, color = "grey75", size = .4) +
+  geom_jitter(data = res, aes(x = n, y = sd), 
+              width = 5, height = 0, color = "grey75", size = .4) +
   geom_line(data = sum, aes(x = n, y = sd), size = 1) +
   scale_y_continuous(limits = c(0.11, 0.18), breaks = seq(0.11, 0.18, by = 0.01), 
                      name ="sd of posterior distribution") +
+  scale_x_continuous(limits = c(390, 660), breaks = seq(400, 650, by = 50), 
+                     name="sample size") +
   theme(panel.grid = element_blank(),  
         plot.title = element_text(size = 10, face = "bold")) +
   ggtitle("Distribution of standard deviations")
 ```
 
+
+<a name="addendum"></a>
+
 ### Addendum
+
+Something here about the added uncertainty induced by drawing effect sizes from a distribution.
 
 ```{r, eval=FALSE}
 library(cmdstanr)
