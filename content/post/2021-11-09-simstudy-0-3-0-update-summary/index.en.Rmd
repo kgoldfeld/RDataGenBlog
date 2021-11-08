@@ -1,0 +1,184 @@
+---
+title: 'simstudy update: adding flexibility to data generation'
+author: Package Build
+date: '2021-11-09'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+```{r, echo=FALSE}
+options(digits = 3)
+```
+
+A new version of `simstudy` (0.3.0) is now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"} and on the [package website](https://github.com/kgoldfeld/simstudy/releases){target="_blank"}. Along with some less exciting bug fixes, we have added flexibility to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition. 
+    
+## Using non-scalar double-dot variable reference
+
+Double-dot notation was [introduced](https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/) in the last version of `simstudy` to allow data definitions to be more dynamic. Previously, the double-dot variable was a scalar value, but with the current version, double-dot notation is also *array-friendly*. 
+
+Here are the necessary packages for this post:
+
+```{r}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+```
+
+#### Example 1
+
+In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a *categorical* distribution, more on that in a little bit), we can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as
+
+```{r}
+sizes <- c(2, 4)
+```
+
+The data definition references each cell of the vector:
+
+```{r}
+defblk <- defData(varname = "blksize", 
+   formula = "..sizes[1] | .5 + ..sizes[2] | .5", dist = "mixture")
+```
+
+```{r}
+genData(1000, defblk)
+```
+
+#### Example 2
+
+In this second example, there is a vector variable *tau* of positive real numbers that sum to 1, and we want to calculate the weighted average of three numbers using *tau* as the weights. We could use the following code to estimate a weighted average *theta*:
+
+```{r}
+tau <- rgamma(3, 5, 2)
+tau <- tau / sum(tau)
+tau
+
+d <- defData(varname = "a", formula = 3, variance = 4)
+d <- defData(d, varname = "b", formula = 8, variance = 2)
+d <- defData(d, varname = "c", formula = 11, variance = 6)
+d <- defData(d, varname = "theta", formula = "..tau[1]*a + ..tau[2]*b + ..tau[3]*c", 
+  dist = "nonrandom")
+
+set.seed(19483)
+genData(4, d)
+```
+
+However, we can simplify the calculation of *theta* a bit by using matrix multiplication:
+
+```{r}
+d <- updateDef(d, changevar = "theta", newformula = "t(..tau) %*% c(a, b, c)")
+
+set.seed(19483)
+genData(4, d)
+```
+
+#### Example 3
+
+The arrays can also have **multiple dimensions**, as in a $m \times n$ matrix. If we want to specify the mean outcomes for a $2 \times 2$ factorial study design with two interventions $a$ and $b$, we can use a simple matrix and draw the means directly from the matrix, which in this example is stored in the variable *effect*:
+
+```{r}
+effect <- matrix(c(0, 8, 10, 12), nrow = 2)
+effect
+```
+
+Using double dot notation, it is possible to reference the matrix cell values directly:
+
+```{r}
+d1 <- defData(varname = "a", formula = ".5;.5", variance = "1;2", dist = "categorical")
+d1 <- defData(d1, varname = "b", formula = ".5;.5", 
+              variance = "1;2", dist = "categorical")
+d1 <- defData(d1, varname = "outcome", formula = "..effect[a, b]",
+              variance = 9, dist="normal")
+```
+
+```{r}
+dx <- genData(1000, d1)
+dx
+```
+
+The plot shows individual values as well as mean values by intervention arm:
+
+```{r, echo=FALSE}
+cbbPalette <- c("#B84226","#B88F26", "#A5B435", "#1B8446",
+                "#B87326","#B8A526", "#6CA723", "#1C5974") 
+
+dsum <- dx[, .(outcome=mean(outcome)), keyby = .(a, b)]
+
+ggplot(data = dx, aes(x = factor(a), y = outcome)) +
+  geom_jitter(aes(color = factor(b)), width = .2, alpha = .4, size = .2) +
+  geom_point(data = dsum, size = 2, aes(color = factor(b))) + 
+  geom_line(data = dsum, size = 1, aes(color = factor(b), group = factor(b))) +
+  scale_color_manual(values = cbbPalette, name = "  b") +
+  theme(panel.grid = element_blank()) +
+  xlab ("a")
+```
+
+## Assigned treatment using *trtAssign* distribution in `defData`
+
+The function [trtAssign](https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html){target="_blank"} provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Now, it is also possible to generate these treatment assignments directly in the `defData` and `genData` process without a separate call to `trtAssign`. We've done this by adding *trtAssign* as a possible distribution. 
+
+In this example, randomization is stratified by *gender* and *age*, and the outcome *y* is effected by both of these factors as well as the treatment assignment variable *rx*.
+
+```{r}
+def <- defData(varname = "male", dist = "binary", 
+               formula = .5 , id="cid")
+def <- defData(def, varname = "over65", dist = "binary",  
+               formula = "-1.7 + .8*male", link="logit")
+def <- defData(def, varname = "rx", dist = "trtAssign",
+               formula = "1;1", variance = "male;over65")
+def <- defData(def, varname = "y", dist = "normal", 
+               formula = "20 + 5*male + 10*over65 + 10*rx", variance = 40)
+
+dtstudy <- genData(330, def)
+dtstudy
+```
+
+Here are the counts and average outcomes for each *gender*, *age*, and *treatment* combination:
+
+```{r}
+dtstudy[, .(n = .N, avg = round(mean(y), 1)), keyby = .(male, over65, rx)]
+```
+
+## Categogorical data
+
+In previous versions, the *categorical* distribution generated a set of integer categories:
+
+```{r}
+def <- defData(varname = "grp", formula = ".4;.3;.2;.1", dist="categorical")
+genData(1000, def)
+```
+
+Now, it is possible to generate specific values or string categories by using the `variance` argument:
+
+```{r}
+def <- defData(varname = "grp", formula = ".4;.3;.2;.1", 
+               variance = "a;b;c;d", dist="categorical")
+
+dd <- genData(1000, def)
+dd
+```
+
+```{r, echo=FALSE, fig.height = 4}
+ggplot(data = dd, aes(x = grp)) +
+  geom_bar(width = .5, fill = cbbPalette[5]) +
+  theme(panel.grid = element_blank())
+```
+
+And to replicate the Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the *categorical* distribution.
+
+```{r}
+defblk <- defData(varname = "blksize", 
+   formula = ".5;.5", variance = "2;4", dist = "categorical")
+
+genData(1000, defblk)
+```
+
+## Possible next steps
+
+As we expand the functionality of `simstudy`, we realize that the current structure of the data definition table cannot always easily accommodate all of our new ideas. As a result, we have ended up having to shoehorn some solutions in non-intuitive ways as we grow. We are in the process of reconsidering that structure so that we won't have (as many of) these awkward specifications in the future (though we will be making everything backwards compatible, so no worries there).

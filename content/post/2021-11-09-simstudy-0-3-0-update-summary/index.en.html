@@ -1,0 +1,207 @@
+---
+title: 'simstudy update: adding flexibility to data generation'
+author: Package Build
+date: '2021-11-09'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>A new version of <code>simstudy</code> (0.3.0) is now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a> and on the <a href="https://github.com/kgoldfeld/simstudy/releases" target="_blank">package website</a>. Along with some less exciting bug fixes, we have added flexibility to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition.</p>
+<div id="using-non-scalar-double-dot-variable-reference" class="section level2">
+<h2>Using non-scalar double-dot variable reference</h2>
+<p>Double-dot notation was <a href="https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/">introduced</a> in the last version of <code>simstudy</code> to allow data definitions to be more dynamic. Previously, the double-dot variable was a scalar value, but with the current version, double-dot notation is also <em>array-friendly</em>.</p>
+<p>Here are the necessary packages for this post:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)</code></pre>
+<div id="example-1" class="section level4">
+<h4>Example 1</h4>
+<p>In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a <em>categorical</em> distribution, more on that in a little bit), we can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as</p>
+<pre class="r"><code>sizes &lt;- c(2, 4)</code></pre>
+<p>The data definition references each cell of the vector:</p>
+<pre class="r"><code>defblk &lt;- defData(varname = &quot;blksize&quot;, 
+   formula = &quot;..sizes[1] | .5 + ..sizes[2] | .5&quot;, dist = &quot;mixture&quot;)</code></pre>
+<pre class="r"><code>genData(1000, defblk)</code></pre>
+<pre><code>##         id blksize
+##    1:    1       4
+##    2:    2       2
+##    3:    3       2
+##    4:    4       2
+##    5:    5       2
+##   ---             
+##  996:  996       4
+##  997:  997       2
+##  998:  998       4
+##  999:  999       2
+## 1000: 1000       4</code></pre>
+</div>
+<div id="example-2" class="section level4">
+<h4>Example 2</h4>
+<p>In this second example, there is a vector variable <em>tau</em> of positive real numbers that sum to 1, and we want to calculate the weighted average of three numbers using <em>tau</em> as the weights. We could use the following code to estimate a weighted average <em>theta</em>:</p>
+<pre class="r"><code>tau &lt;- rgamma(3, 5, 2)
+tau &lt;- tau / sum(tau)
+tau</code></pre>
+<pre><code>## [1] 0.179 0.356 0.465</code></pre>
+<pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 3, variance = 4)
+d &lt;- defData(d, varname = &quot;b&quot;, formula = 8, variance = 2)
+d &lt;- defData(d, varname = &quot;c&quot;, formula = 11, variance = 6)
+d &lt;- defData(d, varname = &quot;theta&quot;, formula = &quot;..tau[1]*a + ..tau[2]*b + ..tau[3]*c&quot;, 
+  dist = &quot;nonrandom&quot;)
+
+set.seed(19483)
+genData(4, d)</code></pre>
+<pre><code>##    id    a    b     c theta
+## 1:  1 1.87 8.16 13.72  9.62
+## 2:  2 3.45 7.45  6.08  6.10
+## 3:  3 7.41 6.27 10.21  8.31
+## 4:  4 2.34 9.52 10.01  8.46</code></pre>
+<p>However, we can simplify the calculation of <em>theta</em> a bit by using matrix multiplication:</p>
+<pre class="r"><code>d &lt;- updateDef(d, changevar = &quot;theta&quot;, newformula = &quot;t(..tau) %*% c(a, b, c)&quot;)
+
+set.seed(19483)
+genData(4, d)</code></pre>
+<pre><code>##    id    a    b     c theta
+## 1:  1 1.87 8.16 13.72  9.62
+## 2:  2 3.45 7.45  6.08  6.10
+## 3:  3 7.41 6.27 10.21  8.31
+## 4:  4 2.34 9.52 10.01  8.46</code></pre>
+</div>
+<div id="example-3" class="section level4">
+<h4>Example 3</h4>
+<p>The arrays can also have <strong>multiple dimensions</strong>, as in a <span class="math inline">\(m \times n\)</span> matrix. If we want to specify the mean outcomes for a <span class="math inline">\(2 \times 2\)</span> factorial study design with two interventions <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span>, we can use a simple matrix and draw the means directly from the matrix, which in this example is stored in the variable <em>effect</em>:</p>
+<pre class="r"><code>effect &lt;- matrix(c(0, 8, 10, 12), nrow = 2)
+effect</code></pre>
+<pre><code>##      [,1] [,2]
+## [1,]    0   10
+## [2,]    8   12</code></pre>
+<p>Using double dot notation, it is possible to reference the matrix cell values directly:</p>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;a&quot;, formula = &quot;.5;.5&quot;, variance = &quot;1;2&quot;, dist = &quot;categorical&quot;)
+d1 &lt;- defData(d1, varname = &quot;b&quot;, formula = &quot;.5;.5&quot;, 
+              variance = &quot;1;2&quot;, dist = &quot;categorical&quot;)
+d1 &lt;- defData(d1, varname = &quot;outcome&quot;, formula = &quot;..effect[a, b]&quot;,
+              variance = 9, dist=&quot;normal&quot;)</code></pre>
+<pre class="r"><code>dx &lt;- genData(1000, d1)
+dx</code></pre>
+<pre><code>##         id a b outcome
+##    1:    1 1 2   12.07
+##    2:    2 2 2    9.70
+##    3:    3 2 2   10.76
+##    4:    4 2 2   11.04
+##    5:    5 2 1    5.51
+##   ---                 
+##  996:  996 1 1   -2.80
+##  997:  997 2 1    5.15
+##  998:  998 2 2   19.47
+##  999:  999 2 1   10.53
+## 1000: 1000 2 1    3.89</code></pre>
+<p>The plot shows individual values as well as mean values by intervention arm:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="672" /></p>
+</div>
+</div>
+<div id="assigned-treatment-using-trtassign-distribution-in-defdata" class="section level2">
+<h2>Assigned treatment using <em>trtAssign</em> distribution in <code>defData</code></h2>
+<p>The function <a href="https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html" target="_blank">trtAssign</a> provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Now, it is also possible to generate these treatment assignments directly in the <code>defData</code> and <code>genData</code> process without a separate call to <code>trtAssign</code>. We’ve done this by adding <em>trtAssign</em> as a possible distribution.</p>
+<p>In this example, randomization is stratified by <em>gender</em> and <em>age</em>, and the outcome <em>y</em> is effected by both of these factors as well as the treatment assignment variable <em>rx</em>.</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;male&quot;, dist = &quot;binary&quot;, 
+               formula = .5 , id=&quot;cid&quot;)
+def &lt;- defData(def, varname = &quot;over65&quot;, dist = &quot;binary&quot;,  
+               formula = &quot;-1.7 + .8*male&quot;, link=&quot;logit&quot;)
+def &lt;- defData(def, varname = &quot;rx&quot;, dist = &quot;trtAssign&quot;,
+               formula = &quot;1;1&quot;, variance = &quot;male;over65&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, dist = &quot;normal&quot;, 
+               formula = &quot;20 + 5*male + 10*over65 + 10*rx&quot;, variance = 40)
+
+dtstudy &lt;- genData(330, def)
+dtstudy</code></pre>
+<pre><code>##      cid male over65 rx    y
+##   1:   1    1      0  0 20.4
+##   2:   2    1      0  0 23.9
+##   3:   3    0      1  0 23.7
+##   4:   4    1      0  1 25.9
+##   5:   5    0      1  0 35.4
+##  ---                        
+## 326: 326    1      1  1 46.3
+## 327: 327    1      0  1 33.2
+## 328: 328    1      0  1 35.5
+## 329: 329    1      1  0 42.2
+## 330: 330    0      0  0 12.5</code></pre>
+<p>Here are the counts and average outcomes for each <em>gender</em>, <em>age</em>, and <em>treatment</em> combination:</p>
+<pre class="r"><code>dtstudy[, .(n = .N, avg = round(mean(y), 1)), keyby = .(male, over65, rx)]</code></pre>
+<pre><code>##    male over65 rx  n  avg
+## 1:    0      0  0 72 20.3
+## 2:    0      0  1 72 30.3
+## 3:    0      1  0 12 28.7
+## 4:    0      1  1 12 38.5
+## 5:    1      0  0 55 25.0
+## 6:    1      0  1 56 34.3
+## 7:    1      1  0 26 36.6
+## 8:    1      1  1 25 45.7</code></pre>
+</div>
+<div id="categogorical-data" class="section level2">
+<h2>Categogorical data</h2>
+<p>In previous versions, the <em>categorical</em> distribution generated a set of integer categories:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;grp&quot;, formula = &quot;.4;.3;.2;.1&quot;, dist=&quot;categorical&quot;)
+genData(1000, def)</code></pre>
+<pre><code>##         id grp
+##    1:    1   1
+##    2:    2   4
+##    3:    3   4
+##    4:    4   1
+##    5:    5   2
+##   ---         
+##  996:  996   1
+##  997:  997   4
+##  998:  998   2
+##  999:  999   4
+## 1000: 1000   1</code></pre>
+<p>Now, it is possible to generate specific values or string categories by using the <code>variance</code> argument:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;grp&quot;, formula = &quot;.4;.3;.2;.1&quot;, 
+               variance = &quot;a;b;c;d&quot;, dist=&quot;categorical&quot;)
+
+dd &lt;- genData(1000, def)
+dd</code></pre>
+<pre><code>##         id grp
+##    1:    1   d
+##    2:    2   b
+##    3:    3   a
+##    4:    4   c
+##    5:    5   b
+##   ---         
+##  996:  996   d
+##  997:  997   a
+##  998:  998   b
+##  999:  999   a
+## 1000: 1000   d</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
+<p>And to replicate the Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the <em>categorical</em> distribution.</p>
+<pre class="r"><code>defblk &lt;- defData(varname = &quot;blksize&quot;, 
+   formula = &quot;.5;.5&quot;, variance = &quot;2;4&quot;, dist = &quot;categorical&quot;)
+
+genData(1000, defblk)</code></pre>
+<pre><code>##         id blksize
+##    1:    1       2
+##    2:    2       4
+##    3:    3       2
+##    4:    4       4
+##    5:    5       4
+##   ---             
+##  996:  996       2
+##  997:  997       2
+##  998:  998       2
+##  999:  999       2
+## 1000: 1000       2</code></pre>
+</div>
+<div id="possible-next-steps" class="section level2">
+<h2>Possible next steps</h2>
+<p>As we expand the functionality of <code>simstudy</code>, we realize that the current structure of the data definition table cannot always easily accommodate all of our new ideas. As a result, we have ended up having to shoehorn some solutions in non-intuitive ways as we grow. We are in the process of reconsidering that structure so that we won’t have (as many of) these awkward specifications in the future (though we will be making everything backwards compatible, so no worries there).</p>
+</div>
