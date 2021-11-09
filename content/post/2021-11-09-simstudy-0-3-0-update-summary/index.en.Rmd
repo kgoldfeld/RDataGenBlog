@@ -10,20 +10,19 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 ```{r, echo=FALSE}
 options(digits = 3)
 ```
 
-A new version of `simstudy` (0.3.0) is now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"} and on the [package website](https://github.com/kgoldfeld/simstudy/releases){target="_blank"}. Along with some less exciting bug fixes, we have added flexibility to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition. 
+A new version of `simstudy` (0.3.0) is now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"} and on the [package website](https://github.com/kgoldfeld/simstudy/releases){target="_blank"}. Along with some less exciting bug fixes, we have added capabilities to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition. These simple additions should make the data generation process a little smoother and more flexible.
     
 ## Using non-scalar double-dot variable reference
 
-Double-dot notation was [introduced](https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/) in the last version of `simstudy` to allow data definitions to be more dynamic. Previously, the double-dot variable was a scalar value, but with the current version, double-dot notation is also *array-friendly*. 
+Double-dot notation was [introduced](https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/) in the last version of `simstudy` to allow data definitions to be more dynamic. Previously, the double-dot variable could only be a scalar value, and with the current version, double-dot notation is now also *array-friendly*. 
 
-Here are the necessary packages for this post:
+Before the examples, here are the necessary packages for this post:
 
 ```{r}
 library(simstudy)
@@ -33,13 +32,13 @@ library(ggplot2)
 
 #### Example 1
 
-In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a *categorical* distribution, more on that in a little bit), we can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as
+In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a *categorical* distribution, more on that in a little bit). We can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as
 
 ```{r}
 sizes <- c(2, 4)
 ```
 
-The data definition references each cell of the vector:
+The data definition references each element of the vector:
 
 ```{r}
 defblk <- defData(varname = "blksize", 
@@ -87,7 +86,7 @@ effect <- matrix(c(0, 8, 10, 12), nrow = 2)
 effect
 ```
 
-Using double dot notation, it is possible to reference the matrix cell values directly:
+Using double dot notation, it is possible to reference the matrix cell values directly, depending on the values of *a* and *b*:
 
 ```{r}
 d1 <- defData(varname = "a", formula = ".5;.5", variance = "1;2", dist = "categorical")
@@ -121,9 +120,9 @@ ggplot(data = dx, aes(x = factor(a), y = outcome)) +
 
 ## Assigned treatment using *trtAssign* distribution in `defData`
 
-The function [trtAssign](https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html){target="_blank"} provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Now, it is also possible to generate these treatment assignments directly in the `defData` and `genData` process without a separate call to `trtAssign`. We've done this by adding *trtAssign* as a possible distribution. 
+The function [trtAssign](https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html){target="_blank"} currently provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Starting with version 0.3.0, it is also possible to generate these treatment assignments directly in the `defData` and `genData` process without a separate call to `trtAssign`. We've done this by adding *trtAssign* as a possible distribution. 
 
-In this example, randomization is stratified by *gender* and *age*, and the outcome *y* is effected by both of these factors as well as the treatment assignment variable *rx*.
+In this example, randomization is stratified by *gender* and *age* (specified in the `variance` argument), and randomization is 1:1 treatment to control (specified in `formula`). The outcome *y* is effected by both of these factors as well as the treatment assignment variable *rx*.
 
 ```{r}
 def <- defData(varname = "male", dist = "binary", 
@@ -147,7 +146,7 @@ dtstudy[, .(n = .N, avg = round(mean(y), 1)), keyby = .(male, over65, rx)]
 
 ## Categogorical data
 
-In previous versions, the *categorical* distribution generated a set of integer categories:
+Finally, in previous versions, the *categorical* distribution generated a set of integer categories:
 
 ```{r}
 def <- defData(varname = "grp", formula = ".4;.3;.2;.1", dist="categorical")
@@ -170,7 +169,7 @@ ggplot(data = dd, aes(x = grp)) +
   theme(panel.grid = element_blank())
 ```
 
-And to replicate the Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the *categorical* distribution.
+To replicate Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the *categorical* distribution and the new functionality.
 
 ```{r}
 defblk <- defData(varname = "blksize", 

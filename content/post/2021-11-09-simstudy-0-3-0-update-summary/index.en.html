@@ -10,39 +10,38 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>A new version of <code>simstudy</code> (0.3.0) is now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a> and on the <a href="https://github.com/kgoldfeld/simstudy/releases" target="_blank">package website</a>. Along with some less exciting bug fixes, we have added flexibility to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition.</p>
+<p>A new version of <code>simstudy</code> (0.3.0) is now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a> and on the <a href="https://github.com/kgoldfeld/simstudy/releases" target="_blank">package website</a>. Along with some less exciting bug fixes, we have added capabilities to a few existing features: double-dot variable reference, treatment assignment, and categorical data definition. These simple additions should make the data generation process a little smoother and more flexible.</p>
 <div id="using-non-scalar-double-dot-variable-reference" class="section level2">
 <h2>Using non-scalar double-dot variable reference</h2>
-<p>Double-dot notation was <a href="https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/">introduced</a> in the last version of <code>simstudy</code> to allow data definitions to be more dynamic. Previously, the double-dot variable was a scalar value, but with the current version, double-dot notation is also <em>array-friendly</em>.</p>
-<p>Here are the necessary packages for this post:</p>
+<p>Double-dot notation was <a href="https://www.rdatagen.net/post/simstudy-just-got-a-little-more-dynamic-version-0-2-0/">introduced</a> in the last version of <code>simstudy</code> to allow data definitions to be more dynamic. Previously, the double-dot variable could only be a scalar value, and with the current version, double-dot notation is now also <em>array-friendly</em>.</p>
+<p>Before the examples, here are the necessary packages for this post:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(ggplot2)</code></pre>
 <div id="example-1" class="section level4">
 <h4>Example 1</h4>
-<p>In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a <em>categorical</em> distribution, more on that in a little bit), we can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as</p>
+<p>In the first example, we want to create a mixture distribution from a vector of values (which we can also do using a <em>categorical</em> distribution, more on that in a little bit). We can define the mixture formula in terms of the vector. In this case we are generating permuted block sizes of 2 and 4, specified as</p>
 <pre class="r"><code>sizes &lt;- c(2, 4)</code></pre>
-<p>The data definition references each cell of the vector:</p>
+<p>The data definition references each element of the vector:</p>
 <pre class="r"><code>defblk &lt;- defData(varname = &quot;blksize&quot;, 
    formula = &quot;..sizes[1] | .5 + ..sizes[2] | .5&quot;, dist = &quot;mixture&quot;)</code></pre>
 <pre class="r"><code>genData(1000, defblk)</code></pre>
 <pre><code>##         id blksize
-##    1:    1       4
-##    2:    2       2
+##    1:    1       2
+##    2:    2       4
 ##    3:    3       2
-##    4:    4       2
-##    5:    5       2
+##    4:    4       4
+##    5:    5       4
 ##   ---             
 ##  996:  996       4
-##  997:  997       2
+##  997:  997       4
 ##  998:  998       4
-##  999:  999       2
+##  999:  999       4
 ## 1000: 1000       4</code></pre>
 </div>
 <div id="example-2" class="section level4">
@@ -51,7 +50,7 @@ library(ggplot2)</code></pre>
 <pre class="r"><code>tau &lt;- rgamma(3, 5, 2)
 tau &lt;- tau / sum(tau)
 tau</code></pre>
-<pre><code>## [1] 0.179 0.356 0.465</code></pre>
+<pre><code>## [1] 0.362 0.400 0.238</code></pre>
 <pre class="r"><code>d &lt;- defData(varname = &quot;a&quot;, formula = 3, variance = 4)
 d &lt;- defData(d, varname = &quot;b&quot;, formula = 8, variance = 2)
 d &lt;- defData(d, varname = &quot;c&quot;, formula = 11, variance = 6)
@@ -61,20 +60,20 @@ d &lt;- defData(d, varname = &quot;theta&quot;, formula = &quot;..tau[1]*a + ..t
 set.seed(19483)
 genData(4, d)</code></pre>
 <pre><code>##    id    a    b     c theta
-## 1:  1 1.87 8.16 13.72  9.62
-## 2:  2 3.45 7.45  6.08  6.10
-## 3:  3 7.41 6.27 10.21  8.31
-## 4:  4 2.34 9.52 10.01  8.46</code></pre>
+## 1:  1 1.87 8.16 13.72  7.21
+## 2:  2 3.45 7.45  6.08  5.68
+## 3:  3 7.41 6.27 10.21  7.62
+## 4:  4 2.34 9.52 10.01  7.04</code></pre>
 <p>However, we can simplify the calculation of <em>theta</em> a bit by using matrix multiplication:</p>
 <pre class="r"><code>d &lt;- updateDef(d, changevar = &quot;theta&quot;, newformula = &quot;t(..tau) %*% c(a, b, c)&quot;)
 
 set.seed(19483)
 genData(4, d)</code></pre>
 <pre><code>##    id    a    b     c theta
-## 1:  1 1.87 8.16 13.72  9.62
-## 2:  2 3.45 7.45  6.08  6.10
-## 3:  3 7.41 6.27 10.21  8.31
-## 4:  4 2.34 9.52 10.01  8.46</code></pre>
+## 1:  1 1.87 8.16 13.72  7.21
+## 2:  2 3.45 7.45  6.08  5.68
+## 3:  3 7.41 6.27 10.21  7.62
+## 4:  4 2.34 9.52 10.01  7.04</code></pre>
 </div>
 <div id="example-3" class="section level4">
 <h4>Example 3</h4>
@@ -84,7 +83,7 @@ effect</code></pre>
 <pre><code>##      [,1] [,2]
 ## [1,]    0   10
 ## [2,]    8   12</code></pre>
-<p>Using double dot notation, it is possible to reference the matrix cell values directly:</p>
+<p>Using double dot notation, it is possible to reference the matrix cell values directly, depending on the values of <em>a</em> and <em>b</em>:</p>
 <pre class="r"><code>d1 &lt;- defData(varname = &quot;a&quot;, formula = &quot;.5;.5&quot;, variance = &quot;1;2&quot;, dist = &quot;categorical&quot;)
 d1 &lt;- defData(d1, varname = &quot;b&quot;, formula = &quot;.5;.5&quot;, 
               variance = &quot;1;2&quot;, dist = &quot;categorical&quot;)
@@ -110,8 +109,8 @@ dx</code></pre>
 </div>
 <div id="assigned-treatment-using-trtassign-distribution-in-defdata" class="section level2">
 <h2>Assigned treatment using <em>trtAssign</em> distribution in <code>defData</code></h2>
-<p>The function <a href="https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html" target="_blank">trtAssign</a> provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Now, it is also possible to generate these treatment assignments directly in the <code>defData</code> and <code>genData</code> process without a separate call to <code>trtAssign</code>. We’ve done this by adding <em>trtAssign</em> as a possible distribution.</p>
-<p>In this example, randomization is stratified by <em>gender</em> and <em>age</em>, and the outcome <em>y</em> is effected by both of these factors as well as the treatment assignment variable <em>rx</em>.</p>
+<p>The function <a href="https://kgoldfeld.github.io/simstudy/articles/treat_and_exposure.html" target="_blank">trtAssign</a> currently provides functionality to randomize group assignments using stratification and non-standard ratios (e.g. 2:2:1 for a three arm trial). Starting with version 0.3.0, it is also possible to generate these treatment assignments directly in the <code>defData</code> and <code>genData</code> process without a separate call to <code>trtAssign</code>. We’ve done this by adding <em>trtAssign</em> as a possible distribution.</p>
+<p>In this example, randomization is stratified by <em>gender</em> and <em>age</em> (specified in the <code>variance</code> argument), and randomization is 1:1 treatment to control (specified in <code>formula</code>). The outcome <em>y</em> is effected by both of these factors as well as the treatment assignment variable <em>rx</em>.</p>
 <pre class="r"><code>def &lt;- defData(varname = &quot;male&quot;, dist = &quot;binary&quot;, 
                formula = .5 , id=&quot;cid&quot;)
 def &lt;- defData(def, varname = &quot;over65&quot;, dist = &quot;binary&quot;,  
@@ -149,7 +148,7 @@ dtstudy</code></pre>
 </div>
 <div id="categogorical-data" class="section level2">
 <h2>Categogorical data</h2>
-<p>In previous versions, the <em>categorical</em> distribution generated a set of integer categories:</p>
+<p>Finally, in previous versions, the <em>categorical</em> distribution generated a set of integer categories:</p>
 <pre class="r"><code>def &lt;- defData(varname = &quot;grp&quot;, formula = &quot;.4;.3;.2;.1&quot;, dist=&quot;categorical&quot;)
 genData(1000, def)</code></pre>
 <pre><code>##         id grp
@@ -183,7 +182,7 @@ dd</code></pre>
 ##  999:  999   a
 ## 1000: 1000   d</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="672" /></p>
-<p>And to replicate the Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the <em>categorical</em> distribution.</p>
+<p>To replicate Example 1 above, here is an alternative way to generate block sizes of 2 and 4 using the <em>categorical</em> distribution and the new functionality.</p>
 <pre class="r"><code>defblk &lt;- defData(varname = &quot;blksize&quot;, 
    formula = &quot;.5;.5&quot;, variance = &quot;2;4&quot;, dist = &quot;categorical&quot;)
 
