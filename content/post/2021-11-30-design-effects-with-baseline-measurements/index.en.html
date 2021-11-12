@@ -1,0 +1,2300 @@
+---
+title: Design effects with baseline measurements
+author: Keith Goldfeld
+date: '2021-11-30'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Two colleagues on the <a href="https://impactcollaboratory.org/design-and-statistics-core/" target="_blank">Design and Statistics Core</a> of the <a href="https://impactcollaboratory.org/" target="_blank">NIA IMPACT Collaboratory</a>, Monica Taljaard and Fan Li, and I have started to think about baseline outcome information in the context of a stepped wedge cluster randomized trial. The question we are focused on is <em>if we are able to measure an outcome at both baseline and follow-up for each individual in the study, how much can we reduce the number clusters or sites needed for the study</em>? Ultimately, we hope to have an analytic solution for this, but to get things started, we thought we could explore using simulation. I’ll be sharing some of those results in this and upcoming posts.</p>
+<p>Before we get to the case of the stepped wedge design, I thought it might be useful to start with the simpler case of a parallel cluster randomized design. I have previously written generally about the <a href="https://www.rdatagen.net/post/what-exactly-is-the-design-effect/" target="_blank">design effect</a>, but a <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352" target="_blank">paper</a> titled “A simple sample size formula for analysis of covariance in cluster randomized trials” by <em>Teerenstra et al</em> provides a great jumping off point to understand how baseline measurements can impact sample sizes.</p>
+<p>In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements, focusing on the number of clusters. The repeated measurement design effects were all drawn from the <em>Teerenstra et al</em> paper.</p>
+<div id="quick-overview" class="section level2">
+<h2>Quick overview</h2>
+<p>This post is a bit longer than usual, but there was no obvious way to split it apart; besides, once you get the hang of it, it flows pretty smoothly (says the blogger). After showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of cluster randomized designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized needs 64 sites, a cross-sectional pre-post design needs 52, a repeated measures design needs 38, and a repeated measures design that models follow-up outcomes only (i.e. and ANCOVA model) requires only 32.</p>
+</div>
+<div id="simple-rct" class="section level2">
+<h2>Simple RCT</h2>
+<p>We start with a simple RCT (without any clustering) that randomizes individuals to treatment or control.</p>
+<p><span class="math display">\[
+Y_{i} = \alpha + \delta Z_{i} + s_{i}
+\]</span> where <span class="math inline">\(Y_{i}\)</span> is a continuous outcome measure for individual <span class="math inline">\(i\)</span>, and <span class="math inline">\(Z_{i}\)</span> is the treatment status of individual <span class="math inline">\(i\)</span>. <span class="math inline">\(\delta\)</span> is the treatment effect. <span class="math inline">\(s_{i} \sim N(0, \sigma_s^2)\)</span> are the individual random effects or noise.</p>
+<p>Now that we are about to start coding, here are the necessary packages:</p>
+<pre class="r"><code>RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(19287)
+
+library(simstudy)
+library(ggplot2)
+library(lmerTest)
+library(parallel)
+library(data.table)
+library(pwr)
+library(gtsummary)</code></pre>
+<p>In the examples that follow, overall variance <span class="math inline">\(\sigma^2 = 64\)</span>. In this first example, then, <span class="math inline">\(\sigma_s^2 = 64\)</span> since that is the only source of variation. The overall effect size <span class="math inline">\(\delta\)</span>, which is the difference in average scores across treatment groups, is assumed to be 2.4, a standardized effect size <span class="math inline">\(2.4/8 = 0.3.\)</span> We will need to generate 350 individual subjects (175 in each arm) to achieve power of 80%.</p>
+<pre class="r"><code>pwr.t.test(d = 0.3, power = 0.80)</code></pre>
+<pre><code>## 
+##      Two-sample t test power calculation 
+## 
+##               n = 175
+##               d = 0.3
+##       sig.level = 0.05
+##           power = 0.8
+##     alternative = two.sided
+## 
+## NOTE: n is number in *each* group</code></pre>
+<div id="data-generation-process" class="section level4">
+<h4>Data generation process</h4>
+<p>Here is the data definition and generation process:</p>
+<pre class="r"><code>simple_rct &lt;- function(N) {
+  
+  # data definition for outcome
+  
+  defS &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+  defS &lt;- defData(defS, varname = &quot;y&quot;, formula = &quot;2.4*rx&quot;, variance = 64, dist = &quot;normal&quot;)
+
+  dd &lt;- genData(N, defS)
+  
+  dd[]
+}
+
+dd &lt;- simple_rct(350)</code></pre>
+<p>Here is a visualization of the outcome measures by treatment arm.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="480" /></p>
+</div>
+<div id="estimating-effect-size" class="section level4">
+<h4>Estimating effect size</h4>
+<p>A simple linear regression model estimates the effect size:</p>
+<pre class="r"><code>fit1 &lt;- lm(y ~  rx, data = dd)
+tbl_regression(fit1)</code></pre>
+<div id="gpdyzpkjsn" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#gpdyzpkjsn .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#gpdyzpkjsn .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#gpdyzpkjsn .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#gpdyzpkjsn .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#gpdyzpkjsn .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#gpdyzpkjsn .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#gpdyzpkjsn .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#gpdyzpkjsn .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#gpdyzpkjsn .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#gpdyzpkjsn .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#gpdyzpkjsn .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#gpdyzpkjsn .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#gpdyzpkjsn .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#gpdyzpkjsn .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#gpdyzpkjsn .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#gpdyzpkjsn .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#gpdyzpkjsn .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#gpdyzpkjsn .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#gpdyzpkjsn .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#gpdyzpkjsn .gt_left {
+  text-align: left;
+}
+
+#gpdyzpkjsn .gt_center {
+  text-align: center;
+}
+
+#gpdyzpkjsn .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#gpdyzpkjsn .gt_font_normal {
+  font-weight: normal;
+}
+
+#gpdyzpkjsn .gt_font_bold {
+  font-weight: bold;
+}
+
+#gpdyzpkjsn .gt_font_italic {
+  font-style: italic;
+}
+
+#gpdyzpkjsn .gt_super {
+  font-size: 65%;
+}
+
+#gpdyzpkjsn .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>Beta</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">3.2</td>
+<td class="gt_row gt_center">1.6, 4.9</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+</div>
+<div id="confirming-power" class="section level4">
+<h4>Confirming power</h4>
+<p>We can confirm the power by repeatedly generating data sets and fitting models, recording the p-values for each replication.</p>
+<pre class="r"><code>replicate &lt;- function() {
+  dd &lt;- simple_rct(350)
+  fit1 &lt;- lm(y ~  rx, data = dd)
+  
+  coef(summary(fit1))[&quot;rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+}
+
+p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)</code></pre>
+<p>Here is the estimated power based on 1000 replications:</p>
+<pre class="r"><code>mean(unlist(p_values) &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.789</code></pre>
+</div>
+</div>
+<div id="parallel-cluster-randomized-trial" class="section level2">
+<h2>Parallel cluster randomized trial</h2>
+<p>If we need to randomize at the site level (i.e., conduct a cluster randomized trial), we can describe the data generation process as</p>
+<p><span class="math display">\[Y_{ij} = \alpha + \delta Z_{j} + c_j + s_i\]</span></p>
+<p>where <span class="math inline">\(Y_{ij}\)</span> is a continuous outcome for subject <span class="math inline">\(i\)</span> in site <span class="math inline">\(j\)</span>. <span class="math inline">\(Z_{j}\)</span> is the treatment indicator for site <span class="math inline">\(j\)</span>. Again, <span class="math inline">\(\delta\)</span> is the treatment effect. <span class="math inline">\(c_j \sim N(0,\sigma_c^2)\)</span> is a site level effect, and <span class="math inline">\(s_i \sim N(0, \sigma_s^2)\)</span> is the subject level effect. The correlation of any two subjects in a cluster is <span class="math inline">\(\rho\)</span> (the ICC):</p>
+<p><span class="math display">\[\rho = \frac{\sigma_c^2}{\sigma_c^2 + \sigma_s^2}\]</span></p>
+<p>If we have a pre-specified number (<span class="math inline">\(n\)</span>) of subjects at each site, we can estimate the sample size required in the CRT might applying a <em>design effect</em> <span class="math inline">\(1+(n-1)\rho\)</span> to the sample size of an RCT that has the same overall variance. So, if <span class="math inline">\(\sigma_c^2 + \sigma_s^2 = 64\)</span>, we can augment the sample size we used in the initial example. If <span class="math inline">\(\sigma_c^2 = 9.6\)</span> + <span class="math inline">\(\sigma_s^2 = 54.4\)</span>, <span class="math inline">\(\rho = 0.15\)</span>. We anticipate having 30 subjects at each site so the design effect is</p>
+<p><span class="math display">\[1 + (30 - 1) \times 0.15 = 5.35\]</span></p>
+<p>This means we will need <span class="math inline">\(5.35 \times 350 = 1872\)</span> total subjects based on the same effect size and power assumptions. Since we anticipate 30 subjects per site, we need <span class="math inline">\(1872 / 30 = 62.4\)</span> sites - we will round up to the nearest even number and use 64 sites.</p>
+<div id="data-generation-process-1" class="section level4">
+<h4>Data generation process</h4>
+<pre class="r"><code>simple_crt &lt;- function(nsites, n) {
+  
+  defC &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+  defC &lt;- defData(defC, varname = &quot;c&quot;, formula = &quot;0&quot;, variance = 9.6, dist = &quot;normal&quot;)  
+  
+  defS &lt;- defDataAdd(varname=&quot;y&quot;, formula=&quot;c + 2.4*rx&quot;, variance = 54.4, dist=&quot;normal&quot;)
+
+# site/cluster level data
+  
+  dc &lt;- genData(nsites, defC, id = &quot;site&quot;)
+
+# individual level data
+  
+  dd &lt;- genCluster(dc, &quot;site&quot;, n, &quot;id&quot;)
+  dd &lt;- addColumns(defS, dd)
+  
+  dd[]
+}
+
+dd &lt;- simple_crt(20, 50)</code></pre>
+<p>Once again, the sites randomized to the treatment arm are colored red:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="768" /></p>
+</div>
+<div id="estimating-effect-size-1" class="section level4">
+<h4>Estimating effect size</h4>
+<p>A mixed effects model is used to estimate the effect size. I’m using a larger data set to recover the parameters used in the data generation process:</p>
+<pre class="r"><code>dd &lt;- simple_crt(200,100)
+
+fit2 &lt;- lmer(y ~  rx + (1|site), data = dd)
+tbl_regression(fit2, tidy_fun = broom.mixed::tidy)</code></pre>
+<div id="izjetofxgq" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#izjetofxgq .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#izjetofxgq .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#izjetofxgq .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#izjetofxgq .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#izjetofxgq .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#izjetofxgq .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#izjetofxgq .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#izjetofxgq .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#izjetofxgq .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#izjetofxgq .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#izjetofxgq .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#izjetofxgq .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#izjetofxgq .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#izjetofxgq .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#izjetofxgq .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#izjetofxgq .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#izjetofxgq .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#izjetofxgq .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#izjetofxgq .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#izjetofxgq .gt_left {
+  text-align: left;
+}
+
+#izjetofxgq .gt_center {
+  text-align: center;
+}
+
+#izjetofxgq .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#izjetofxgq .gt_font_normal {
+  font-weight: normal;
+}
+
+#izjetofxgq .gt_font_bold {
+  font-weight: bold;
+}
+
+#izjetofxgq .gt_font_italic {
+  font-style: italic;
+}
+
+#izjetofxgq .gt_super {
+  font-size: 65%;
+}
+
+#izjetofxgq .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>Beta</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">1.2</td>
+<td class="gt_row gt_center">0.21, 2.1</td>
+<td class="gt_row gt_center">0.018</td></tr>
+    <tr><td class="gt_row gt_left">site.sd__(Intercept)</td>
+<td class="gt_row gt_center">3.4</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">Residual.sd__Observation</td>
+<td class="gt_row gt_center">7.4</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+</div>
+<div id="confirming-power-1" class="section level4">
+<h4>Confirming power</h4>
+<p>Now, I will confirm power using 64 sites with 30 subjects per site, for a total of 1920 subjects (compared with only 350 in the RCT):</p>
+<pre class="r"><code>replicate &lt;- function() {
+  dd &lt;- simple_crt(64, 30)
+  fit2 &lt;- lmer(y ~  rx + (1|site), data = dd)
+  
+  coef(summary(fit2))[&quot;rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+}
+
+p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.801</code></pre>
+</div>
+</div>
+<div id="crt-with-baseline-measurement" class="section level2">
+<h2>CRT with baseline measurement</h2>
+<p>We paid quite a hefty price moving from an RCT to a CRT in terms of the number of subjects we need to collect data on. If these data are coming from administrative systems, that added burden might not be an issue, but if we need to consent all the subjects and survey them individually, this could be quite burdensome.</p>
+<p>We may be able to decrease the required number of clusters (i.e. reduce the design effect) if we can collect baseline measurements of the outcome. The baseline and follow-up measurements can be collected from the same subjects or different subjects, <em>though the impact on the design effect depends on what approach is taken</em>.</p>
+<p><span class="math display">\[
+Y_{ijk} = \alpha_0 + \alpha_1 k  + \delta_{0} Z_j + \delta_{1}k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
+\]</span></p>
+<p>where <span class="math inline">\(Y_{ijk}\)</span> is a continuous outcome measure for individual <span class="math inline">\(i\)</span> in site <span class="math inline">\(j\)</span> and measurment <span class="math inline">\(k \in \{0,1\}\)</span>. <span class="math inline">\(Z_{j}\)</span> is the treatment status of cluster <span class="math inline">\(j\)</span>, <span class="math inline">\(Z_{j} \in \{0,1\}.\)</span> <span class="math inline">\(\alpha_0\)</span> is the mean outcome at baseline for subjects in the control clusters, <span class="math inline">\(\alpha_1\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\delta_{0}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\delta_{1}\)</span> is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since <span class="math inline">\(\delta_0\)</span> should be close to <span class="math inline">\(0\)</span>, <span class="math inline">\(\delta_1\)</span> is the treatment effect.)</p>
+<p>The model has cluster-specific and subject-specific random effects. For both, there can be time-invariant effects and time-varying effects. <span class="math inline">\(c_j \sim N(0,\sigma_c^2)\)</span> are time invariant site-specific effects, and <span class="math inline">\(cp_{jk}\)</span> are the site-specific period (time varying) effects, where <span class="math inline">\(c_{jk} \sim N(0, \sigma_{cp}^2)\)</span>. At the subject level there can be <span class="math inline">\(s_{ij} \sim N(0, \sigma_s^2)\)</span> and <span class="math inline">\(sp_{ijk} \sim N(0, \sigma_{sp}^2)\)</span>.</p>
+<p>Here is the generic code that will facilitate data generation in this model:</p>
+<pre class="r"><code>crt_base &lt;- function(effect, nsites, n, s_c, s_cp, s_s, s_sp) {
+
+  defC &lt;- defData(varname = &quot;c&quot;, formula = 0, variance = &quot;..s_c&quot;)
+  defC &lt;- defData(defC, varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+  
+  defCP &lt;- defDataAdd(varname = &quot;c.p&quot;, formula = 0, variance = &quot;..s_cp&quot;)
+  
+  defS &lt;- defDataAdd(varname = &quot;s&quot;, formula = 0, variance = &quot;..s_s&quot;)
+  
+  defSP &lt;- defDataAdd(varname = &quot;y&quot;,
+    formula = &quot;..effect * rx * period + c + c.p + s&quot;, 
+    variance =&quot;..s_sp&quot;)
+  
+  dc &lt;- genData(nsites, defC, id = &quot;site&quot;)
+
+  dcp &lt;- addPeriods(dc, 2, &quot;site&quot;)
+  dcp &lt;- addColumns(defCP, dcp)
+  dcp &lt;- dcp[, .(site, period, c.p, timeID)]
+  
+  ds &lt;- genCluster(dc, &quot;site&quot;, n, &quot;id&quot;)
+  ds &lt;- addColumns(defS, ds)
+  
+  dsp &lt;- addPeriods(ds, 2)
+  setnames(dsp, &quot;timeID&quot;, &quot;obsID&quot;)
+  
+  setkey(dsp, site, period)
+  setkey(dcp, site, period)
+  
+  dd &lt;- merge(dsp, dcp)
+  dd &lt;- addColumns(defSP, dd)
+  setkey(dd, site, id, period)
+  
+  dd[]
+}</code></pre>
+</div>
+<div id="design-effect" class="section level2">
+<h2>Design effect</h2>
+<p>In their paper, <em>Teerenstra et al</em> develop a design effect that takes into account the baseline measurement. Here are a few key quantities that are needed for the calculation:</p>
+<p>The <strong>correlation of two subject measurements in the same cluster and same time period</strong> is the ICC or <span class="math inline">\(\rho\)</span>, and is:</p>
+<p><span class="math display">\[\rho = \frac{\sigma_c^2 + \sigma_{cp}^2}{\sigma_c^2 + \sigma_{cp}^2 + \sigma_s^2 + \sigma_{sp}^2}
+\]</span></p>
+<p>In order to estimate design effect, we need two more correlations. The <strong>correlation between baseline and follow-up <em>random effects</em> at the <em>cluster level</em></strong> is</p>
+<p><span class="math display">\[\rho_c =  \frac{\sigma_c^2}{\sigma_c^2 + \sigma_{cp}^2}\]</span></p>
+<p>and the <strong>correlation between baseline and follow-up random effects at the <em>subject level</em></strong> is</p>
+<p><span class="math display">\[\rho_s =  \frac{\sigma_s^2}{\sigma_s^2 + \sigma_{sp}^2}\]</span></p>
+<p>A value <span class="math inline">\(r\)</span> is used to estimate the design effect, and is defined as</p>
+<p><span class="math display">\[ r = \frac{n\rho\rho_c + (1-\rho)\rho_s}{1 + (n-1)\rho}\]</span></p>
+<p>If we are able to collect baseline measurements and our focus is on estimating <span class="math inline">\(\delta_1\)</span> from the model, the design effect is slightly modified from before:</p>
+<p><span class="math display">\[ (1 + (n-1)\rho)(2(1-r)) \]</span></p>
+</div>
+<div id="cross-sectional-cohorts" class="section level2">
+<h2>Cross-sectional cohorts</h2>
+<p>We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization), we might be able to reduce the number of clusters. In this case, <span class="math inline">\(\sigma_s^2 = 0\)</span> and <span class="math inline">\(\rho_s = 0\)</span>, so the general model reduces to</p>
+<p><span class="math display">\[
+Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + sp_{ijk}
+\]</span></p>
+<div id="data-generation-process-2" class="section level4">
+<h4>Data generation process</h4>
+<p>The parameters for this simulation are <span class="math inline">\(\delta_1 = 2.4\)</span>, <span class="math inline">\(\sigma_c^2 = 6.8\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 2.8\)</span>, <span class="math inline">\(\sigma_{sp}^2 = 54.4\)</span>.</p>
+<pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 20, n = 30, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)</code></pre>
+<p>Here is a visualization of the outcome measures by site and by period, with the sites in the <em>treatment</em> arm colored in red (only in the follow-up period).</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-14-1.png" width="864" /></p>
+</div>
+<div id="estimating-effect-size-2" class="section level4">
+<h4>Estimating effect size</h4>
+<p>To estimate the effect size we fit a mixed effect model with cluster-specific effects only (both time invariant and time varying).</p>
+<pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 200, n = 100, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)
+
+fit3 &lt;- lmer(y ~ period*rx+ (1|timeID:site) + (1 | site), data = dd)
+tbl_regression(fit3, tidy_fun = broom.mixed::tidy)</code></pre>
+<div id="dqyroxmggv" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#dqyroxmggv .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#dqyroxmggv .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#dqyroxmggv .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#dqyroxmggv .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#dqyroxmggv .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#dqyroxmggv .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#dqyroxmggv .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#dqyroxmggv .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#dqyroxmggv .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#dqyroxmggv .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#dqyroxmggv .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#dqyroxmggv .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#dqyroxmggv .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#dqyroxmggv .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#dqyroxmggv .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#dqyroxmggv .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#dqyroxmggv .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#dqyroxmggv .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#dqyroxmggv .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#dqyroxmggv .gt_left {
+  text-align: left;
+}
+
+#dqyroxmggv .gt_center {
+  text-align: center;
+}
+
+#dqyroxmggv .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#dqyroxmggv .gt_font_normal {
+  font-weight: normal;
+}
+
+#dqyroxmggv .gt_font_bold {
+  font-weight: bold;
+}
+
+#dqyroxmggv .gt_font_italic {
+  font-style: italic;
+}
+
+#dqyroxmggv .gt_super {
+  font-size: 65%;
+}
+
+#dqyroxmggv .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>Beta</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">period</td>
+<td class="gt_row gt_center">-0.03</td>
+<td class="gt_row gt_center">-0.52, 0.46</td>
+<td class="gt_row gt_center">>0.9</td></tr>
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">0.17</td>
+<td class="gt_row gt_center">-0.78, 1.1</td>
+<td class="gt_row gt_center">0.7</td></tr>
+    <tr><td class="gt_row gt_left">period * rx</td>
+<td class="gt_row gt_center">2.7</td>
+<td class="gt_row gt_center">2.0, 3.4</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+    <tr><td class="gt_row gt_left">timeID:site.sd__(Intercept)</td>
+<td class="gt_row gt_center">1.6</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">site.sd__(Intercept)</td>
+<td class="gt_row gt_center">2.9</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">Residual.sd__Observation</td>
+<td class="gt_row gt_center">7.4</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+</div>
+<div id="confirming-power-2" class="section level4">
+<h4>Confirming power</h4>
+<p>Based on the variance assumptions, we can update our design effect:</p>
+<pre class="r"><code>s_c &lt;- 6.8
+s_cp &lt;- 2.8
+s_s &lt;- 0
+s_sp &lt;- 54.4
+
+rho &lt;- (s_c + s_cp)/(s_c + s_cp + s_s + s_sp)
+rho_c &lt;- s_c/(s_c + s_cp)
+rho_s &lt;- s_s/(s_s + s_sp)
+
+n &lt;- 30
+
+r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
+<p>The design effect for the cluster randomized trial without any baseline measurement was 5.35. With the two-cohort design, the design effect is reduced slightly:</p>
+<pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * 2 * (1 - r))</code></pre>
+<pre><code>## [1] 4.32</code></pre>
+<pre class="r"><code>des_effect * 350 / n</code></pre>
+<pre><code>## [1] 50.5</code></pre>
+<p>The desired number of sites is over 50, so rounding up to the next even number gives us 52:</p>
+<pre class="r"><code>replicate &lt;- function() {
+  dd &lt;- crt_base(2.4, 52, 30, s_c = 6.8, s_cp = 2.8, s_s = 0, s_sp = 54.4)
+  fit3 &lt;- lmer(y ~ period * rx+ (1|timeID:site) + (1 | site), data = dd)
+  
+  coef(summary(fit3))[&quot;period:rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+}
+
+p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.805</code></pre>
+</div>
+</div>
+<div id="repeated-measurements" class="section level2">
+<h2>Repeated measurements</h2>
+<p>We can reduce the number of clusters further if instead of measuring one cohort prior to the intervention and another after the intervention, we measure a single cohort twice - once at baseline and once at follow-up. Now we use the full model that decomposes the subject level variance into a time invariant effect (<span class="math inline">\(c_j\)</span>) and a time varying effect <span class="math inline">\(cp_{jk}\)</span>:</p>
+<p><span class="math display">\[
+Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
+\]</span></p>
+<div id="data-generation-process-3" class="section level4">
+<h4>Data generation process</h4>
+<p>These are the parameters, <span class="math inline">\(\delta_1 = 2.4\)</span>, <span class="math inline">\(\sigma_c^2 = 6.8\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 2.8\)</span>, <span class="math inline">\(\sigma_s = 38,\)</span> and <span class="math inline">\(\sigma_{sp}^2 = 16.4\)</span>.</p>
+<pre class="r"><code>dd &lt;- crt_base(effect=2.4, nsites=20, n=30, s_c=6.8, s_cp=2.8, s_s=38, s_sp=16.4)</code></pre>
+<p>Here is what the data look like; each line represents an individual subject at the two time points, baseline and follow-up.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-20-1.png" width="864" /></p>
+</div>
+<div id="estimating-effect-size-3" class="section level4">
+<h4>Estimating effect size</h4>
+<p>The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects.</p>
+<pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 200, n = 100, 
+  s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+
+fit4 &lt;- lmer(y ~ period*rx + (1 | id:site) + (1|timeID:site) + (1 | site), data = dd)
+tbl_regression(fit4, tidy_fun = broom.mixed::tidy)</code></pre>
+<div id="syvravrbas" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#syvravrbas .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#syvravrbas .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#syvravrbas .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#syvravrbas .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#syvravrbas .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#syvravrbas .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#syvravrbas .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#syvravrbas .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#syvravrbas .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#syvravrbas .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#syvravrbas .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#syvravrbas .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#syvravrbas .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#syvravrbas .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#syvravrbas .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#syvravrbas .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#syvravrbas .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#syvravrbas .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#syvravrbas .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#syvravrbas .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#syvravrbas .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#syvravrbas .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#syvravrbas .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#syvravrbas .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#syvravrbas .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#syvravrbas .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#syvravrbas .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#syvravrbas .gt_left {
+  text-align: left;
+}
+
+#syvravrbas .gt_center {
+  text-align: center;
+}
+
+#syvravrbas .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#syvravrbas .gt_font_normal {
+  font-weight: normal;
+}
+
+#syvravrbas .gt_font_bold {
+  font-weight: bold;
+}
+
+#syvravrbas .gt_font_italic {
+  font-style: italic;
+}
+
+#syvravrbas .gt_super {
+  font-size: 65%;
+}
+
+#syvravrbas .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>Beta</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">period</td>
+<td class="gt_row gt_center">-0.21</td>
+<td class="gt_row gt_center">-0.73, 0.31</td>
+<td class="gt_row gt_center">0.4</td></tr>
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">-0.19</td>
+<td class="gt_row gt_center">-1.1, 0.73</td>
+<td class="gt_row gt_center">0.7</td></tr>
+    <tr><td class="gt_row gt_left">period * rx</td>
+<td class="gt_row gt_center">2.4</td>
+<td class="gt_row gt_center">1.7, 3.2</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+    <tr><td class="gt_row gt_left">id:site.sd__(Intercept)</td>
+<td class="gt_row gt_center">6.2</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">timeID:site.sd__(Intercept)</td>
+<td class="gt_row gt_center">1.8</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">site.sd__(Intercept)</td>
+<td class="gt_row gt_center">2.7</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">Residual.sd__Observation</td>
+<td class="gt_row gt_center">4.1</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+</div>
+<div id="confirming-power-3" class="section level4">
+<h4>Confirming power</h4>
+<p>Based on the variance assumptions, we can update our design effect a third time:</p>
+<pre class="r"><code>s_c &lt;- 6.8
+s_cp &lt;- 2.8
+s_s &lt;- 38
+s_sp &lt;- 16.4
+
+rho &lt;- (s_c + s_cp)/(s_c + s_cp + s_s + s_sp)
+rho_c &lt;- s_c/(s_c + s_cp)
+rho_s &lt;- s_s/(s_s + s_sp)
+
+n &lt;- 30
+
+r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
+<p>Once again, the design effect (and sample size requirement) is reduced:</p>
+<pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * 2 * (1 - r))</code></pre>
+<pre><code>## [1] 3.14</code></pre>
+<pre class="r"><code>des_effect * 350 / n</code></pre>
+<pre><code>## [1] 36.6</code></pre>
+<p>The desired number of sites is over 36, so I will round up to 38:</p>
+<pre class="r"><code>replicate &lt;- function() {
+  dd &lt;- crt_base(2.4, 38, 30, s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+  fit4 &lt;-  lmer(y ~ period*rx + (1 | id:site) + (1|timeID:site) + (1 | site), data = dd)
+  
+  coef(summary(fit4))[&quot;period:rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+}
+
+p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.792</code></pre>
+</div>
+</div>
+<div id="repeated-measurements---ancova" class="section level2">
+<h2>Repeated measurements - ANCOVA</h2>
+<p>We may be able to reduce the number of clusters even further by changing the model so that we are comparing follow-up outcomes of the two treatment arms (as opposed to measuring the differences in changes as we just did). This model is</p>
+<p><span class="math display">\[
+Y_{ij1} = \alpha_0 + \gamma Y_{ij0} + \delta Z_j + c_j + s_{ij}
+\]</span></p>
+<p>where we have adjusted for baseline measurement <span class="math inline">\(Y_{ij0}.\)</span> Even though the estimation model has changed, I am using the exact same data generation process as before, with the same effect size and variance assumptions:</p>
+<pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 200, n = 100, 
+  s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+
+dobs &lt;- dd[, .(site, rx, id, period, timeID, y)]
+dobs &lt;- dcast(dobs, site + rx + id ~ period, value.var = &quot;y&quot;)
+
+fit5 &lt;- lmer(`1` ~ `0` + rx + (1 | site), data = dobs)
+tbl_regression(fit5, tidy_fun = broom.mixed::tidy)</code></pre>
+<div id="ymuatefzfz" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#ymuatefzfz .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#ymuatefzfz .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#ymuatefzfz .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#ymuatefzfz .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#ymuatefzfz .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#ymuatefzfz .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#ymuatefzfz .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#ymuatefzfz .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#ymuatefzfz .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#ymuatefzfz .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#ymuatefzfz .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#ymuatefzfz .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#ymuatefzfz .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#ymuatefzfz .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#ymuatefzfz .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#ymuatefzfz .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#ymuatefzfz .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#ymuatefzfz .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#ymuatefzfz .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#ymuatefzfz .gt_left {
+  text-align: left;
+}
+
+#ymuatefzfz .gt_center {
+  text-align: center;
+}
+
+#ymuatefzfz .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#ymuatefzfz .gt_font_normal {
+  font-weight: normal;
+}
+
+#ymuatefzfz .gt_font_bold {
+  font-weight: bold;
+}
+
+#ymuatefzfz .gt_font_italic {
+  font-style: italic;
+}
+
+#ymuatefzfz .gt_super {
+  font-size: 65%;
+}
+
+#ymuatefzfz .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>Beta</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">0</td>
+<td class="gt_row gt_center">0.70</td>
+<td class="gt_row gt_center">0.69, 0.71</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">2.5</td>
+<td class="gt_row gt_center">1.8, 3.1</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+    <tr><td class="gt_row gt_left">site.sd__(Intercept)</td>
+<td class="gt_row gt_center">2.2</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+    <tr><td class="gt_row gt_left">Residual.sd__Observation</td>
+<td class="gt_row gt_center">5.3</td>
+<td class="gt_row gt_center"></td>
+<td class="gt_row gt_center"></td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+<div id="design-effect-1" class="section level4">
+<h4>Design effect</h4>
+<p><em>Teerenstra et al</em> derived an alternative design effect that is specific to the ANCOVA model:</p>
+<p><span class="math display">\[
+(1 + (n-1)\rho) (1-r^2)
+\]</span></p>
+<p>where <span class="math inline">\(r\)</span> is the same as before. Since <span class="math inline">\((1-r^2) &lt; 2(1-r), \ 0 \le r &lt; 1\)</span>, this will be a reduction from the earlier model.</p>
+<pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * (1 - r^2))</code></pre>
+<pre><code>## [1] 2.68</code></pre>
+<pre class="r"><code>des_effect * 350 / n</code></pre>
+<pre><code>## [1] 31.2</code></pre>
+</div>
+<div id="confirming-power-4" class="section level4">
+<h4>Confirming power</h4>
+<pre class="r"><code>replicate &lt;- function() {
+  
+  dd &lt;- crt_base(2.4, 32, 30, s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+  dobs &lt;- dd[, .(site, rx, id, period, timeID, y)]
+  dobs &lt;- dcast(dobs, site + rx + id ~ period, value.var = &quot;y&quot;)
+
+  fit5 &lt;- lmer(`1` ~ `0` + rx + (1 | site), data = dobs)
+  coef(summary(fit5))[&quot;rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+}
+
+p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) &lt; 0.05)</code></pre>
+<pre><code>## [1] 0.778</code></pre>
+</div>
+</div>
+<div id="next-steps" class="section level2">
+<h2>Next steps</h2>
+<p>These simulations confirmed the design effects derived by <em>Teerenstra et al</em>. In the next post, we will turn to baseline measurements in the context of a stepped wedge design, to see if these results translate to a more complex setting. The design effects themselves have not yet been derived, but those should soon follow. In the meantime, to get yourself psyched up for what is coming, you can read more generally about stepped wedge designs <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/">here</a>, <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">here</a>, <a href="https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/">here</a>, <a href="https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/">here</a>, <a href="https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/">here</a>, and <a href="https://www.rdatagen.net/post/analyzing-the-open-cohort-stepped-wedge-trial-with-binary-outcomes/">here</a>.</p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Teerenstra, Steven, Sandra Eldridge, Maud Graff, Esther de Hoop, and George F. Borm. “A simple sample size formula for analysis of covariance in cluster randomized trials.” Statistics in medicine 31, no. 20 (2012): 2169-2178.</p>
+<p>Support:</p>
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small>
+</p>
+</div>

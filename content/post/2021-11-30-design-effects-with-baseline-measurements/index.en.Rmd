@@ -1,0 +1,527 @@
+---
+title: Design effects with baseline measurements
+author: Keith Goldfeld
+date: '2021-11-30'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+```{r setup, echo=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(digits = 3)
+```
+
+Two colleagues on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}, Monica Taljaard and Fan Li, and I have started to think about baseline outcome information in the context of a stepped wedge cluster randomized trial. The question we are focused on is *if we are able to measure an outcome at both baseline and follow-up for each individual in the study, how much can we reduce the number clusters or sites needed for the study*? Ultimately, we hope to have an analytic solution for this, but to get things started, we thought we could explore using simulation. I'll be sharing some of those results in this and upcoming posts.
+
+Before we get to the case of the stepped wedge design, I thought it might be useful to start with the simpler case of a parallel cluster randomized design. I have previously written generally about the [design effect](https://www.rdatagen.net/post/what-exactly-is-the-design-effect/){target="_blank"}, but a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} titled "A simple sample size formula for analysis of covariance in cluster randomized trials" by *Teerenstra et al* provides a great jumping off point to understand how baseline measurements can impact sample sizes. 
+
+In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements, focusing on the number of clusters. The repeated measurement design effects were all drawn from the *Teerenstra et al* paper.
+
+## Quick overview
+
+This post is a bit longer than usual, but there was no obvious way to split it apart; besides, once you get the hang of it, it flows pretty smoothly (says the blogger). After showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of cluster randomized designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized needs 64 sites, a cross-sectional pre-post design needs 52, a repeated measures design needs 38, and a repeated measures design that models follow-up outcomes only (i.e. and ANCOVA model) requires only 32.
+
+## Simple RCT
+
+We start with a simple RCT (without any clustering) that randomizes individuals to treatment or control.
+
+$$
+Y_{i} = \alpha + \delta Z_{i} + s_{i}
+$$ where $Y_{i}$ is a continuous outcome measure for individual $i$, and $Z_{i}$ is the treatment status of individual $i$. $\delta$ is the treatment effect. $s_{i} \sim N(0, \sigma_s^2)$ are the individual random effects or noise.
+
+Now that we are about to start coding, here are the necessary packages:
+
+```{r, warning=FALSE, message=FALSE}
+RNGkind("L'Ecuyer-CMRG")
+set.seed(19287)
+
+library(simstudy)
+library(ggplot2)
+library(lmerTest)
+library(parallel)
+library(data.table)
+library(pwr)
+library(gtsummary)
+```
+
+In the examples that follow, overall variance $\sigma^2 = 64$. In this first example, then, $\sigma_s^2 = 64$ since that is the only source of variation. The overall effect size $\delta$, which is the difference in average scores across treatment groups, is assumed to be 2.4, a standardized effect size $2.4/8 = 0.3.$ We will need to generate 350 individual subjects (175 in each arm) to achieve power of 80%.
+
+```{r}
+pwr.t.test(d = 0.3, power = 0.80)
+```
+
+#### Data generation process
+
+Here is the data definition and generation process:
+
+```{r}
+simple_rct <- function(N) {
+  
+  # data definition for outcome
+  
+  defS <- defData(varname = "rx", formula = "1;1", dist = "trtAssign")
+  defS <- defData(defS, varname = "y", formula = "2.4*rx", variance = 64, dist = "normal")
+
+  dd <- genData(N, defS)
+  
+  dd[]
+}
+
+dd <- simple_rct(350)
+```
+
+Here is a visualization of the outcome measures by treatment arm.
+
+```{r, fig.width = 5, fig.height = 4, echo = FALSE}
+avg <- dd[, .(y = mean(y)), keyby = rx]
+
+ggplot(data = dd, aes(y = y, x = factor(rx, labels = c("control", "rx")))) +
+  geom_jitter(height = 0, width = .2, aes(color = factor(rx)), alpha = .4, size = .6) +
+  geom_point(data = avg, size = 5,  aes(color = factor(rx))) +
+  theme(panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "none",
+        axis.title.x = element_blank()) +
+  scale_color_manual(values = c("#0078b3", "#b33b00")) 
+```
+
+#### Estimating effect size
+
+A simple linear regression model estimates the effect size:
+
+```{r}
+fit1 <- lm(y ~  rx, data = dd)
+tbl_regression(fit1)
+```
+
+#### Confirming power
+
+We can confirm the power by repeatedly generating data sets and fitting models, recording the p-values for each replication.
+
+```{r}
+replicate <- function() {
+  dd <- simple_rct(350)
+  fit1 <- lm(y ~  rx, data = dd)
+  
+  coef(summary(fit1))["rx", "Pr(>|t|)"]
+}
+
+p_values <- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+```
+
+Here is the estimated power based on 1000 replications:
+
+```{r}
+mean(unlist(p_values) < 0.05)
+```
+
+## Parallel cluster randomized trial
+
+If we need to randomize at the site level (i.e., conduct a cluster randomized trial), we can describe the data generation process as
+
+$$Y_{ij} = \alpha + \delta Z_{j} + c_j + s_i$$ 
+
+where $Y_{ij}$ is a continuous outcome for subject $i$ in site $j$. $Z_{j}$ is the treatment indicator for site $j$. Again, $\delta$ is the treatment effect. $c_j \sim N(0,\sigma_c^2)$ is a site level effect, and $s_i \sim N(0, \sigma_s^2)$ is the subject level effect. The correlation of any two subjects in a cluster is $\rho$ (the ICC):
+
+$$\rho = \frac{\sigma_c^2}{\sigma_c^2 + \sigma_s^2}$$
+
+If we have a pre-specified number ($n$) of subjects at each site, we can estimate the sample size required in the CRT might applying a *design effect* $1+(n-1)\rho$ to the sample size of an RCT that has the same overall variance. So, if $\sigma_c^2 + \sigma_s^2 = 64$, we can augment the sample size we used in the initial example. If $\sigma_c^2 = 9.6$ + $\sigma_s^2 = 54.4$, $\rho = 0.15$. We anticipate having 30 subjects at each site so the design effect is
+
+$$1 + (30 - 1) \times 0.15 = 5.35$$
+
+This means we will need $5.35 \times 350 = 1872$ total subjects based on the same effect size and power assumptions. Since we anticipate 30 subjects per site, we need $1872 / 30 = 62.4$ sites - we will round up to the nearest even number and use 64 sites.
+
+#### Data generation process
+
+```{r}
+simple_crt <- function(nsites, n) {
+  
+  defC <- defData(varname = "rx", formula = "1;1", dist = "trtAssign")
+  defC <- defData(defC, varname = "c", formula = "0", variance = 9.6, dist = "normal")  
+  
+  defS <- defDataAdd(varname="y", formula="c + 2.4*rx", variance = 54.4, dist="normal")
+
+# site/cluster level data
+  
+  dc <- genData(nsites, defC, id = "site")
+
+# individual level data
+  
+  dd <- genCluster(dc, "site", n, "id")
+  dd <- addColumns(defS, dd)
+  
+  dd[]
+}
+
+dd <- simple_crt(20, 50)
+```
+
+Once again, the sites randomized to the treatment arm are colored red:
+
+```{r, fig.width = 8, fig.height = 4, echo = FALSE}
+ggplot(data = dd, aes(y = y, x = factor(site))) +
+  geom_jitter(size = 1, height = 0, width = .1, aes(color = factor(rx))) +
+  theme(panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "none") +
+  scale_color_manual(values = c("#0078b3", "#b33b00")) +
+  xlab("sites")
+```
+
+#### Estimating effect size
+
+A mixed effects model is used to estimate the effect size. I'm using a larger data set to recover the parameters used in the data generation process:
+
+```{r}
+dd <- simple_crt(200,100)
+
+fit2 <- lmer(y ~  rx + (1|site), data = dd)
+tbl_regression(fit2, tidy_fun = broom.mixed::tidy)
+```
+
+#### Confirming power
+
+Now, I will confirm power using 64 sites with 30 subjects per site, for a total of 1920 subjects (compared with only 350 in the RCT):
+
+```{r}
+replicate <- function() {
+  dd <- simple_crt(64, 30)
+  fit2 <- lmer(y ~  rx + (1|site), data = dd)
+  
+  coef(summary(fit2))["rx", "Pr(>|t|)"]
+}
+
+p_values <- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) < 0.05)
+```
+
+## CRT with baseline measurement
+
+We paid quite a hefty price moving from an RCT to a CRT in terms of the number of subjects we need to collect data on. If these data are coming from administrative systems, that added burden might not be an issue, but if we need to consent all the subjects and survey them individually, this could be quite burdensome.
+
+We may be able to decrease the required number of clusters (i.e. reduce the design effect) if we can collect baseline measurements of the outcome. The baseline and follow-up measurements can be collected from the same subjects or different subjects, *though the impact on the design effect depends on what approach is taken*.
+
+$$
+Y_{ijk} = \alpha_0 + \alpha_1 k  + \delta_{0} Z_j + \delta_{1}k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
+$$
+
+where $Y_{ijk}$ is a continuous outcome measure for individual $i$ in site $j$ and measurment $k \in \{0,1\}$. $Z_{j}$ is the treatment status of cluster $j$, $Z_{j} \in \{0,1\}.$ $\alpha_0$ is the mean outcome at baseline for subjects in the control clusters, $\alpha_1$ is the change from baseline to follow-up in the control arm, $\delta_{0}$ is the difference at baseline between control and treatment arms (we would expect this to be $0$ in a randomized trial), and $\delta_{1}$ is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since $\delta_0$ should be close to $0$, $\delta_1$ is the treatment effect.)
+
+The model has cluster-specific and subject-specific random effects. For both, there can be time-invariant effects and time-varying effects. $c_j \sim N(0,\sigma_c^2)$ are time invariant site-specific effects, and $cp_{jk}$ are the site-specific period (time varying) effects, where $c_{jk} \sim N(0, \sigma_{cp}^2)$. At the subject level there can be $s_{ij} \sim N(0, \sigma_s^2)$ and $sp_{ijk} \sim N(0, \sigma_{sp}^2)$.
+
+Here is the generic code that will facilitate data generation in this model:
+
+```{r}
+crt_base <- function(effect, nsites, n, s_c, s_cp, s_s, s_sp) {
+
+  defC <- defData(varname = "c", formula = 0, variance = "..s_c")
+  defC <- defData(defC, varname = "rx", formula = "1;1", dist = "trtAssign")
+  
+  defCP <- defDataAdd(varname = "c.p", formula = 0, variance = "..s_cp")
+  
+  defS <- defDataAdd(varname = "s", formula = 0, variance = "..s_s")
+  
+  defSP <- defDataAdd(varname = "y",
+    formula = "..effect * rx * period + c + c.p + s", 
+    variance ="..s_sp")
+  
+  dc <- genData(nsites, defC, id = "site")
+
+  dcp <- addPeriods(dc, 2, "site")
+  dcp <- addColumns(defCP, dcp)
+  dcp <- dcp[, .(site, period, c.p, timeID)]
+  
+  ds <- genCluster(dc, "site", n, "id")
+  ds <- addColumns(defS, ds)
+  
+  dsp <- addPeriods(ds, 2)
+  setnames(dsp, "timeID", "obsID")
+  
+  setkey(dsp, site, period)
+  setkey(dcp, site, period)
+  
+  dd <- merge(dsp, dcp)
+  dd <- addColumns(defSP, dd)
+  setkey(dd, site, id, period)
+  
+  dd[]
+}
+```
+
+## Design effect
+
+In their paper, *Teerenstra et al* develop a design effect that takes into account the baseline measurement. Here are a few key quantities that are needed for the calculation: 
+
+The **correlation of two subject measurements in the same cluster and same time period** is the ICC or $\rho$, and is:
+
+$$\rho = \frac{\sigma_c^2 + \sigma_{cp}^2}{\sigma_c^2 + \sigma_{cp}^2 + \sigma_s^2 + \sigma_{sp}^2}
+$$
+
+In order to estimate design effect, we need two more correlations. The **correlation between baseline and follow-up *random effects* at the *cluster level*** is
+
+$$\rho_c =  \frac{\sigma_c^2}{\sigma_c^2 + \sigma_{cp}^2}$$
+
+and the **correlation between baseline and follow-up random effects at the *subject level*** is
+
+$$\rho_s =  \frac{\sigma_s^2}{\sigma_s^2 + \sigma_{sp}^2}$$
+
+A value $r$ is used to estimate the design effect, and is defined as
+
+$$ r = \frac{n\rho\rho_c + (1-\rho)\rho_s}{1 + (n-1)\rho}$$
+
+If we are able to collect baseline measurements and our focus is on estimating $\delta_1$ from the model, the design effect is slightly modified from before:
+
+$$ (1 + (n-1)\rho)(2(1-r)) $$
+
+## Cross-sectional cohorts
+
+We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization), we might be able to reduce the number of clusters. In this case, $\sigma_s^2 = 0$ and $\rho_s = 0$, so the general model reduces to
+
+$$
+Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + sp_{ijk}
+$$
+
+#### Data generation process
+
+The parameters for this simulation are $\delta_1 = 2.4$, $\sigma_c^2 = 6.8$, $\sigma_{cp}^2 = 2.8$, $\sigma_{sp}^2 = 54.4$.
+
+```{r}
+dd <- crt_base(effect = 2.4, nsites = 20, n = 30, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)
+```
+
+Here is a visualization of the outcome measures by site and by period, with the sites in the *treatment* arm colored in red (only in the follow-up period).
+
+```{r, fig.width = 9, echo = FALSE}
+dd[period == 0, rx := 0]
+
+ggplot(data = dd, aes(y = y, x =factor(period))) +
+  geom_jitter(size = .2, height = 0, width = .15, aes(color = factor(rx))) +
+  theme(panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "none") +
+  xlab("period") +
+  scale_color_manual(values = c("#0078b3", "#b33b00")) +
+  facet_wrap( ~ site, ncol = 10)
+```
+
+#### Estimating effect size
+
+To estimate the effect size we fit a mixed effect model with cluster-specific effects only (both time invariant and time varying).
+
+```{r}
+dd <- crt_base(effect = 2.4, nsites = 200, n = 100, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)
+
+fit3 <- lmer(y ~ period*rx+ (1|timeID:site) + (1 | site), data = dd)
+tbl_regression(fit3, tidy_fun = broom.mixed::tidy)
+```
+
+#### Confirming power
+
+Based on the variance assumptions, we can update our design effect:
+
+```{r}
+s_c <- 6.8
+s_cp <- 2.8
+s_s <- 0
+s_sp <- 54.4
+
+rho <- (s_c + s_cp)/(s_c + s_cp + s_s + s_sp)
+rho_c <- s_c/(s_c + s_cp)
+rho_s <- s_s/(s_s + s_sp)
+
+n <- 30
+
+r <- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)
+```
+
+The design effect for the cluster randomized trial without any baseline measurement was 5.35. With the two-cohort design, the design effect is reduced slightly:
+
+```{r}
+(des_effect <- (1 + (n - 1) * rho) * 2 * (1 - r))
+
+des_effect * 350 / n
+
+```
+
+The desired number of sites is over 50, so rounding up to the next even number gives us 52:
+
+```{r}
+replicate <- function() {
+  dd <- crt_base(2.4, 52, 30, s_c = 6.8, s_cp = 2.8, s_s = 0, s_sp = 54.4)
+  fit3 <- lmer(y ~ period * rx+ (1|timeID:site) + (1 | site), data = dd)
+  
+  coef(summary(fit3))["period:rx", "Pr(>|t|)"]
+}
+
+p_values <- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) < 0.05)
+```
+
+## Repeated measurements
+
+We can reduce the number of clusters further if instead of measuring one cohort prior to the intervention and another after the intervention, we measure a single cohort twice - once at baseline and once at follow-up. Now we use the full model that decomposes the subject level variance into a time invariant effect ($c_j$) and a time varying effect $cp_{jk}$:
+
+$$
+Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
+$$
+
+#### Data generation process
+
+These are the parameters, $\delta_1 = 2.4$, $\sigma_c^2 = 6.8$, $\sigma_{cp}^2 = 2.8$, $\sigma_s = 38,$ and $\sigma_{sp}^2 = 16.4$.
+
+```{r}
+dd <- crt_base(effect=2.4, nsites=20, n=30, s_c=6.8, s_cp=2.8, s_s=38, s_sp=16.4)
+```
+
+Here is what the data look like; each line represents an individual subject at the two time points, baseline and follow-up.
+
+```{r, fig.width = 9, echo = FALSE}
+ggplot(data = dd, aes(y = y, x =factor(period))) +
+  geom_line(size = .2, aes(color = factor(rx), group = id)) +
+  theme(panel.grid.minor.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.grid.major.x = element_blank(),
+        legend.position = "none") +
+  xlab("period") +
+  scale_color_manual(values = c("#0078b3", "#b33b00")) +
+  facet_wrap( ~ site, ncol = 10)
+```
+
+#### Estimating effect size
+
+The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects.
+
+```{r}
+dd <- crt_base(effect = 2.4, nsites = 200, n = 100, 
+  s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+
+fit4 <- lmer(y ~ period*rx + (1 | id:site) + (1|timeID:site) + (1 | site), data = dd)
+tbl_regression(fit4, tidy_fun = broom.mixed::tidy)
+```
+
+#### Confirming power
+
+Based on the variance assumptions, we can update our design effect a third time:
+
+```{r}
+s_c <- 6.8
+s_cp <- 2.8
+s_s <- 38
+s_sp <- 16.4
+
+rho <- (s_c + s_cp)/(s_c + s_cp + s_s + s_sp)
+rho_c <- s_c/(s_c + s_cp)
+rho_s <- s_s/(s_s + s_sp)
+
+n <- 30
+
+r <- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)
+```
+
+Once again, the design effect (and sample size requirement) is reduced:
+
+```{r}
+(des_effect <- (1 + (n - 1) * rho) * 2 * (1 - r))
+
+des_effect * 350 / n
+
+```
+
+The desired number of sites is over 36, so I will round up to 38:
+
+```{r}
+replicate <- function() {
+  dd <- crt_base(2.4, 38, 30, s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+  fit4 <-  lmer(y ~ period*rx + (1 | id:site) + (1|timeID:site) + (1 | site), data = dd)
+  
+  coef(summary(fit4))["period:rx", "Pr(>|t|)"]
+}
+
+p_values <- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) < 0.05)
+```
+
+## Repeated measurements - ANCOVA
+
+We may be able to reduce the number of clusters even further by changing the model so that we are comparing follow-up outcomes of the two treatment arms (as opposed to measuring the differences in changes as we just did). This model is
+
+$$
+Y_{ij1} = \alpha_0 + \gamma Y_{ij0} + \delta Z_j + c_j + s_{ij}
+$$
+
+where we have adjusted for baseline measurement $Y_{ij0}.$ Even though the estimation model has changed, I am using the exact same data generation process as before, with the same effect size and variance assumptions:
+
+```{r}
+
+dd <- crt_base(effect = 2.4, nsites = 200, n = 100, 
+  s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+
+dobs <- dd[, .(site, rx, id, period, timeID, y)]
+dobs <- dcast(dobs, site + rx + id ~ period, value.var = "y")
+
+fit5 <- lmer(`1` ~ `0` + rx + (1 | site), data = dobs)
+tbl_regression(fit5, tidy_fun = broom.mixed::tidy)
+  
+```
+
+#### Design effect
+
+*Teerenstra et al* derived an alternative design effect that is specific to the ANCOVA model:
+
+$$
+(1 + (n-1)\rho) (1-r^2)
+$$
+
+where $r$ is the same as before. Since $(1-r^2) < 2(1-r), \ 0 \le r < 1$, this will be a reduction from the earlier model.
+
+```{r}
+(des_effect <- (1 + (n - 1) * rho) * (1 - r^2))
+
+des_effect * 350 / n
+```
+
+#### Confirming power
+
+```{r}
+replicate <- function() {
+  
+  dd <- crt_base(2.4, 32, 30, s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
+  dobs <- dd[, .(site, rx, id, period, timeID, y)]
+  dobs <- dcast(dobs, site + rx + id ~ period, value.var = "y")
+
+  fit5 <- lmer(`1` ~ `0` + rx + (1 | site), data = dobs)
+  coef(summary(fit5))["rx", "Pr(>|t|)"]
+}
+
+p_values <- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
+
+mean(unlist(p_values) < 0.05)
+```
+
+## Next steps
+
+These simulations confirmed the design effects derived by *Teerenstra et al*. In the next post, we will turn to baseline measurements in the context of a stepped wedge design, to see if these results translate to a more complex setting. The design effects themselves have not yet been derived, but those should soon follow. In the meantime, to get yourself psyched up for what is coming, you can read more generally about stepped wedge designs [here](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/intra-cluster-correlations-over-time/), [here](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/), [here](https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/), and [here](https://www.rdatagen.net/post/analyzing-the-open-cohort-stepped-wedge-trial-with-binary-outcomes/).
+
+
+<p><small><font color="darkkhaki">
+Reference:
+
+Teerenstra, Steven, Sandra Eldridge, Maud Graff, Esther de Hoop, and George F. Borm. "A simple sample size formula for analysis of covariance in cluster randomized trials." Statistics in medicine 31, no. 20 (2012): 2169-2178.
+
+Support:
+
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory ([NIA IMPACT Collaboratory](https://impactcollaboratory.org/)). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small></p>
