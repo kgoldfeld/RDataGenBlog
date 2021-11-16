@@ -1,5 +1,5 @@
 ---
-title: Design effects with baseline measurements
+title: The design effect of a cluster randomized trial with baseline measurements
 author: Keith Goldfeld
 date: '2021-11-30'
 slug: []
@@ -15,18 +15,23 @@ draft: TRUE
 
 ```{r setup, echo=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
-options(digits = 3)
+options(digits = 2)
 ```
 
-Two colleagues on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}, Monica Taljaard and Fan Li, and I have started to think about baseline outcome information in the context of a stepped wedge cluster randomized trial. The question we are focused on is *if we are able to measure an outcome at both baseline and follow-up for each individual in the study, how much can we reduce the number clusters or sites needed for the study*? Ultimately, we hope to have an analytic solution for this, but to get things started, we thought we could explore using simulation. I'll be sharing some of those results in this and upcoming posts.
+Is it possible to reduce the size requirements of a stepped wedge cluster randomized trial simply by collecting baseline information? It is generally the case that if we are able to measure an outcome for a subject at two time periods, first at baseline and then at follow-up, we can reduce sample size. Does this extend to the context of cluster randomized trials generally, and stepped wedge designs more specifically? The answer to the first part of the question is a definite "yes," as described in a 2012 paper *Teerenstra et al* (some more details on that below). 
 
-Before we get to the case of the stepped wedge design, I thought it might be useful to start with the simpler case of a parallel cluster randomized design. I have previously written generally about the [design effect](https://www.rdatagen.net/post/what-exactly-is-the-design-effect/){target="_blank"}, but a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} titled "A simple sample size formula for analysis of covariance in cluster randomized trials" by *Teerenstra et al* provides a great jumping off point to understand how baseline measurements can impact sample sizes. 
-
-In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements, focusing on the number of clusters. The repeated measurement design effects were all drawn from the *Teerenstra et al* paper.
+As for the second part of the question, two colleagues on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}, Monica Taljaard and Fan Li, and I have just started thinking about this. Ultimately, we hope to have an analytic solution that provides more formal guidance for stepped wedge designs, but to get things started, we thought we could explore a bit using simulation.
 
 ## Quick overview
 
-This post is a bit longer than usual, but there was no obvious way to split it apart; besides, once you get the hang of it, it flows pretty smoothly (says the blogger). After showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of cluster randomized designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized needs 64 sites, a cross-sectional pre-post design needs 52, a repeated measures design needs 38, and a repeated measures design that models follow-up outcomes only (i.e. and ANCOVA model) requires only 32.
+Generally speaking, why might baseline measurements have any impact at all? The curse of any clinical trial is variability - the more noise (variability) there is in the outcome, the more difficult it is to identify the signal (effect). For example, if we are interested in measuring the impact of an intervention on the quality of life (QOL) across a diverse range of patients, the measurement (which typically ranges from 0 to 1) might vary considerably from person to person, regardless of the intervention. If the intervention has a real but moderate effect of, say, 0.1 points, it could easily get lost if the standard deviation is considerably larger, say 0.25.
+
+It turns out that if we collect baseline QOL scores and can "control" for those measurements in some way (by conducting a repeated measures analysis, using ANCOVA, or assessing the difference itself as an outcome), we might be able to reduce the variability across study subjects sufficiently to give us a better chance at picking up the signal. I've [written](https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/
+){target="_blank"} about this concept before in the context of clinical trials where randomization is at the subject level; now we will turn to the case where randomization is at the cluster or site level.
+
+This post will focus on work already done to derive *design effects* for parallel cluster randomized trials that collect baseline measurements. (We will get to stepped wedge designs in future posts.) I described the [design effect](https://www.rdatagen.net/post/what-exactly-is-the-design-effect/){target="_blank"} more generally in an earlier post, but the [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*, titled "A simple sample size formula for analysis of covariance in cluster randomized trials" provides a better jumping off point to understand how baseline measurements can impact sample sizes in clustered designs. In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements.
+
+Here's a brief outline of what follows: after showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized that needs 64 sites, a cross-sectional pre-post design that needs 52, a repeated measures design needs that 38, and a repeated measures design that models follow-up outcomes only (i.e. uses an ANCOVA model) that requires only 32.
 
 ## Simple RCT
 
@@ -215,7 +220,7 @@ $$
 Y_{ijk} = \alpha_0 + \alpha_1 k  + \delta_{0} Z_j + \delta_{1}k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
 $$
 
-where $Y_{ijk}$ is a continuous outcome measure for individual $i$ in site $j$ and measurment $k \in \{0,1\}$. $Z_{j}$ is the treatment status of cluster $j$, $Z_{j} \in \{0,1\}.$ $\alpha_0$ is the mean outcome at baseline for subjects in the control clusters, $\alpha_1$ is the change from baseline to follow-up in the control arm, $\delta_{0}$ is the difference at baseline between control and treatment arms (we would expect this to be $0$ in a randomized trial), and $\delta_{1}$ is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since $\delta_0$ should be close to $0$, $\delta_1$ is the treatment effect.)
+where $Y_{ijk}$ is a continuous outcome measure for individual $i$ in site $j$ and measurement $k \in \{0,1\}$. $k=0$ for baseline measurement, and $k=1$ for the follow-up. $Z_{j}$ is the treatment status of cluster $j$, $Z_{j} \in \{0,1\}.$ $\alpha_0$ is the mean outcome at baseline for subjects in the control clusters, $\alpha_1$ is the change from baseline to follow-up in the control arm, $\delta_{0}$ is the difference at baseline between control and treatment arms (we would expect this to be $0$ in a randomized trial), and $\delta_{1}$ is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since $\delta_0$ should be close to $0$, $\delta_1$ is the treatment effect.)
 
 The model has cluster-specific and subject-specific random effects. For both, there can be time-invariant effects and time-varying effects. $c_j \sim N(0,\sigma_c^2)$ are time invariant site-specific effects, and $cp_{jk}$ are the site-specific period (time varying) effects, where $c_{jk} \sim N(0, \sigma_{cp}^2)$. At the subject level there can be $s_{ij} \sim N(0, \sigma_s^2)$ and $sp_{ijk} \sim N(0, \sigma_{sp}^2)$.
 
@@ -285,7 +290,9 @@ $$ (1 + (n-1)\rho)(2(1-r)) $$
 
 ## Cross-sectional cohorts
 
-We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization), we might be able to reduce the number of clusters. In this case, $\sigma_s^2 = 0$ and $\rho_s = 0$, so the general model reduces to
+We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization assignment of the cluster), we might be able to reduce the number of clusters. 
+
+In this case, $\sigma_s^2 = 0$ and $\rho_s = 0$, so the general model reduces to
 
 $$
 Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + sp_{ijk}
@@ -293,7 +300,7 @@ $$
 
 #### Data generation process
 
-The parameters for this simulation are $\delta_1 = 2.4$, $\sigma_c^2 = 6.8$, $\sigma_{cp}^2 = 2.8$, $\sigma_{sp}^2 = 54.4$.
+The parameters for this simulation are $\delta_1 = 2.4$, $\sigma_c^2 = 6.8$, $\sigma_{cp}^2 = 2.8$, $\sigma_{sp}^2 = 54.4$. Total variance $\sigma_c^2 + \sigma_{cp}^2 + \sigma_{sp}^2 = 6.8 + 2.8 + 54.4 = 64$, as used previously.
 
 ```{r}
 dd <- crt_base(effect = 2.4, nsites = 20, n = 30, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)
@@ -401,7 +408,7 @@ ggplot(data = dd, aes(y = y, x =factor(period))) +
 
 #### Estimating effect size
 
-The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects.
+The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects. Again, total variance ($\sigma_c^2 + \sigma_{cp}^2 + \sigma_s^2 + \sigma_{sp}^2) is 64.
 
 ```{r}
 dd <- crt_base(effect = 2.4, nsites = 200, n = 100, 
@@ -413,7 +420,7 @@ tbl_regression(fit4, tidy_fun = broom.mixed::tidy)
 
 #### Confirming power
 
-Based on the variance assumptions, we can update our design effect a third time:
+Based on the variance assumptions, we can update our design effect a second time:
 
 ```{r}
 s_c <- 6.8
@@ -430,7 +437,7 @@ n <- 30
 r <- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)
 ```
 
-Once again, the design effect (and sample size requirement) is reduced:
+And again, the design effect (and sample size requirement) is reduced:
 
 ```{r}
 (des_effect <- (1 + (n - 1) * rho) * 2 * (1 - r))

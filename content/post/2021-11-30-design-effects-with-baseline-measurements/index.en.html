@@ -1,5 +1,5 @@
 ---
-title: Design effects with baseline measurements
+title: The design effect of a cluster randomized trial with baseline measurements
 author: Keith Goldfeld
 date: '2021-11-30'
 slug: []
@@ -16,12 +16,14 @@ draft: TRUE
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>Two colleagues on the <a href="https://impactcollaboratory.org/design-and-statistics-core/" target="_blank">Design and Statistics Core</a> of the <a href="https://impactcollaboratory.org/" target="_blank">NIA IMPACT Collaboratory</a>, Monica Taljaard and Fan Li, and I have started to think about baseline outcome information in the context of a stepped wedge cluster randomized trial. The question we are focused on is <em>if we are able to measure an outcome at both baseline and follow-up for each individual in the study, how much can we reduce the number clusters or sites needed for the study</em>? Ultimately, we hope to have an analytic solution for this, but to get things started, we thought we could explore using simulation. I’ll be sharing some of those results in this and upcoming posts.</p>
-<p>Before we get to the case of the stepped wedge design, I thought it might be useful to start with the simpler case of a parallel cluster randomized design. I have previously written generally about the <a href="https://www.rdatagen.net/post/what-exactly-is-the-design-effect/" target="_blank">design effect</a>, but a <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352" target="_blank">paper</a> titled “A simple sample size formula for analysis of covariance in cluster randomized trials” by <em>Teerenstra et al</em> provides a great jumping off point to understand how baseline measurements can impact sample sizes.</p>
-<p>In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements, focusing on the number of clusters. The repeated measurement design effects were all drawn from the <em>Teerenstra et al</em> paper.</p>
+<p>Is it possible to reduce the size requirements of a stepped wedge cluster randomized trial simply by collecting baseline information? It is generally the case that if we are able to measure an outcome for a subject at two time periods, first at baseline and then at follow-up, we can reduce sample size. Does this extend to the context of cluster randomized trials generally, and stepped wedge designs more specifically? The answer to the first part of the question is a definite “yes,” as described in a 2012 paper <em>Teerenstra et al</em> (some more details on that below).</p>
+<p>As for the second part of the question, two colleagues on the <a href="https://impactcollaboratory.org/design-and-statistics-core/" target="_blank">Design and Statistics Core</a> of the <a href="https://impactcollaboratory.org/" target="_blank">NIA IMPACT Collaboratory</a>, Monica Taljaard and Fan Li, and I have just started thinking about this. Ultimately, we hope to have an analytic solution that provides more formal guidance for stepped wedge designs, but to get things started, we thought we could explore a bit using simulation.</p>
 <div id="quick-overview" class="section level2">
 <h2>Quick overview</h2>
-<p>This post is a bit longer than usual, but there was no obvious way to split it apart; besides, once you get the hang of it, it flows pretty smoothly (says the blogger). After showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of cluster randomized designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized needs 64 sites, a cross-sectional pre-post design needs 52, a repeated measures design needs 38, and a repeated measures design that models follow-up outcomes only (i.e. and ANCOVA model) requires only 32.</p>
+<p>Generally speaking, why might baseline measurements have any impact at all? The curse of any clinical trial is variability - the more noise (variability) there is in the outcome, the more difficult it is to identify the signal (effect). For example, if we are interested in measuring the impact of an intervention on the quality of life (QOL) across a diverse range of patients, the measurement (which typically ranges from 0 to 1) might vary considerably from person to person, regardless of the intervention. If the intervention has a real but moderate effect of, say, 0.1 points, it could easily get lost if the standard deviation is considerably larger, say 0.25.</p>
+<p>It turns out that if we collect baseline QOL scores and can “control” for those measurements in some way (by conducting a repeated measures analysis, using ANCOVA, or assessing the difference itself as an outcome), we might be able to reduce the variability across study subjects sufficiently to give us a better chance at picking up the signal. I’ve <a href="https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/" target="_blank">written</a> about this concept before in the context of clinical trials where randomization is at the subject level; now we will turn to the case where randomization is at the cluster or site level.</p>
+<p>This post will focus on work already done to derive <em>design effects</em> for parallel cluster randomized trials that collect baseline measurements. (We will get to stepped wedge designs in future posts.) I described the <a href="https://www.rdatagen.net/post/what-exactly-is-the-design-effect/" target="_blank">design effect</a> more generally in an earlier post, but the <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352" target="_blank">paper</a> by <em>Teerenstra et al</em>, titled “A simple sample size formula for analysis of covariance in cluster randomized trials” provides a better jumping off point to understand how baseline measurements can impact sample sizes in clustered designs. In this initial exploration, I am simulating data from a series of study designs to illustrate the impact of the design effect on sample size requirements.</p>
+<p>Here’s a brief outline of what follows: after showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe a series of designs with cluster sizes of 30 subjects that require progressively fewer clusters to achieve 80% under the same effect size and total variance assumptions: a simple cluster randomized that needs 64 sites, a cross-sectional pre-post design that needs 52, a repeated measures design needs that 38, and a repeated measures design that models follow-up outcomes only (i.e. uses an ANCOVA model) that requires only 32.</p>
 </div>
 <div id="simple-rct" class="section level2">
 <h2>Simple RCT</h2>
@@ -461,7 +463,7 @@ tbl_regression(fit1)</code></pre>
 p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)</code></pre>
 <p>Here is the estimated power based on 1000 replications:</p>
 <pre class="r"><code>mean(unlist(p_values) &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.789</code></pre>
+<pre><code>## [1] 0.79</code></pre>
 </div>
 </div>
 <div id="parallel-cluster-randomized-trial" class="section level2">
@@ -898,7 +900,7 @@ tbl_regression(fit2, tidy_fun = broom.mixed::tidy)</code></pre>
 p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
 
 mean(unlist(p_values) &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.801</code></pre>
+<pre><code>## [1] 0.8</code></pre>
 </div>
 </div>
 <div id="crt-with-baseline-measurement" class="section level2">
@@ -908,7 +910,7 @@ mean(unlist(p_values) &lt; 0.05)</code></pre>
 <p><span class="math display">\[
 Y_{ijk} = \alpha_0 + \alpha_1 k  + \delta_{0} Z_j + \delta_{1}k Z_{j} + c_j + cp_{jk} + s_{ij} + sp_{ijk}
 \]</span></p>
-<p>where <span class="math inline">\(Y_{ijk}\)</span> is a continuous outcome measure for individual <span class="math inline">\(i\)</span> in site <span class="math inline">\(j\)</span> and measurment <span class="math inline">\(k \in \{0,1\}\)</span>. <span class="math inline">\(Z_{j}\)</span> is the treatment status of cluster <span class="math inline">\(j\)</span>, <span class="math inline">\(Z_{j} \in \{0,1\}.\)</span> <span class="math inline">\(\alpha_0\)</span> is the mean outcome at baseline for subjects in the control clusters, <span class="math inline">\(\alpha_1\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\delta_{0}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\delta_{1}\)</span> is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since <span class="math inline">\(\delta_0\)</span> should be close to <span class="math inline">\(0\)</span>, <span class="math inline">\(\delta_1\)</span> is the treatment effect.)</p>
+<p>where <span class="math inline">\(Y_{ijk}\)</span> is a continuous outcome measure for individual <span class="math inline">\(i\)</span> in site <span class="math inline">\(j\)</span> and measurement <span class="math inline">\(k \in \{0,1\}\)</span>. <span class="math inline">\(k=0\)</span> for baseline measurement, and <span class="math inline">\(k=1\)</span> for the follow-up. <span class="math inline">\(Z_{j}\)</span> is the treatment status of cluster <span class="math inline">\(j\)</span>, <span class="math inline">\(Z_{j} \in \{0,1\}.\)</span> <span class="math inline">\(\alpha_0\)</span> is the mean outcome at baseline for subjects in the control clusters, <span class="math inline">\(\alpha_1\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\delta_{0}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\delta_{1}\)</span> is the difference in the change from baseline to follow-up between the two arms. (In a randomized trial, since <span class="math inline">\(\delta_0\)</span> should be close to <span class="math inline">\(0\)</span>, <span class="math inline">\(\delta_1\)</span> is the treatment effect.)</p>
 <p>The model has cluster-specific and subject-specific random effects. For both, there can be time-invariant effects and time-varying effects. <span class="math inline">\(c_j \sim N(0,\sigma_c^2)\)</span> are time invariant site-specific effects, and <span class="math inline">\(cp_{jk}\)</span> are the site-specific period (time varying) effects, where <span class="math inline">\(c_{jk} \sim N(0, \sigma_{cp}^2)\)</span>. At the subject level there can be <span class="math inline">\(s_{ij} \sim N(0, \sigma_s^2)\)</span> and <span class="math inline">\(sp_{ijk} \sim N(0, \sigma_{sp}^2)\)</span>.</p>
 <p>Here is the generic code that will facilitate data generation in this model:</p>
 <pre class="r"><code>crt_base &lt;- function(effect, nsites, n, s_c, s_cp, s_s, s_sp) {
@@ -963,13 +965,14 @@ Y_{ijk} = \alpha_0 + \alpha_1 k  + \delta_{0} Z_j + \delta_{1}k Z_{j} + c_j + cp
 </div>
 <div id="cross-sectional-cohorts" class="section level2">
 <h2>Cross-sectional cohorts</h2>
-<p>We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization), we might be able to reduce the number of clusters. In this case, <span class="math inline">\(\sigma_s^2 = 0\)</span> and <span class="math inline">\(\rho_s = 0\)</span>, so the general model reduces to</p>
+<p>We may not be able to collect two measurements for each subject at a site, but if we can collect measurements on two different cohorts, one at baseline before the intervention is implemented, and one cohort in a second period (either after the intervention has been implemented or not, depending on the randomization assignment of the cluster), we might be able to reduce the number of clusters.</p>
+<p>In this case, <span class="math inline">\(\sigma_s^2 = 0\)</span> and <span class="math inline">\(\rho_s = 0\)</span>, so the general model reduces to</p>
 <p><span class="math display">\[
 Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp_{jk} + sp_{ijk}
 \]</span></p>
 <div id="data-generation-process-2" class="section level4">
 <h4>Data generation process</h4>
-<p>The parameters for this simulation are <span class="math inline">\(\delta_1 = 2.4\)</span>, <span class="math inline">\(\sigma_c^2 = 6.8\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 2.8\)</span>, <span class="math inline">\(\sigma_{sp}^2 = 54.4\)</span>.</p>
+<p>The parameters for this simulation are <span class="math inline">\(\delta_1 = 2.4\)</span>, <span class="math inline">\(\sigma_c^2 = 6.8\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 2.8\)</span>, <span class="math inline">\(\sigma_{sp}^2 = 54.4\)</span>. Total variance <span class="math inline">\(\sigma_c^2 + \sigma_{cp}^2 + \sigma_{sp}^2 = 6.8 + 2.8 + 54.4 = 64\)</span>, as used previously.</p>
 <pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 20, n = 30, s_c=6.8, s_cp=2.8, s_s=0, s_sp=54.4)</code></pre>
 <p>Here is a visualization of the outcome measures by site and by period, with the sites in the <em>treatment</em> arm colored in red (only in the follow-up period).</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-14-1.png" width="864" /></p>
@@ -1390,9 +1393,9 @@ n &lt;- 30
 r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
 <p>The design effect for the cluster randomized trial without any baseline measurement was 5.35. With the two-cohort design, the design effect is reduced slightly:</p>
 <pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * 2 * (1 - r))</code></pre>
-<pre><code>## [1] 4.32</code></pre>
+<pre><code>## [1] 4.3</code></pre>
 <pre class="r"><code>des_effect * 350 / n</code></pre>
-<pre><code>## [1] 50.5</code></pre>
+<pre><code>## [1] 50</code></pre>
 <p>The desired number of sites is over 50, so rounding up to the next even number gives us 52:</p>
 <pre class="r"><code>replicate &lt;- function() {
   dd &lt;- crt_base(2.4, 52, 30, s_c = 6.8, s_cp = 2.8, s_s = 0, s_sp = 54.4)
@@ -1404,7 +1407,7 @@ r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
 p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
 
 mean(unlist(p_values) &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.805</code></pre>
+<pre><code>## [1] 0.8</code></pre>
 </div>
 </div>
 <div id="repeated-measurements" class="section level2">
@@ -1422,7 +1425,7 @@ Y_{ijk} = \alpha_0 + \alpha_1 k + \delta_{0} Z_j + \delta_{1} k Z_{j} + c_j + cp
 </div>
 <div id="estimating-effect-size-3" class="section level4">
 <h4>Estimating effect size</h4>
-<p>The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects.</p>
+<p>The mixed effect model includes cluster-specific effects only (both time invariant and time varying), as well as subject level effects. Again, total variance ($<em>c^2 + </em>{cp}^2 + <em>s^2 + </em>{sp}^2) is 64.</p>
 <pre class="r"><code>dd &lt;- crt_base(effect = 2.4, nsites = 200, n = 100, 
   s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
 
@@ -1826,7 +1829,7 @@ tbl_regression(fit4, tidy_fun = broom.mixed::tidy)</code></pre>
 </div>
 <div id="confirming-power-3" class="section level4">
 <h4>Confirming power</h4>
-<p>Based on the variance assumptions, we can update our design effect a third time:</p>
+<p>Based on the variance assumptions, we can update our design effect a second time:</p>
 <pre class="r"><code>s_c &lt;- 6.8
 s_cp &lt;- 2.8
 s_s &lt;- 38
@@ -1839,11 +1842,11 @@ rho_s &lt;- s_s/(s_s + s_sp)
 n &lt;- 30
 
 r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
-<p>Once again, the design effect (and sample size requirement) is reduced:</p>
+<p>And again, the design effect (and sample size requirement) is reduced:</p>
 <pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * 2 * (1 - r))</code></pre>
-<pre><code>## [1] 3.14</code></pre>
+<pre><code>## [1] 3.1</code></pre>
 <pre class="r"><code>des_effect * 350 / n</code></pre>
-<pre><code>## [1] 36.6</code></pre>
+<pre><code>## [1] 37</code></pre>
 <p>The desired number of sites is over 36, so I will round up to 38:</p>
 <pre class="r"><code>replicate &lt;- function() {
   dd &lt;- crt_base(2.4, 38, 30, s_c = 6.8, s_cp = 2.8, s_s = 38, s_sp = 16.4)
@@ -1855,7 +1858,7 @@ r &lt;- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)</code></pre>
 p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
 
 mean(unlist(p_values) &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.792</code></pre>
+<pre><code>## [1] 0.79</code></pre>
 </div>
 </div>
 <div id="repeated-measurements---ancova" class="section level2">
@@ -2264,9 +2267,9 @@ tbl_regression(fit5, tidy_fun = broom.mixed::tidy)</code></pre>
 \]</span></p>
 <p>where <span class="math inline">\(r\)</span> is the same as before. Since <span class="math inline">\((1-r^2) &lt; 2(1-r), \ 0 \le r &lt; 1\)</span>, this will be a reduction from the earlier model.</p>
 <pre class="r"><code>(des_effect &lt;- (1 + (n - 1) * rho) * (1 - r^2))</code></pre>
-<pre><code>## [1] 2.68</code></pre>
+<pre><code>## [1] 2.7</code></pre>
 <pre class="r"><code>des_effect * 350 / n</code></pre>
-<pre><code>## [1] 31.2</code></pre>
+<pre><code>## [1] 31</code></pre>
 </div>
 <div id="confirming-power-4" class="section level4">
 <h4>Confirming power</h4>
@@ -2283,7 +2286,7 @@ tbl_regression(fit5, tidy_fun = broom.mixed::tidy)</code></pre>
 p_values &lt;- mclapply(1:1000, function(x) replicate(), mc.cores = 4)
 
 mean(unlist(p_values) &lt; 0.05)</code></pre>
-<pre><code>## [1] 0.778</code></pre>
+<pre><code>## [1] 0.78</code></pre>
 </div>
 </div>
 <div id="next-steps" class="section level2">
