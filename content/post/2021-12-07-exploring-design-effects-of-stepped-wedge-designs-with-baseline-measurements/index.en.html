@@ -1,0 +1,631 @@
+---
+title: Exploring design effects of stepped wedge designs with baseline measurements
+author: Keith Goldfeld
+date: '2021-12-07'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<div id="data-generation-process" class="section level1">
+<h1>Data generation process</h1>
+<p>The general data generating process used here allows for time period effects (specified as a time trend) as well as all the possible site and individual random effects.</p>
+<p><span class="math display">\[
+Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
+\]</span></p>
+<p><span class="math inline">\(Y_{ijkt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t\)</span>, <span class="math inline">\(t \in \{0,\dots, T\}\)</span>; <span class="math inline">\(k \in \{0, 1\}\)</span>, <span class="math inline">\(k=0\)</span> if the measurement is taken at baseline and <span class="math inline">\(k=1\)</span> if the measurment is the follow-up. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>.</p>
+<p>The parameter <span class="math inline">\(\tau\)</span> is the general time trend. <span class="math inline">\(\gamma\)</span> is the treatment effect, which can only impact follow-up measurements. <span class="math inline">\(c_j\)</span> and <span class="math inline">\(cp_{jt}\)</span> are the site and site-time specific random effects with distributions <span class="math inline">\(N(0, \sigma_c^2)\)</span> and <span class="math inline">\(N(0, \sigma_{cp}^2)\)</span>, respectively. <span class="math inline">\(s_{ijt}\)</span> is the subject-level effect (and is specific to period <span class="math inline">\(t\)</span> since the subject is only observed in that period), <span class="math inline">\(s_{ijt} \sim N(0, \sigma_{s}^2)\)</span>. <span class="math inline">\(sp_{ijkt}\)</span> is the measurement noise, <span class="math inline">\(sp_{ijkt} \sim N(0, \sigma_{sp}^2).\)</span></p>
+<p>Here is the generalized code that implements this data generation process:</p>
+<pre class="r"><code>base_swt &lt;- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, s_sp) {
+  
+  defC &lt;- defData(varname = &quot;c&quot;, formula = 0, variance = &quot;..s_c&quot;)
+  defCP &lt;- defDataAdd(varname = &quot;c.p&quot;, formula = 0, variance = &quot;..s_cp&quot;)
+  defS &lt;- defDataAdd(varname = &quot;s&quot;, formula = 0, variance = &quot;..s_s&quot;)
+  defSP &lt;- defDataAdd(varname = &quot;y&quot;,
+    formula = &quot;..trend * s_per + ..effect * Ict * p_fu + c + c.p + s&quot;, 
+    variance = &quot;..s_sp&quot;
+  )
+  
+  dsite &lt;- genData(nsites, defC, id = &quot;site&quot;)
+  
+  dper &lt;- addPeriods(dsite, nPeriods = nperiods, idvars = &quot;site&quot;, 
+                     timeid = &quot;s_time&quot;, perName = &quot;s_per&quot;)
+  dper &lt;- addColumns(defCP, dper)
+  
+  dsw &lt;- trtStepWedge(dper, &quot;site&quot;, nWaves = nwaves, lenWaves = 1, 
+                      startPer = 1, perName = &quot;s_per&quot;,
+                      grpName = &quot;Ict&quot;)
+  
+  dpat &lt;- genCluster(dper, cLevelVar = &quot;s_time&quot;, 
+                     numIndsVar = n, level1ID = &quot;id&quot;)
+  dpat &lt;- addColumns(defS, dpat)
+  dpat &lt;- addPeriods(dpat, nPeriods = 2, idvars = &quot;id&quot;, timeid = &quot;p_time&quot;, perName = &quot;p_fu&quot;)
+
+  setkey(dpat, &quot;s_time&quot;, &quot;site&quot;, &quot;s_per&quot;, &quot;id&quot;)
+  dsw[, c(&quot;c&quot;, &quot;c.p&quot;) := NULL]
+  setkey(dsw, &quot;s_time&quot;, &quot;site&quot;, &quot;s_per&quot;)
+  
+  dpat &lt;- merge(dpat, dsw)
+  setkey(dpat, &quot;id&quot;, &quot;p_fu&quot;)
+  dpat &lt;- addColumns(defSP, dpat)
+}</code></pre>
+</div>
+<div id="no-site-period-random-effects" class="section level1">
+<h1>No site-period random effects</h1>
+<p>To start, we are focusing on a situation where there is no site-period effect, so that <span class="math inline">\(cp_{jt} = 0\)</span> for all <span class="math inline">\(j\)</span> and <span class="math inline">\(t\)</span>. The effect size <span class="math inline">\(\gamma = 1\)</span> and the time trend <span class="math inline">\(\tau = 3\)</span>. There will be 20 sites divided into 4 waves of 5 sites, with each wave starting in period <span class="math inline">\(t=1\)</span>, and subsequent waves starting in each consecutive period. There will be 30 subjects for each site, each period. <span class="math inline">\(\sigma_c^2 = 6\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 0\)</span>, <span class="math inline">\(\sigma_s^2 = 44\)</span>, and <span class="math inline">\(\sigma_{sp}^2 = 20.\)</span></p>
+<pre class="r"><code>dd &lt;- base_swt(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)</code></pre>
+<p><br></p>
+<p><strong>Standard stepped-wdege design - no baseline</strong></p>
+<p>The standard stepped-wedge design does not actually collect the the baseline measurement, so we only observe the single follow-up measurement for each subject.</p>
+<p>In the simple stepped-wedge design, clusters are randomized to start treatment in a specific period. Possible start periods for the intervention depend on the number of clusters and number of waves, as well as the interval between starting periods. In the example below, there will be 20 clusters divided in 4 waves (so 5 clusters per wave), and there are <span class="math inline">\(t=5\)</span> total observation periods, <span class="math inline">\(t \in \{0, \dots, 4\}\)</span>, with the first wave starting the intervention at <span class="math inline">\(t=1\)</span> and the last wave starting the intervention at <span class="math inline">\(t=4\)</span>. (We are phasing in a new wave every period.)</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p><strong>Stepped-wedge design with baseline measurement</strong></p>
+<p>To extend the basic stepped-wedge design, we assume we observe individual measurements at baseline (prior to any type of treatment) as well as at follow-up after treatment (two measurements per individual). <strong>The baseline and follow-up measurements are assumed to be collected in the same period <span class="math inline">\(k\)</span>.</strong> The baseline measurement is collected prior to randomization (so will by definition be under the control condition).</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<div id="models" class="section level2">
+<h2>Models</h2>
+<div id="simple-stepped-wedge-design" class="section level3">
+<h3>Simple stepped-wedge design</h3>
+<p>The model for the simple stepped-wedge design under the assumption of no site-period random effects is</p>
+<p><span class="math display">\[
+Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j  + sp_{ijt}
+\]</span></p>
+<p>where <span class="math inline">\(Y_{ijt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t\)</span>. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>. The <span class="math inline">\(\alpha_t\text{`s}\)</span> are the period-specific fixed effects and <span class="math inline">\(\gamma\)</span> is the treatment effect. <span class="math inline">\(c_j\)</span> is the site specific random effects with distribution <span class="math inline">\(N(0, \sigma_c^2)\)</span>. <span class="math inline">\(sp_{ijt}\)</span> is the subject-level effect or noise, <span class="math inline">\(sp_{ijt} \sim N(0, \sigma_{s}^2)\)</span></p>
+</div>
+<div id="stepped-wedge-with-baseline" class="section level3">
+<h3>Stepped-wedge with baseline</h3>
+<p>We have a number of options for analyzing the stepped-wedge design with a baseline measurement:</p>
+<div id="model-1---difference-in-change" class="section level4">
+<h4>Model 1 - difference in change</h4>
+<p>First, there is the model that is adapted from the <em>Teerenstra et al</em> paper, which is essentially a “difference in change from baseline” model. It is the essentially the same as the model suggested by Fan, though it makes slightly fewer assumptions. The inclusion <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are there the adjust for any incidental imbalances due to randomization. (In this case ,and all others that follow, there is no site-period random effect <span class="math inline">\(cp_{jt}\)</span>.)</p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jt} + \gamma_2 k Z_{jt} + c_j  + s_{ijt} + sp_{ijkt}
+\]</span></p>
+<p>There are three different parameters from the traditional stepped-wedge model: <span class="math inline">\(\gamma_0\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\gamma_{1}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\gamma_{2}\)</span> is the difference in the change from baseline to follow-up between the two arms.</p>
+</div>
+<div id="model-2---hh" class="section level4">
+<h4>Model 2 - HH</h4>
+<p>This is essentially Fan’s model. <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are gone from the previous model, so we are assuming those are <span class="math inline">\(0\)</span>.</p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha_t +  \gamma k Z_{jt}  + c_j  + s_{ijt} + sp_{ijkt}
+\]</span></p>
+</div>
+<div id="model-3---ancova" class="section level4">
+<h4>Model 3 - ANCOVA</h4>
+<p>The third model is the ANCOVA model that adjusts each follow-up outcome with the observed baseline measurement <span class="math inline">\(Y_0.\)</span> Because we have only a single outcome per subject, the subject-specific effect <span class="math inline">\(sp_{ijkt}\)</span> disappears, and $s_{ijt} is now individual subject-level noise.</p>
+<p><span class="math display">\[
+Y_{ijt} = \alpha_t +  \beta Y_0 + \gamma Z_{jt}  + c_j  + s_{ijt}
+\]</span></p>
+</div>
+<div id="model-4---comparing-change" class="section level4">
+<h4>Model 4 - comparing change</h4>
+<p>The fourth model considers the change from baseline to follow-up (<span class="math inline">\(D_{ijt} = Y_{ij1t} - Y_{ij0t}\)</span>) as the outcome of interest:</p>
+<p><span class="math display">\[
+D_{ijt} = \alpha_t + \gamma Z_{jt}  + c_j  + s_{ijt}
+\]</span></p>
+</div>
+</div>
+</div>
+<div id="estimating-models" class="section level2">
+<h2>Estimating models</h2>
+<p>In <code>R</code>, we can estimate each of thee models as follows</p>
+<div id="standard-stepped-wedge-design" class="section level3">
+<h3>Standard stepped wedge design</h3>
+<pre class="r"><code>dd &lt;- base_swt(1, 3, 200, 4, 5, 30, 6, 0, 44, 20)
+
+d_std &lt;- dd[p_fu == 1]
+
+fit_std &lt;-  lmer( y ~  factor(s_per) - 1 + Ict  + (1|site), data = d_std)
+summary(fit_std)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: y ~ factor(s_per) - 1 + Ict + (1 | site)
+##    Data: d_std
+## 
+## REML criterion at convergence: 210256
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -4.692 -0.668  0.004  0.675  3.630 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  site     (Intercept)  5.61    2.37    
+##  Residual             63.61    7.98    
+## Number of obs: 30000, groups:  site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0    -0.196      0.197   326.409   -0.99     0.32    
+## factor(s_per)1     2.976      0.201   353.695   14.82  &lt; 2e-16 ***
+## factor(s_per)2     5.555      0.213   441.064   26.07  &lt; 2e-16 ***
+## factor(s_per)3     8.787      0.232   603.935   37.87  &lt; 2e-16 ***
+## factor(s_per)4    11.706      0.256   864.423   45.69  &lt; 2e-16 ***
+## Ict                1.179      0.164 24570.375    7.18  7.4e-13 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4
+## fctr(s_pr)1  0.710                            
+## fctr(s_pr)2  0.670  0.734                     
+## fctr(s_pr)3  0.615  0.710  0.772              
+## fctr(s_pr)4  0.557  0.676  0.761  0.812       
+## Ict          0.000 -0.205 -0.386 -0.531 -0.641</code></pre>
+</div>
+<div id="baseline-difference-in-change" class="section level3">
+<h3>Baseline difference in change</h3>
+<pre class="r"><code>fit_1 &lt;- lmer(y ~  factor(s_per) - 1 + p_fu * Ict + (1|id:site) + (1|site), data = dd)
+summary(fit_1)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: y ~ factor(s_per) - 1 + p_fu * Ict + (1 | id:site) + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 401079
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.468 -0.513  0.002  0.513  3.040 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  id:site  (Intercept) 43.62    6.60    
+##  site     (Intercept)  5.52    2.35    
+##  Residual             20.06    4.48    
+## Number of obs: 60000, groups:  id:site, 30000; site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0 -1.99e-01   1.93e-01  3.19e+02   -1.03     0.30    
+## factor(s_per)1  2.93e+00   1.97e-01  3.43e+02   14.90   &lt;2e-16 ***
+## factor(s_per)2  5.58e+00   2.07e-01  4.18e+02   26.91   &lt;2e-16 ***
+## factor(s_per)3  8.76e+00   2.24e-01  5.57e+02   39.13   &lt;2e-16 ***
+## factor(s_per)4  1.16e+01   2.45e-01  7.80e+02   47.44   &lt;2e-16 ***
+## p_fu            1.73e-02   5.17e-02  3.00e+04    0.33     0.74    
+## Ict             2.22e-01   1.56e-01  2.89e+04    1.42     0.15    
+## p_fu:Ict        9.75e-01   7.31e-02  3.00e+04   13.33   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4 p_fu   Ict   
+## fctr(s_pr)1  0.745                                          
+## fctr(s_pr)2  0.707  0.764                                   
+## fctr(s_pr)3  0.655  0.740  0.795                            
+## fctr(s_pr)4  0.598  0.705  0.782  0.828                     
+## p_fu        -0.134 -0.132 -0.125 -0.116 -0.105              
+## Ict         -0.022 -0.209 -0.376 -0.512 -0.618  0.166       
+## p_fu:Ict     0.095  0.093  0.088  0.082  0.075 -0.707 -0.235</code></pre>
+</div>
+<div id="hh-model" class="section level3">
+<h3>HH Model</h3>
+<pre class="r"><code>fit_2 &lt;- lmer(y ~ factor(s_per) - 1 + p_fu:Ict + (1|id:site) + (1|site), data = dd)
+summary(fit_2)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: y ~ factor(s_per) - 1 + p_fu:Ict + (1 | id:site) + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 401075
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.468 -0.513  0.001  0.513  3.041 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  id:site  (Intercept) 43.62    6.60    
+##  site     (Intercept)  5.53    2.35    
+##  Residual             20.06    4.48    
+## Number of obs: 60000, groups:  id:site, 30000; site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0    -0.191      0.191   307.278    -1.0     0.32    
+## factor(s_per)1     2.989      0.191   307.959    15.6   &lt;2e-16 ***
+## factor(s_per)2     5.688      0.192   310.007    29.7   &lt;2e-16 ***
+## factor(s_per)3     8.923      0.192   313.435    46.4   &lt;2e-16 ***
+## factor(s_per)4    11.849      0.193   318.265    61.4   &lt;2e-16 ***
+## p_fu:Ict           1.005      0.051 31743.669    19.7   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4
+## fctr(s_pr)1  0.755                            
+## fctr(s_pr)2  0.754  0.756                     
+## fctr(s_pr)3  0.752  0.755  0.757              
+## fctr(s_pr)4  0.749  0.753  0.756  0.759       
+## p_fu:Ict     0.000 -0.033 -0.066 -0.099 -0.132</code></pre>
+</div>
+<div id="ancova-model" class="section level3">
+<h3>ANCOVA Model</h3>
+<pre class="r"><code>dd_b &lt;- dd[p_fu ==0, .(id, y0 = y)]
+dd_f &lt;- dd[p_fu ==1, ]
+
+dd &lt;- merge(dd_f, dd_b, by = &quot;id&quot;)
+
+fit_3 &lt;- lmer(y ~  factor(s_per) - 1 +  y0 + Ict  + (1|site), data = dd)
+summary(fit_3)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: y ~ factor(s_per) - 1 + y0 + Ict + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 191005
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.970 -0.667  0.003  0.666  4.009 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  site     (Intercept)  0.553   0.743   
+##  Residual             33.785   5.812   
+## Number of obs: 30000, groups:  site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0 -6.68e-02   9.16e-02  8.86e+02   -0.73     0.47    
+## factor(s_per)1  9.68e-01   9.66e-02  1.02e+03   10.02   &lt;2e-16 ***
+## factor(s_per)2  1.66e+00   1.10e-01  1.41e+03   15.13   &lt;2e-16 ***
+## factor(s_per)3  2.72e+00   1.30e-01  2.02e+03   21.03   &lt;2e-16 ***
+## factor(s_per)4  3.68e+00   1.53e-01  2.73e+03   24.14   &lt;2e-16 ***
+## y0              6.92e-01   4.16e-03  2.83e+04  166.27   &lt;2e-16 ***
+## Ict             1.03e+00   1.12e-01  6.26e+03    9.14   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4 y0    
+## fctr(s_pr)1  0.311                                   
+## fctr(s_pr)2  0.273  0.435                            
+## fctr(s_pr)3  0.230  0.444  0.585                     
+## fctr(s_pr)4  0.195  0.440  0.606  0.705              
+## y0           0.008 -0.124 -0.211 -0.279 -0.314       
+## Ict          0.000 -0.289 -0.508 -0.646 -0.732 -0.012</code></pre>
+</div>
+<div id="change-as-outcome" class="section level3">
+<h3>Change as outcome</h3>
+<pre class="r"><code>dd[, d := y - y0]
+
+fit_4 &lt;- lmer(d ~  factor(s_per) - 1 + Ict  + (1|site), data = dd)
+summary(fit_4)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: d ~ factor(s_per) - 1 + Ict + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 195907
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.943 -0.667  0.002  0.670  4.259 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  site     (Intercept)  0.0     0.00    
+##  Residual             40.1     6.33    
+## Number of obs: 30000, groups:  site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0 -9.47e-03   8.18e-02  3.00e+04   -0.12     0.91    
+## factor(s_per)1  8.37e-02   8.58e-02  3.00e+04    0.98     0.33    
+## factor(s_per)2 -4.85e-02   9.68e-02  3.00e+04   -0.50     0.62    
+## factor(s_per)3  5.64e-02   1.13e-01  3.00e+04    0.50     0.62    
+## factor(s_per)4  1.52e-01   1.32e-01  3.00e+04    1.15     0.25    
+## Ict             9.16e-01   1.03e-01  3.00e+04    8.86   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4
+## fctr(s_pr)1  0.000                            
+## fctr(s_pr)2  0.000  0.161                     
+## fctr(s_pr)3  0.000  0.208  0.368              
+## fctr(s_pr)4  0.000  0.237  0.419  0.540       
+## Ict          0.000 -0.302 -0.535 -0.688 -0.784
+## optimizer (nloptwrap) convergence code: 0 (OK)
+## boundary (singular) fit: see ?isSingular</code></pre>
+</div>
+</div>
+<div id="power-analysis" class="section level2">
+<h2>Power analysis</h2>
+<p>By repeatedly generate data sets, we can estimate the parameters using each of the models and compare the proportion of cases where the observied <em>p-value</em> is less than 0.05 to estimate the power of each modeling approach. The curves in the figure show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes).</p>
+<p>In this case, <strong>with fixed period effects but no random site-specific period effects</strong>, the <em>Teerenstra et al</em> model (Model 1) is considerably more powerful than both the ANCOVA and change models (Models 3 and 4).</p>
+<p>Note that in the data generation scenario with no fixed period effects (i.e. <span class="math inline">\(\tau = 0\)</span>), I am still assuming fixed period effects in the model estimation (i.e. including <span class="math inline">\(\alpha_t\)</span>).</p>
+<pre><code>## [[1]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    12   30     4       5  0.155  0.386  0.672  0.219  0.218
+## 
+## [[2]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    12   30     4       5   0.22  0.617  0.897  0.319  0.329
+## 
+## [[3]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    12   30     4       5  0.335  0.779  0.989  0.457  0.471
+## 
+## [[4]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    12   30     4       5  0.149  0.387  0.665  0.213  0.211
+## 
+## [[5]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    12   30     4       5  0.219  0.594  0.893  0.315  0.313
+## 
+## [[6]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    12   30     4       5  0.311  0.775  0.979  0.448  0.473
+## 
+## [[7]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    20   30     4       5  0.216  0.574  0.875  0.294  0.321
+## 
+## [[8]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    20   30     4       5  0.355  0.815  0.987  0.491  0.518
+## 
+## [[9]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    20   30     4       5  0.476  0.939      1  0.663  0.701
+## 
+## [[10]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    20   30     4       5  0.212  0.601  0.884  0.298  0.316
+## 
+## [[11]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    20   30     4       5   0.35  0.827  0.984  0.486  0.519
+## 
+## [[12]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    20   30     4       5  0.498  0.949  0.999   0.67  0.701
+## 
+## [[13]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    28   30     4       5  0.265  0.723   0.95  0.397   0.42
+## 
+## [[14]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    28   30     4       5  0.436  0.925  0.999  0.623  0.645
+## 
+## [[15]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    28   30     4       5  0.624  0.992      1  0.799  0.845
+## 
+## [[16]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    28   30     4       5  0.289  0.735  0.961  0.392  0.418
+## 
+## [[17]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    28   30     4       5   0.44  0.938  0.998  0.615   0.67
+## 
+## [[18]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    28   30     4       5  0.613  0.988      1  0.805  0.848
+## 
+## [[19]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    36   30     4       5  0.346  0.829  0.987  0.487  0.527
+## 
+## [[20]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    36   30     4       5  0.544  0.979      1  0.727  0.778
+## 
+## [[21]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    36   30     4       5  0.727  0.997      1  0.886  0.925
+## 
+## [[22]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    36   30     4       5   0.34   0.81  0.991  0.479  0.483
+## 
+## [[23]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    36   30     4       5  0.519  0.968      1  0.729  0.785
+## 
+## [[24]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    36   30     4       5  0.744  0.999      1  0.881   0.92
+## 
+## [[25]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    44   30     4       5  0.436  0.898  0.999    0.6  0.634
+## 
+## [[26]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    44   30     4       5  0.652  0.989      1  0.814  0.858
+## 
+## [[27]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    44   30     4       5  0.813  0.999      1  0.944  0.955
+## 
+## [[28]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    44   30     4       5  0.416  0.887  0.992  0.559  0.584
+## 
+## [[29]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    44   30     4       5  0.631  0.987      1  0.804  0.855
+## 
+## [[30]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    44   30     4       5  0.823      1      1  0.938  0.961
+## 
+## [[31]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    52   30     4       5  0.471  0.932  0.999  0.646  0.661
+## 
+## [[32]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    52   30     4       5  0.703  0.993      1  0.864  0.904
+## 
+## [[33]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    52   30     4       5  0.875      1      1  0.977  0.986
+## 
+## [[34]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    52   30     4       5  0.485  0.941      1  0.663  0.701
+## 
+## [[35]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    52   30     4       5  0.695  0.995      1  0.856  0.899
+## 
+## [[36]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    52   30     4       5  0.885      1      1  0.975  0.984
+## 
+## [[37]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     0    60   30     4       5  0.509  0.955      1  0.703  0.747
+## 
+## [[38]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     0    60   30     4       5  0.757      1      1  0.919  0.948
+## 
+## [[39]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     0    60   30     4       5  0.919      1      1  0.989  0.991
+## 
+## [[40]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.6     3    60   30     4       5  0.531  0.959      1  0.709  0.737
+## 
+## [[41]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:    0.8     3    60   30     4       5  0.764  0.999      1  0.911  0.935
+## 
+## [[42]]
+##    effect trend sites npat waves periods pval_s pval_1 pval_2 pval_3 pval_4
+## 1:      1     3    60   30     4       5  0.922      1      1  0.987   0.99</code></pre>
+</div>
+</div>
+<div id="no-period-effects-fixed-or-random" class="section level1">
+<h1>No period effects (fixed or random)</h1>
+<p>Here, we explore what happens to relative estimates of power in the case where there is are <strong>no fixed or random period effects</strong>. We generate data for this by fixing the time trend <span class="math inline">\(\tau\)</span> to 0.</p>
+<pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 0, 20, 4, 5, 30, 6, 0, 44, 20)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<div id="models-1" class="section level2">
+<h2>Models</h2>
+<p>I am just showing the specification for Model 1 here, though the others are adjusted in similar fashion. The only change from the models in the previous section is that <span class="math inline">\(\alpha\)</span> replaces <span class="math inline">\(\alpha_t\)</span> in the modeling process.</p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha + \gamma_0 k + \gamma_1 Z_{jk} + \gamma_2 k Z_{jk} + c_j  + s_{ijt} + sp_{ijkt}
+\]</span></p>
+</div>
+<div id="estimation" class="section level2">
+<h2>Estimation</h2>
+<p>The model estimation removes the period effect and adds an intercept term:</p>
+<pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 0, 200, 4, 5, 30, 6, 0, 44, 20)
+
+fit_1 &lt;- lmer(y ~  p_fu * Ict + (1|id:site) + (1|site), data = dd)
+summary(fit_1)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: y ~ p_fu * Ict + (1 | id:site) + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 400806
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.405 -0.522  0.001  0.521  3.429 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  id:site  (Intercept) 43.6     6.60    
+##  site     (Intercept)  6.5     2.55    
+##  Residual             19.9     4.46    
+## Number of obs: 60000, groups:  id:site, 30000; site, 200
+## 
+## Fixed effects:
+##              Estimate Std. Error        df t value Pr(&gt;|t|)    
+## (Intercept) -1.39e-01   1.93e-01  2.33e+02   -0.72    0.472    
+## p_fu        -8.55e-02   5.15e-02  3.00e+04   -1.66    0.097 .  
+## Ict         -9.48e-02   1.01e-01  3.86e+04   -0.94    0.346    
+## p_fu:Ict     1.05e+00   7.28e-02  3.00e+04   14.41   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##          (Intr) p_fu   Ict   
+## p_fu     -0.134              
+## Ict      -0.261  0.256       
+## p_fu:Ict  0.094 -0.707 -0.362</code></pre>
+</div>
+<div id="power-estimates" class="section level2">
+<h2>Power estimates</h2>
+<p>In this case, the power estimates for the ANCOVA and change models (Models 3 and 4) are quite close to the power estimates for the difference in change model (Model 1). That is, if we do not model fixed time effects, the power of all three models is comparable.</p>
+</div>
+</div>
+<div id="all-random-effects" class="section level1">
+<h1>All random effects</h1>
+<p>To compare with previous results, we generate data with both fixed and random period effects:</p>
+<pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 3, 20, 4, 5, 30, 4, 2, 44, 20)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jk} + \gamma_2 k Z_{jk} + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
+\]</span></p>
+<pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 3, 200, 4, 5, 30, 4, 2, 44, 20)
+
+fit_1 &lt;- lmer(y ~  factor(s_per) - 1 + p_fu * Ict + (1|id:site) + (1|s_time:site) + (1|site), data = dd)
+ 
+summary(fit_1)</code></pre>
+<pre><code>## Linear mixed model fit by REML. t-tests use Satterthwaite&#39;s method [
+## lmerModLmerTest]
+## Formula: 
+## y ~ factor(s_per) - 1 + p_fu * Ict + (1 | id:site) + (1 | s_time:site) +  
+##     (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 401399
+## 
+## Scaled residuals: 
+##    Min     1Q Median     3Q    Max 
+## -3.088 -0.518  0.000  0.520  3.287 
+## 
+## Random effects:
+##  Groups      Name        Variance Std.Dev.
+##  id:site     (Intercept) 44.08    6.64    
+##  s_time:site (Intercept)  2.44    1.56    
+##  site        (Intercept)  3.91    1.98    
+##  Residual                19.74    4.44    
+## Number of obs: 60000, groups:  id:site, 30000; s_time:site, 1000; site, 200
+## 
+## Fixed effects:
+##                 Estimate Std. Error        df t value Pr(&gt;|t|)    
+## factor(s_per)0 -1.72e-01   2.03e-01  5.35e+02   -0.85     0.40    
+## factor(s_per)1  2.68e+00   2.11e-01  5.81e+02   12.72   &lt;2e-16 ***
+## factor(s_per)2  5.59e+00   2.32e-01  6.99e+02   24.05   &lt;2e-16 ***
+## factor(s_per)3  8.82e+00   2.64e-01  8.31e+02   33.38   &lt;2e-16 ***
+## factor(s_per)4  1.16e+01   3.03e-01  9.26e+02   38.26   &lt;2e-16 ***
+## p_fu            6.50e-02   5.13e-02  3.00e+04    1.27     0.21    
+## Ict             2.75e-01   2.28e-01  9.92e+02    1.21     0.23    
+## p_fu:Ict        9.34e-01   7.26e-02  3.00e+04   12.88   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Correlation of Fixed Effects:
+##             fc(_)0 fc(_)1 fc(_)2 fc(_)3 fc(_)4 p_fu   Ict   
+## fctr(s_pr)1  0.470                                          
+## fctr(s_pr)2  0.427  0.540                                   
+## fctr(s_pr)3  0.376  0.532  0.637                            
+## fctr(s_pr)4  0.327  0.513  0.645  0.725                     
+## p_fu        -0.126 -0.122 -0.110 -0.097 -0.085              
+## Ict         -0.014 -0.277 -0.490 -0.641 -0.741  0.113       
+## p_fu:Ict     0.089  0.086  0.078  0.069  0.060 -0.707 -0.159</code></pre>
+<p>The power estimates indicate that Model 1 is superior to Models 3 and 4:</p>
+</div>
