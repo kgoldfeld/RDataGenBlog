@@ -18,9 +18,9 @@ knitr::opts_chunk$set(echo = TRUE)
 options(digits = 2)
 ```
 
-Is it possible to reduce the sample size requirements of a stepped wedge cluster randomized trial simply by collecting baseline information? In a trial with randomization at the individual level, it *is* generally the case that if we are able to measure an outcome for subjects at two time periods, first at baseline and then at follow-up, we can reduce the overall sample size. But does this extend to (a) the context of cluster randomized trials generally, and (b) to stepped wedge designs more specifically? 
+Is it possible to reduce the sample size requirements of a stepped wedge cluster randomized trial simply by collecting baseline information? In a trial with randomization at the individual level, it *is* generally the case that if we are able to measure an outcome for subjects at two time periods, first at baseline and then at follow-up, we can reduce the overall sample size. But does this extend to (a) cluster randomized trials generally, and to (b) stepped wedge designs more specifically? 
 
-The answer to part (a) of the question is a definite "yes," as described in a 2012 paper *Teerenstra et al* (some more details on that below). As for part (b), two colleagues on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}, Monica Taljaard and Fan Li, and I have just started thinking about this. Ultimately, we hope to have an analytic solution that provides more formal guidance for stepped wedge designs; but to get things started, we thought we could explore a bit using simulation.
+The answer to (a) is a definite "yes," as described in a 2012 paper *Teerenstra et al* (some more details on that below). As for (b), two colleagues on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}, Monica Taljaard and Fan Li, and I have just started thinking about this. Ultimately, we hope to have an analytic solution that provides more formal guidance for stepped wedge designs; but to get things started, we thought we could explore a bit using simulation.
 
 ## Quick overview
 
@@ -28,9 +28,9 @@ Generally speaking, why might baseline measurements have any impact at all? The 
 
 It turns out that if we collect baseline QOL scores and can "control" for those measurements in some way (by conducting a repeated measures analysis, using ANCOVA, or assessing the difference itself as an outcome), we might be able to reduce the variability across study subjects sufficiently to give us a better chance at picking up the signal. Previously, I've written about [baseline covariate adjustment](https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/){target="_blank"} in the context of clinical trials where randomization is at the individual subject level; now we will turn to the case where randomization is at the cluster or site level.
 
-This post focuses on work already done to derive *design effects* for parallel cluster randomized trials that collect baseline measurements; we will get to stepped wedge designs in future posts. I described the [design effect](https://www.rdatagen.net/post/what-exactly-is-the-design-effect/){target="_blank"} pretty generally in an earlier post, but a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*, titled "A simple sample size formula for analysis of covariance in cluster randomized trials" provides a great foundation to understand how baseline measurements can impact sample sizes in clustered designs.
+This post focuses on work already done to derive *design effects* for parallel cluster randomized trials (CRTs) that collect baseline measurements; we will get to stepped wedge designs in future posts. I described the [design effect](https://www.rdatagen.net/post/what-exactly-is-the-design-effect/){target="_blank"} pretty generally in an earlier post, but a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*, titled "A simple sample size formula for analysis of covariance in cluster randomized trials" provides a great foundation to understand how baseline measurements can impact sample sizes in clustered designs.
 
-Here's a brief outline of what follows: after showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe and simulate a series of designs with cluster sizes of 30 subjects that require progressively fewer clusters but also provide 80% power under the same effect size and total variance assumptions: a simple cluster randomized that needs 64 sites, a cross-sectional pre-post design that needs 52, a repeated measures design needs that 38, and a repeated measures design that models follow-up outcomes only (i.e. uses an ANCOVA model) that requires only 32.
+Here's a brief outline of what follows: after showing an example based on a simple 2-arm randomized control trial with 350 subjects that has 80% power to detect a standardized effect size of 0.3, I describe and simulate a series of designs with cluster sizes of 30 subjects that require progressively fewer clusters but also provide 80% power under the same effect size and total variance assumptions: a simple CRT that needs 64 sites, a cross-sectional pre-post design that needs 52, a repeated measures design needs that 38, and a repeated measures design that models follow-up outcomes only (i.e. uses an ANCOVA model) that requires only 32.
 
 ## Simple RCT
 
@@ -129,7 +129,7 @@ mean(unlist(p_values) < 0.05)
 
 ## Parallel cluster randomized trial
 
-If we need to randomize at the site level (i.e., conduct a cluster randomized trial), we can describe the data generation process as
+If we need to randomize at the site level (i.e., conduct a CRT), we can describe the data generation process as
 
 $$Y_{ij} = \alpha + \delta Z_{j} + c_j + s_i$$ 
 
@@ -351,7 +351,7 @@ n <- 30
 r <- (n * rho * rho_c + (1-rho) * rho_s) / (1 + (n-1) * rho)
 ```
 
-The design effect for the cluster randomized trial without any baseline measurement was 5.35. With the two-cohort design, the design effect is reduced slightly:
+The design effect for the CRT without any baseline measurement was 5.35. With the two-cohort design, the design effect is reduced slightly:
 
 ```{r}
 (des_effect <- (1 + (n - 1) * rho) * 2 * (1 - r))
@@ -519,7 +519,7 @@ mean(unlist(p_values) < 0.05)
 
 ## Next steps
 
-These simulations confirmed the design effects derived by *Teerenstra et al*. In the next post, we will turn to baseline measurements in the context of a stepped wedge design, to see if these results translate to a more complex setting. The design effects themselves have not yet been derived, but those should soon follow. In the meantime, to get yourself psyched up for what is coming, you can read more generally about stepped wedge designs [here](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/intra-cluster-correlations-over-time/), [here](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/), [here](https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/), and [here](https://www.rdatagen.net/post/analyzing-the-open-cohort-stepped-wedge-trial-with-binary-outcomes/).
+These simulations confirmed the design effects derived by *Teerenstra et al*. In the next post, we will turn to baseline measurements in the context of a stepped wedge design, to see if these results translate to a more complex setting. The design effects themselves have not yet been derived. In the meantime, to get yourself psyched up for what is coming, you can read more generally about stepped wedge designs [here](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/intra-cluster-correlations-over-time/), [here](https://www.rdatagen.net/post/estimating-treatment-effects-and-iccs-for-stepped-wedge-designs/), [here](https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/), [here](https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/), and [here](https://www.rdatagen.net/post/analyzing-the-open-cohort-stepped-wedge-trial-with-binary-outcomes/).
 
 
 <p><small><font color="darkkhaki">
