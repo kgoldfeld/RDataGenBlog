@@ -17,6 +17,8 @@ draft: TRUE
 options(digits = 3)
 ```
 
+In the [previous post](), I described an incipient effort that I am undertaking with two colleagues, Monica Taljaard and Fan Li, to better understand the implications for collecting baseline measurements on sample size requirements for stepped wedge cluster randomized trials. (The three of us are on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}.) In that post, I conducted a series of simulations that illustrated the design effects in parallel cluster randomized trial designs that had been derived analytically in a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*. In this post, I am extending those simulations to stepped wedge trials, where design effects have yet to be derived; the actual derivation is the ultimate goal of this project.
+
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 RNGkind("L'Ecuyer-CMRG")
 set.seed(71918)
@@ -28,23 +30,10 @@ library(parallel)
 library(data.table)
 library(pwr)
 library(paletteer)
+library(gtsummary)
 ```
 
-# Data generation process
-
-The general data generating process used here allows for time period effects (specified as a time trend) as well as all the possible site and individual random effects.
-
-$$
-Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
-$$
-
-$Y_{ijkt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t$, $t \in \{0,\dots, T\}$; $k \in \{0, 1\}$, $k=0$ if the measurement is taken at baseline  and $k=1$ if the measurment is the follow-up. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. 
-
-The parameter $\tau$ is the general time trend. $\gamma$ is the treatment effect, which can only impact follow-up measurements. $c_j$ and $cp_{jt}$ are the site and site-time specific random effects with distributions $N(0, \sigma_c^2)$ and $N(0, \sigma_{cp}^2)$, respectively. $s_{ijt}$ is the subject-level effect (and is specific to period $t$ since the subject is only observed in that period), $s_{ijt} \sim N(0, \sigma_{s}^2)$. $sp_{ijkt}$ is the measurement noise, $sp_{ijkt} \sim N(0, \sigma_{sp}^2).$
-
-Here is the generalized code that implements this data generation process:
-
-```{r}
+```{r, echo = FALSE}
 base_swt <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, s_sp) {
   
   defC <- defData(varname = "c", formula = 0, variance = "..s_c")
@@ -80,24 +69,21 @@ base_swt <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s,
 }
 ```
 
-# No site-period random effects
+## Stepped wedge designs
 
-To start, we are focusing on a situation where there is no site-period effect, so that $cp_{jt} = 0$ for all $j$ and $t$. The effect size $\gamma = 1$ and the time trend $\tau = 3$. There will be 20 sites divided into 4 waves of 5 sites, with each wave starting in period $t=1$, and subsequent waves starting in each consecutive period. There will be 30 subjects for each site, each period. $\sigma_c^2 = 6$, $\sigma_{cp}^2 = 0$, $\sigma_s^2 = 44$, and $\sigma_{sp}^2 = 20.$
+At the end of the previous post, I provided links to a few earlier entries where I described stepped wedge designs in some detail. This [post](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is probably the best one that I've done to give an overview of the design.
 
-```{r}
+In short, in the stepped-wedge design, all clusters in a trial will receive the intervention at some point, but the start of the intervention will be staggered. The amount of time in each state (control or intervention) will differ for each cluster (or group of clusters if there are waves of more than one cluster starting up at the same time). In this design, time is divided into discrete data collection/phase-in periods. 
+
+In the figure below there are four waves of clusters, schematic figure, the light blue sections are periods during which the sites are in a control state, and the darker blue are periods during which the sites are in the intervention state. Each period in this case is 4 weeks long.
+
+```{r, echo = FALSE, fig.height=4}
 dd <- base_swt(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)
-```
 
-<br>
-
-**Standard stepped-wdege design - no baseline**
-
-The standard stepped-wedge design does not actually collect the the baseline measurement, so we only observe the single follow-up measurement for each subject.
-
-In the simple stepped-wedge design, clusters are randomized to start treatment in a specific period. Possible start periods for the intervention depend on the number of clusters and number of waves, as well as the interval between starting periods. In the example below, there will be 20 clusters divided in 4 waves (so 5 clusters per wave), and there are $t=5$ total observation periods, $t \in \{0, \dots, 4\}$, with the first wave starting the intervention at $t=1$ and the last wave starting the intervention at $t=4$. (We are phasing in a new wave every period.)
-
-```{r, echo=FALSE}
 dplot <- dd[p_fu == 1]
+dplot[, s_per := s_per + 1]
+dplot[, startTrt := startTrt + 1]
+
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
 
 ggplot(data = dplot, aes(y = y, x = s_per)) +
@@ -107,9 +93,79 @@ ggplot(data = dplot, aes(y = y, x = s_per)) +
   theme(panel.grid = element_blank(),
         legend.position = "none") +
   # scale_color_manual(values = c("#0078b3", "#b33b00")) +
-  scale_x_continuous(limits = c(-.4, 4.4), breaks = c(0:4), name = "period") +
+  scale_x_continuous(limits = c(0.4, 5.4), breaks = c(1:5), name = "period") +
   scale_colour_paletteer_d(palette = "wesanderson::Moonrise2")
 ```
+
+
+# Data generation process
+
+The general data generating process used here allows for time period effects (specified as a time trend) as well as all the possible cluster and individual random effects.
+
+$$
+Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
+$$
+
+$Y_{ijkt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t,$ $t \in \{0,\dots, T\};$ $k \in \{0, 1\}, \ k=0$ if the measurement is taken at baseline  and $k=1$ if the measurement is the follow-up. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. 
+
+The parameter $\tau$ is the general time trend. $\gamma$ is the treatment effect, which can only impact follow-up measurements. $c_j$ and $cp_{jt}$ are the cluster and cluster-period specific random effects with distributions $N(0, \sigma_c^2)$ and $N(0, \sigma_{cp}^2)$, respectively. $s_{ijt}$ is the subject-level effect (and is specific to period $t$ since the subject is only observed in that period), $s_{ijt} \sim N(0, \sigma_{s}^2)$. $sp_{ijkt}$ is the measurement noise, $sp_{ijkt} \sim N(0, \sigma_{sp}^2).$
+
+Here is the generalized code that implements this data generation process:
+
+```{r, eval = FALSE}
+base_swt <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, s_sp) {
+  
+  defC <- defData(varname = "c", formula = 0, variance = "..s_c")
+  defCP <- defDataAdd(varname = "c.p", formula = 0, variance = "..s_cp")
+  defS <- defDataAdd(varname = "s", formula = 0, variance = "..s_s")
+  defSP <- defDataAdd(varname = "y",
+    formula = "..trend * s_per + ..effect * Ict * p_fu + c + c.p + s", 
+    variance = "..s_sp"
+  )
+  
+  dsite <- genData(nsites, defC, id = "site")
+  
+  dper <- addPeriods(dsite, nPeriods = nperiods, idvars = "site", 
+                     timeid = "s_time", perName = "s_per")
+  dper <- addColumns(defCP, dper)
+  
+  dsw <- trtStepWedge(dper, "site", nWaves = nwaves, lenWaves = 1, 
+                      startPer = 1, perName = "s_per",
+                      grpName = "Ict")
+  
+  dpat <- genCluster(dper, cLevelVar = "s_time", 
+                     numIndsVar = n, level1ID = "id")
+  dpat <- addColumns(defS, dpat)
+  dpat <- addPeriods(dpat, nPeriods = 2, idvars = "id", timeid = "p_time", perName = "p_fu")
+
+  setkey(dpat, "s_time", "site", "s_per", "id")
+  dsw[, c("c", "c.p") := NULL]
+  setkey(dsw, "s_time", "site", "s_per")
+  
+  dpat <- merge(dpat, dsw)
+  setkey(dpat, "id", "p_fu")
+  dpat <- addColumns(defSP, dpat)
+}
+```
+
+
+
+# No cluster-period random effects
+
+To start, we are focusing on a situation where there is no cluster-period effect, so that $cp_{jt} = 0$ for all $j$ and $t$. The effect size $\gamma = 1$ and the time trend $\tau = 3$. There will be 20 clusters divided into 4 waves of 5 clusters, with each wave starting in period $t=1$, and subsequent waves starting in each consecutive period. There will be 30 subjects for each cluster, each period. $\sigma_c^2 = 6$, $\sigma_{cp}^2 = 0$, $\sigma_s^2 = 44$, and $\sigma_{sp}^2 = 20.$
+
+```{r}
+dd <- base_swt(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)
+```
+
+<br>
+
+**Standard stepped-wedge design - no baseline**
+
+The standard stepped-wedge design does not actually collect the the baseline measurement, so we only observe the single follow-up measurement for each subject.
+
+In the simple stepped-wedge design, clusters are randomized to start treatment in a specific period. Possible start periods for the intervention depend on the number of clusters and number of waves, as well as the interval between starting periods. In the example below, there will be 20 clusters divided in 4 waves (so 5 clusters per wave), and there are $t=5$ total observation periods, $t \in \{0, \dots, 4\}$, with the first wave starting the intervention at $t=1$ and the last wave starting the intervention at $t=4$. (We are phasing in a new wave every period.)
+
 
 **Stepped-wedge design with baseline measurement**
 
@@ -117,6 +173,10 @@ To extend the basic stepped-wedge design, we assume we observe individual measur
 
 ```{r, echo=FALSE}
 dplot <- copy(dd)
+
+dplot[, s_per := s_per + 1]
+dplot[, startTrt := startTrt + 1]
+
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
 dplot[, plotper := s_per - 0.5 + p_fu]
   
@@ -127,7 +187,7 @@ ggplot(data = dplot, aes(y = y, x = plotper)) +
     facet_grid(startTrt ~ sitef) +
     theme(panel.grid = element_blank(),
           legend.position = "none") +
-    scale_x_continuous(limits = c(-.75, 4.75), breaks = c(0:4), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2")
 
 ```
@@ -136,13 +196,13 @@ ggplot(data = dplot, aes(y = y, x = plotper)) +
 
 ### Simple stepped-wedge design
 
-The model for the simple stepped-wedge design under the assumption of no site-period random effects is
+The model for the simple stepped-wedge design under the assumption of no cluster-period random effects is
 
 $$
 Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j  + sp_{ijt}
 $$
 
-where $Y_{ijt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t$. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. The $\alpha_t\text{`s}$ are the period-specific fixed effects and $\gamma$ is the treatment effect. $c_j$ is the site specific random effects with distribution $N(0, \sigma_c^2)$. $sp_{ijt}$ is the subject-level effect or noise, $sp_{ijt} \sim N(0, \sigma_{s}^2)$ 
+where $Y_{ijt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t$. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. The $\alpha_t\text{`s}$ are the period-specific fixed effects and $\gamma$ is the treatment effect. $c_j$ is the cluster specific random effects with distribution $N(0, \sigma_c^2)$. $sp_{ijt}$ is the subject-level effect or noise, $sp_{ijt} \sim N(0, \sigma_{s}^2)$ 
 
 ### Stepped-wedge with baseline
 
@@ -150,7 +210,7 @@ We have a number of options for analyzing the stepped-wedge design with a baseli
 
 #### Model 1 - difference in change
 
-First, there is the model that is adapted from the *Teerenstra et al* paper, which is essentially a "difference in change from baseline" model. It is the essentially the same as the model suggested by Fan, though it makes slightly fewer assumptions. The inclusion $\gamma_0$ and $\gamma_1$ are there the adjust for any incidental imbalances due to randomization. (In this case ,and all others that follow, there is no site-period random effect $cp_{jt}$.)
+First, there is the model that is adapted from the *Teerenstra et al* paper, which is essentially a "difference in change from baseline" model. It is the essentially the same as the model suggested by Fan, though it makes slightly fewer assumptions. The inclusion $\gamma_0$ and $\gamma_1$ are there the adjust for any incidental imbalances due to randomization. (In this case ,and all others that follow, there is no cluster-period random effect $cp_{jt}$.)
 
 $$
 Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jt} + \gamma_2 k Z_{jt} + c_j  + s_{ijt} + sp_{ijkt}
@@ -190,25 +250,26 @@ In `R`, we can estimate each of thee models as follows
 
 ```{r, message=FALSE, warning=FALSE}
 dd <- base_swt(1, 3, 200, 4, 5, 30, 6, 0, 44, 20)
+dd[, period := factor(s_per, labels = c(1:5))]
 
 d_std <- dd[p_fu == 1]
+fit_std <-  lmer( y ~  period + Ict  - 1 + (1|site), data = d_std)
 
-fit_std <-  lmer( y ~  factor(s_per) - 1 + Ict  + (1|site), data = d_std)
-summary(fit_std)
+tbl_regression(fit_std, tidy_fun = broom.mixed::tidy)
 ```
 
 ### Baseline difference in change 
 
 ```{r , message=FALSE, warning=FALSE}
-fit_1 <- lmer(y ~  factor(s_per) - 1 + p_fu * Ict + (1|id:site) + (1|site), data = dd)
-summary(fit_1)
+fit_1 <- lmer(y ~  period - p_fu * Ict - 1 + (1|id:site) + (1|site), data = dd)
+tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)
 ```
 
 ### HH Model
 
 ```{r, message=FALSE, warning=FALSE}
-fit_2 <- lmer(y ~ factor(s_per) - 1 + p_fu:Ict + (1|id:site) + (1|site), data = dd)
-summary(fit_2)
+fit_2 <- lmer(y ~ period + p_fu:Ict  - 1 +  (1|id:site) + (1|site), data = dd)
+tbl_regression(fit_2, tidy_fun = broom.mixed::tidy)
 ```
 
 ### ANCOVA Model
@@ -219,8 +280,8 @@ dd_f <- dd[p_fu ==1, ]
 
 dd <- merge(dd_f, dd_b, by = "id")
 
-fit_3 <- lmer(y ~  factor(s_per) - 1 +  y0 + Ict  + (1|site), data = dd)
-summary(fit_3)
+fit_3 <- lmer(y ~  period +  y0 + Ict  - 1 + (1|site), data = dd)
+tbl_regression(fit_3, tidy_fun = broom.mixed::tidy)
 ```
 
 ### Change as outcome
@@ -229,15 +290,15 @@ summary(fit_3)
   
 dd[, d := y - y0]
 
-fit_4 <- lmer(d ~  factor(s_per) - 1 + Ict  + (1|site), data = dd)
-summary(fit_4)
+fit_4 <- lmer(d ~  period + Ict - 1 + (1|site), data = dd)
+tbl_regression(fit_4, tidy_fun = broom.mixed::tidy)
 ```
 
 ## Power analysis
 
-By repeatedly generate data sets, we can estimate the parameters using each of the models and compare the proportion of cases where the observied *p-value* is less than 0.05 to estimate the power of each modeling approach. The curves in the figure show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes).
+By repeatedly generate data sets, we can estimate the parameters using each of the models and compare the proportion of cases where the observed *p-value* is less than 0.05 to estimate the power of each modeling approach. The curves in the figure show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes).
 
-In this case, **with fixed period effects but no random site-specific period effects**, the *Teerenstra et al* model (Model 1) is considerably more powerful than both the ANCOVA and change models (Models 3 and 4).
+In this case, **with fixed period effects but no random cluster-specific period effects**, the *Teerenstra et al* model (Model 1) is considerably more powerful than both the ANCOVA and change models (Models 3 and 4).
 
 Note that in the data generation scenario with no fixed period effects (i.e. $\tau = 0$), I am still assuming fixed period effects in the model estimation (i.e. including $\alpha_t$).
 
@@ -282,8 +343,12 @@ dd <- base_swt(effect = 1, trend = 0, 20, 4, 5, 30, 6, 0, 44, 20)
 
 ```{r, echo=FALSE}
 dplot <- copy(dd)
+
+dplot[, s_per := s_per + 1]
+dplot[, startTrt := startTrt + 1]
+
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
-dplot[, plotper := s_per -0.5 + p_fu]
+dplot[, plotper := s_per - 0.5 + p_fu]
   
 ggplot(data = dplot, aes(y = y, x = plotper)) +
     geom_line(aes(group = id, color = factor(Ict)),
@@ -292,9 +357,8 @@ ggplot(data = dplot, aes(y = y, x = plotper)) +
     facet_grid(startTrt ~ sitef) +
     theme(panel.grid = element_blank(),
           legend.position = "none") +
-    scale_x_continuous(limits = c(-.75, 4.75), breaks = c(0:4), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2")
-
 ```
 
 ## Models
@@ -313,12 +377,12 @@ The model estimation removes the period effect and adds an intercept term:
 dd <- base_swt(effect = 1, trend = 0, 200, 4, 5, 30, 6, 0, 44, 20)
 
 fit_1 <- lmer(y ~  p_fu * Ict + (1|id:site) + (1|site), data = dd)
-summary(fit_1)
+tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)
 ```
 
 ## Power estimates
 
-In this case, the power estimates for the ANCOVA and change models (Models 3 and 4) are quite close to the power estimates for the difference in change model (Model 1). That is, if we do not model fixed time effects, the power of all three models is comparable.
+In this case, the power estimates for the ANCOVA and change models (Models 3 and 4) are quite close to the power estimates for the difference in change model (Model 1). That is, if we do not model fixed period effects, the power of all three models is comparable.
 
 ```{r, echo=FALSE, fig.height=2.5, fig.width=11, eval=TRUE}
 load("data/res_np.rda")
@@ -360,8 +424,10 @@ dd <- base_swt(effect = 1, trend = 3, 20, 4, 5, 30, 4, 2, 44, 20)
 
 ```{r, echo=FALSE}
 dplot <- copy(dd)
+dplot[, s_per := s_per + 1]
+dplot[, startTrt := startTrt + 1]
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
-dplot[, plotper := s_per -0.5 + p_fu]
+dplot[, plotper := s_per - 0.5 + p_fu]
   
 ggplot(data = dplot, aes(y = y, x = plotper)) +
     geom_line(aes(group = id, color = factor(Ict)),
@@ -370,7 +436,7 @@ ggplot(data = dplot, aes(y = y, x = plotper)) +
     facet_grid(startTrt ~ sitef) +
     theme(panel.grid = element_blank(),
           legend.position = "none") +
-    scale_x_continuous(limits = c(-.75, 4.75), breaks = c(0:4), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2")
 
 ```
@@ -381,10 +447,12 @@ $$
 
 ```{r , message=FALSE, warning=FALSE}
 dd <- base_swt(effect = 1, trend = 3, 200, 4, 5, 30, 4, 2, 44, 20)
+dd[, period := factor(s_per, labels = c(1, 2, 3, 4, 5))]
 
-fit_1 <- lmer(y ~  factor(s_per) - 1 + p_fu * Ict + (1|id:site) + (1|s_time:site) + (1|site), data = dd)
+fit_1 <- lmer(y ~  period + p_fu * Ict - 1 + (1|id:site) + (1|s_time:site) + (1|site), 
+  data = dd)
  
-summary(fit_1)
+tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)
 ```
 
 The power estimates indicate that Model 1 is superior to Models 3 and 4:
@@ -418,3 +486,10 @@ ggplot(data = dd, aes( y = value, x = sites)) +
   scale_colour_paletteer_d(palette = "wesanderson::Moonrise3")
 
 ```
+
+
+<p><small><font color="darkkhaki">
+Support:
+
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory ([NIA IMPACT Collaboratory](https://impactcollaboratory.org/)). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small></p>
