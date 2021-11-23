@@ -20,20 +20,23 @@ draft: TRUE
 <div id="stepped-wedge-designs" class="section level2">
 <h2>Stepped wedge designs</h2>
 <p>At the end of the previous post, I provided links to a few earlier entries where I described stepped wedge designs in some detail. This <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/" target="_blank">post</a> is probably the best one that I’ve done to give an overview of the design.</p>
-<p>In short, in the stepped-wedge design, all clusters in a trial will receive the intervention at some point, but the start of the intervention will be staggered. The amount of time in each state (control or intervention) will differ for each cluster (or group of clusters if there are waves of more than one cluster starting up at the same time). In this design, time is divided into discrete data collection/phase-in periods.</p>
-<p>In the figure below there are four waves of clusters, schematic figure, the light blue sections are periods during which the sites are in a control state, and the darker blue are periods during which the sites are in the intervention state. Each period in this case is 4 weeks long.</p>
+<p>In the stepped-wedge design, all clusters in a trial will receive the intervention at some point, but the start of the intervention will be staggered. The amount of time in each state (control or intervention) will differ for each cluster (or group of clusters if there are waves of more than one cluster starting up at the same time). In this design, time is divided into discrete data collection/phase-in periods.</p>
+<p>In the figure below there are four waves of clusters, with sets of five clusters in each wave. All waves are in the control condition in the first observation period, wave 1 starts the intervention in period 2, wave 2 starts in period 3, wave 3 in period 4, and the last wave starts in period 5. Data from individuals in each cluster are collected for all periods, regardless of intervention status. The points in the figure represent individual responses within each cluster and each time period.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
 </div>
-<div id="data-generation-process" class="section level1">
-<h1>Data generation process</h1>
-<p>The general data generating process used here allows for time period effects (specified as a time trend) as well as all the possible cluster and individual random effects.</p>
+<div id="data-generation-process" class="section level2">
+<h2>Data generation process</h2>
+<p>In order to accommodate a range of scenarios, I’ve written a general function that will be used in the data generating process. This function allows for time period effects (specified as a time trend) as well as all the possible cluster and individual random effects. Importantly, this function will generate two outcome measures for each subject within a specific cluster and time period.</p>
+<p>This is the general data generation process:</p>
 <p><span class="math display">\[
-Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
+Y_{ijkt} = \tau  (t-1) +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt},
 \]</span></p>
-<p><span class="math inline">\(Y_{ijkt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t,\)</span> <span class="math inline">\(t \in \{0,\dots, T\};\)</span> <span class="math inline">\(k \in \{0, 1\}, \ k=0\)</span> if the measurement is taken at baseline and <span class="math inline">\(k=1\)</span> if the measurement is the follow-up. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>.</p>
+<p>where <span class="math inline">\(Y_{ijkt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t,\)</span> <span class="math inline">\(t \in \{1,\dots, T\};\)</span> <span class="math inline">\(k \in \{0, 1\}, \ k=0\)</span> if the measurement is taken at baseline and <span class="math inline">\(k=1\)</span> if the measurement is the follow-up. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>. (There is no reason that the there needs to be a linear time trend - it is just what I am using here to easily generate time period effects.)</p>
 <p>The parameter <span class="math inline">\(\tau\)</span> is the general time trend. <span class="math inline">\(\gamma\)</span> is the treatment effect, which can only impact follow-up measurements. <span class="math inline">\(c_j\)</span> and <span class="math inline">\(cp_{jt}\)</span> are the cluster and cluster-period specific random effects with distributions <span class="math inline">\(N(0, \sigma_c^2)\)</span> and <span class="math inline">\(N(0, \sigma_{cp}^2)\)</span>, respectively. <span class="math inline">\(s_{ijt}\)</span> is the subject-level effect (and is specific to period <span class="math inline">\(t\)</span> since the subject is only observed in that period), <span class="math inline">\(s_{ijt} \sim N(0, \sigma_{s}^2)\)</span>. <span class="math inline">\(sp_{ijkt}\)</span> is the measurement noise, <span class="math inline">\(sp_{ijkt} \sim N(0, \sigma_{sp}^2).\)</span></p>
-<p>Here is the generalized code that implements this data generation process:</p>
+<p>Here is the generalized code that implements this data generation process. It is a little involved, because there are two longtinudinal processes that need to be combined - clusters are repeated over time and subjects are repeated over time within each cluster period.</p>
 <pre class="r"><code>base_swt &lt;- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, s_sp) {
+  
+  # define the cluster and subject level effects
   
   defC &lt;- defData(varname = &quot;c&quot;, formula = 0, variance = &quot;..s_c&quot;)
   defCP &lt;- defDataAdd(varname = &quot;c.p&quot;, formula = 0, variance = &quot;..s_cp&quot;)
@@ -43,21 +46,34 @@ Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
     variance = &quot;..s_sp&quot;
   )
   
+  # generate clusters
+  
   dsite &lt;- genData(nsites, defC, id = &quot;site&quot;)
+  
+  # generate cluster-period data
   
   dper &lt;- addPeriods(dsite, nPeriods = nperiods, idvars = &quot;site&quot;, 
                      timeid = &quot;s_time&quot;, perName = &quot;s_per&quot;)
   dper &lt;- addColumns(defCP, dper)
   
+  # make treatment assignments
+  
   dsw &lt;- trtStepWedge(dper, &quot;site&quot;, nWaves = nwaves, lenWaves = 1, 
                       startPer = 1, perName = &quot;s_per&quot;,
                       grpName = &quot;Ict&quot;)
   
+  # generate individual level data within each cluster
+  
   dpat &lt;- genCluster(dper, cLevelVar = &quot;s_time&quot;, 
                      numIndsVar = n, level1ID = &quot;id&quot;)
   dpat &lt;- addColumns(defS, dpat)
-  dpat &lt;- addPeriods(dpat, nPeriods = 2, idvars = &quot;id&quot;, timeid = &quot;p_time&quot;, perName = &quot;p_fu&quot;)
+  
+  # generate two observation periods for each subject - baseline and follow-up
+  
+  dpat &lt;- addPeriods(dpat, nPeriods=2, idvars=&quot;id&quot;, timeid=&quot;p_time&quot;, perName=&quot;p_fu&quot;)
 
+  # merge subjects with stepped wedge assignments and generate outcome
+  
   setkey(dpat, &quot;s_time&quot;, &quot;site&quot;, &quot;s_per&quot;, &quot;id&quot;)
   dsw[, c(&quot;c&quot;, &quot;c.p&quot;) := NULL]
   setkey(dsw, &quot;s_time&quot;, &quot;site&quot;, &quot;s_per&quot;)
@@ -67,66 +83,52 @@ Y_{ijkt} = \tau  t +  \gamma kZ_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt}
   dpat &lt;- addColumns(defSP, dpat)
 }</code></pre>
 </div>
-<div id="no-cluster-period-random-effects" class="section level1">
-<h1>No cluster-period random effects</h1>
+<div id="models-for-estimating-treatment-effects" class="section level2">
+<h2>Models for estimating treatment effects</h2>
+<p><strong>Model 1: Hussey &amp; Hughes type model with no baseline measurement</strong></p>
+<p>The model for the simple stepped-wedge design under the assumption of no cluster-period random effects is</p>
+<p><span class="math display">\[
+Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j + cp_{jt} + sp_{ijt}
+\]</span></p>
+<p>where <span class="math inline">\(Y_{ijt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t\)</span>. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>. The <span class="math inline">\(\alpha_t\text{`s}\)</span> are the period-specific fixed effects and <span class="math inline">\(\gamma\)</span> is the treatment effect. <span class="math inline">\(c_j\)</span> is the cluster specific random effects with distribution <span class="math inline">\(N(0, \sigma_c^2)\)</span>. <span class="math inline">\(sp_{ijt}\)</span> is the subject-level effect or noise, <span class="math inline">\(sp_{ijt} \sim N(0, \sigma_{s}^2)\)</span></p>
+<p>We have a number of options for analyzing the stepped-wedge design with a baseline measurement:</p>
+<p><strong>Model 2: HH extended to baseline measurement</strong></p>
+<p>This is essentially Fan’s model. <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are gone from the previous model, so we are assuming those are <span class="math inline">\(0\)</span>.</p>
+<p><a href="https://www.sciencedirect.com/science/article/pii/S1551714406000632" class="uri">https://www.sciencedirect.com/science/article/pii/S1551714406000632</a></p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha_t +  \gamma k Z_{jt}  + c_j + cp_{jt} + s_{ijt} + sp_{ijkt}
+\]</span></p>
+<p><strong>Model 3: Teerenstra et al difference in change model</strong></p>
+<p>First, there is the model that is adapted from the <em>Teerenstra et al</em> paper, which is essentially a “difference in change from baseline” model. It is the essentially the same as the model suggested by Fan, though it makes slightly fewer assumptions. The inclusion <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are there the adjust for any incidental imbalances due to randomization. (In this case ,and all others that follow, there is no cluster-period random effect <span class="math inline">\(cp_{jt}\)</span>.)</p>
+<p><span class="math display">\[
+Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jt} + \gamma_2 k Z_{jt} + c_j + cp_{jt} + s_{ijt} + sp_{ijkt}
+\]</span></p>
+<p>There are three different parameters from the traditional stepped-wedge model: <span class="math inline">\(\gamma_0\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\gamma_{1}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\gamma_{2}\)</span> is the difference in the change from baseline to follow-up between the two arms.</p>
+<p><strong>Model 4: ANCOVA</strong></p>
+<p>The third model is the ANCOVA model that adjusts each follow-up outcome with the observed baseline measurement <span class="math inline">\(Y_0.\)</span> Because we have only a single outcome per subject, the subject-specific effect <span class="math inline">\(sp_{ijkt}\)</span> disappears, and $s_{ijt} is now individual subject-level noise.</p>
+<p><span class="math display">\[
+Y_{ijt} = \alpha_t +  \beta Y_0 + \gamma Z_{jt}  + c_j + cp_{jt}  + s_{ijt}
+\]</span></p>
+<p><strong>Model 5: Change as outcome</strong></p>
+<p>The fourth model considers the change from baseline to follow-up (<span class="math inline">\(D_{ijt} = Y_{ij1t} - Y_{ij0t}\)</span>) as the outcome of interest:</p>
+<p><span class="math display">\[
+D_{ijt} = \alpha_t + \gamma Z_{jt}  + c_j + cp_{jt}  + s_{ijt}
+\]</span></p>
+</div>
+<div id="no-cluster-period-random-effects" class="section level2">
+<h2>No cluster-period random effects</h2>
 <p>To start, we are focusing on a situation where there is no cluster-period effect, so that <span class="math inline">\(cp_{jt} = 0\)</span> for all <span class="math inline">\(j\)</span> and <span class="math inline">\(t\)</span>. The effect size <span class="math inline">\(\gamma = 1\)</span> and the time trend <span class="math inline">\(\tau = 3\)</span>. There will be 20 clusters divided into 4 waves of 5 clusters, with each wave starting in period <span class="math inline">\(t=1\)</span>, and subsequent waves starting in each consecutive period. There will be 30 subjects for each cluster, each period. <span class="math inline">\(\sigma_c^2 = 6\)</span>, <span class="math inline">\(\sigma_{cp}^2 = 0\)</span>, <span class="math inline">\(\sigma_s^2 = 44\)</span>, and <span class="math inline">\(\sigma_{sp}^2 = 20.\)</span></p>
 <pre class="r"><code>dd &lt;- base_swt(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)</code></pre>
-<p><br></p>
 <p><strong>Standard stepped-wedge design - no baseline</strong></p>
-<p>The standard stepped-wedge design does not actually collect the the baseline measurement, so we only observe the single follow-up measurement for each subject.</p>
-<p>In the simple stepped-wedge design, clusters are randomized to start treatment in a specific period. Possible start periods for the intervention depend on the number of clusters and number of waves, as well as the interval between starting periods. In the example below, there will be 20 clusters divided in 4 waves (so 5 clusters per wave), and there are <span class="math inline">\(t=5\)</span> total observation periods, <span class="math inline">\(t \in \{0, \dots, 4\}\)</span>, with the first wave starting the intervention at <span class="math inline">\(t=1\)</span> and the last wave starting the intervention at <span class="math inline">\(t=4\)</span>. (We are phasing in a new wave every period.)</p>
+<p>Figure above</p>
 <p><strong>Stepped-wedge design with baseline measurement</strong></p>
 <p>To extend the basic stepped-wedge design, we assume we observe individual measurements at baseline (prior to any type of treatment) as well as at follow-up after treatment (two measurements per individual). <strong>The baseline and follow-up measurements are assumed to be collected in the same period <span class="math inline">\(k\)</span>.</strong> The baseline measurement is collected prior to randomization (so will by definition be under the control condition).</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
-<div id="models" class="section level2">
-<h2>Models</h2>
-<div id="simple-stepped-wedge-design" class="section level3">
-<h3>Simple stepped-wedge design</h3>
-<p>The model for the simple stepped-wedge design under the assumption of no cluster-period random effects is</p>
-<p><span class="math display">\[
-Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j  + sp_{ijt}
-\]</span></p>
-<p>where <span class="math inline">\(Y_{ijt}\)</span> is the outcome for subject <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> measured in period <span class="math inline">\(t\)</span>. <span class="math inline">\(Z_{jt}\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span> during period <span class="math inline">\(t\)</span>. The <span class="math inline">\(\alpha_t\text{`s}\)</span> are the period-specific fixed effects and <span class="math inline">\(\gamma\)</span> is the treatment effect. <span class="math inline">\(c_j\)</span> is the cluster specific random effects with distribution <span class="math inline">\(N(0, \sigma_c^2)\)</span>. <span class="math inline">\(sp_{ijt}\)</span> is the subject-level effect or noise, <span class="math inline">\(sp_{ijt} \sim N(0, \sigma_{s}^2)\)</span></p>
-</div>
-<div id="stepped-wedge-with-baseline" class="section level3">
-<h3>Stepped-wedge with baseline</h3>
-<p>We have a number of options for analyzing the stepped-wedge design with a baseline measurement:</p>
-<div id="model-1---difference-in-change" class="section level4">
-<h4>Model 1 - difference in change</h4>
-<p>First, there is the model that is adapted from the <em>Teerenstra et al</em> paper, which is essentially a “difference in change from baseline” model. It is the essentially the same as the model suggested by Fan, though it makes slightly fewer assumptions. The inclusion <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are there the adjust for any incidental imbalances due to randomization. (In this case ,and all others that follow, there is no cluster-period random effect <span class="math inline">\(cp_{jt}\)</span>.)</p>
-<p><span class="math display">\[
-Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jt} + \gamma_2 k Z_{jt} + c_j  + s_{ijt} + sp_{ijkt}
-\]</span></p>
-<p>There are three different parameters from the traditional stepped-wedge model: <span class="math inline">\(\gamma_0\)</span> is the change from baseline to follow-up in the control arm, <span class="math inline">\(\gamma_{1}\)</span> is the difference at baseline between control and treatment arms (we would expect this to be <span class="math inline">\(0\)</span> in a randomized trial), and <span class="math inline">\(\gamma_{2}\)</span> is the difference in the change from baseline to follow-up between the two arms.</p>
-</div>
-<div id="model-2---hh" class="section level4">
-<h4>Model 2 - HH</h4>
-<p>This is essentially Fan’s model. <span class="math inline">\(\gamma_0\)</span> and <span class="math inline">\(\gamma_1\)</span> are gone from the previous model, so we are assuming those are <span class="math inline">\(0\)</span>.</p>
-<p><span class="math display">\[
-Y_{ijkt} = \alpha_t +  \gamma k Z_{jt}  + c_j  + s_{ijt} + sp_{ijkt}
-\]</span></p>
-</div>
-<div id="model-3---ancova" class="section level4">
-<h4>Model 3 - ANCOVA</h4>
-<p>The third model is the ANCOVA model that adjusts each follow-up outcome with the observed baseline measurement <span class="math inline">\(Y_0.\)</span> Because we have only a single outcome per subject, the subject-specific effect <span class="math inline">\(sp_{ijkt}\)</span> disappears, and $s_{ijt} is now individual subject-level noise.</p>
-<p><span class="math display">\[
-Y_{ijt} = \alpha_t +  \beta Y_0 + \gamma Z_{jt}  + c_j  + s_{ijt}
-\]</span></p>
-</div>
-<div id="model-4---comparing-change" class="section level4">
-<h4>Model 4 - comparing change</h4>
-<p>The fourth model considers the change from baseline to follow-up (<span class="math inline">\(D_{ijt} = Y_{ij1t} - Y_{ij0t}\)</span>) as the outcome of interest:</p>
-<p><span class="math display">\[
-D_{ijt} = \alpha_t + \gamma Z_{jt}  + c_j  + s_{ijt}
-\]</span></p>
-</div>
-</div>
-</div>
-<div id="estimating-models" class="section level2">
-<h2>Estimating models</h2>
+<div id="estimating-models" class="section level3">
+<h3>Estimating models</h3>
 <p>In <code>R</code>, we can estimate each of thee models as follows</p>
-<div id="standard-stepped-wedge-design" class="section level3">
-<h3>Standard stepped wedge design</h3>
+<div id="standard-stepped-wedge-design" class="section level4">
+<h4>Standard stepped wedge design</h4>
 <pre class="r"><code>dd &lt;- base_swt(1, 3, 200, 4, 5, 30, 6, 0, 44, 20)
 dd[, period := factor(s_per, labels = c(1:5))]
 
@@ -538,8 +540,8 @@ tbl_regression(fit_std, tidy_fun = broom.mixed::tidy)</code></pre>
 </table>
 </div>
 </div>
-<div id="baseline-difference-in-change" class="section level3">
-<h3>Baseline difference in change</h3>
+<div id="baseline-difference-in-change" class="section level4">
+<h4>Baseline difference in change</h4>
 <pre class="r"><code>fit_1 &lt;- lmer(y ~  period - p_fu * Ict - 1 + (1|id:site) + (1|site), data = dd)
 tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)</code></pre>
 <div id="ifkxnshrvh" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
@@ -946,8 +948,8 @@ tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)</code></pre>
 </table>
 </div>
 </div>
-<div id="hh-model" class="section level3">
-<h3>HH Model</h3>
+<div id="hh-model" class="section level4">
+<h4>HH Model</h4>
 <pre class="r"><code>fit_2 &lt;- lmer(y ~ period + p_fu:Ict  - 1 +  (1|id:site) + (1|site), data = dd)
 tbl_regression(fit_2, tidy_fun = broom.mixed::tidy)</code></pre>
 <div id="qcvgcgbvgd" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
@@ -1358,8 +1360,8 @@ tbl_regression(fit_2, tidy_fun = broom.mixed::tidy)</code></pre>
 </table>
 </div>
 </div>
-<div id="ancova-model" class="section level3">
-<h3>ANCOVA Model</h3>
+<div id="ancova-model" class="section level4">
+<h4>ANCOVA Model</h4>
 <pre class="r"><code>dd_b &lt;- dd[p_fu ==0, .(id, y0 = y)]
 dd_f &lt;- dd[p_fu ==1, ]
 
@@ -1775,8 +1777,8 @@ tbl_regression(fit_3, tidy_fun = broom.mixed::tidy)</code></pre>
 </table>
 </div>
 </div>
-<div id="change-as-outcome" class="section level3">
-<h3>Change as outcome</h3>
+<div id="change-as-outcome" class="section level4">
+<h4>Change as outcome</h4>
 <pre class="r"><code>dd[, d := y - y0]
 
 fit_4 &lt;- lmer(d ~  period + Ict - 1 + (1|site), data = dd)
@@ -2186,28 +2188,28 @@ tbl_regression(fit_4, tidy_fun = broom.mixed::tidy)</code></pre>
 </div>
 </div>
 </div>
-<div id="power-analysis" class="section level2">
-<h2>Power analysis</h2>
+<div id="power-analysis" class="section level3">
+<h3>Power analysis</h3>
 <p>By repeatedly generate data sets, we can estimate the parameters using each of the models and compare the proportion of cases where the observed <em>p-value</em> is less than 0.05 to estimate the power of each modeling approach. The curves in the figure show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes).</p>
 <p>In this case, <strong>with fixed period effects but no random cluster-specific period effects</strong>, the <em>Teerenstra et al</em> model (Model 1) is considerably more powerful than both the ANCOVA and change models (Models 3 and 4).</p>
 <p>Note that in the data generation scenario with no fixed period effects (i.e. <span class="math inline">\(\tau = 0\)</span>), I am still assuming fixed period effects in the model estimation (i.e. including <span class="math inline">\(\alpha_t\)</span>).</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="1056" /></p>
 </div>
 </div>
-<div id="no-period-effects-fixed-or-random" class="section level1">
-<h1>No period effects (fixed or random)</h1>
+<div id="no-period-effects-fixed-or-random" class="section level2">
+<h2>No period effects (fixed or random)</h2>
 <p>Here, we explore what happens to relative estimates of power in the case where there is are <strong>no fixed or random period effects</strong>. We generate data for this by fixing the time trend <span class="math inline">\(\tau\)</span> to 0.</p>
 <pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 0, 20, 4, 5, 30, 6, 0, 44, 20)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-14-1.png" width="672" /></p>
-<div id="models-1" class="section level2">
-<h2>Models</h2>
+<div id="models" class="section level3">
+<h3>Models</h3>
 <p>I am just showing the specification for Model 1 here, though the others are adjusted in similar fashion. The only change from the models in the previous section is that <span class="math inline">\(\alpha\)</span> replaces <span class="math inline">\(\alpha_t\)</span> in the modeling process.</p>
 <p><span class="math display">\[
 Y_{ijkt} = \alpha + \gamma_0 k + \gamma_1 Z_{jk} + \gamma_2 k Z_{jk} + c_j  + s_{ijt} + sp_{ijkt}
 \]</span></p>
 </div>
-<div id="estimation" class="section level2">
-<h2>Estimation</h2>
+<div id="estimation" class="section level3">
+<h3>Estimation</h3>
 <p>The model estimation removes the period effect and adds an intercept term:</p>
 <pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 0, 200, 4, 5, 30, 6, 0, 44, 20)
 
@@ -2605,14 +2607,14 @@ tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)</code></pre>
 </table>
 </div>
 </div>
-<div id="power-estimates" class="section level2">
-<h2>Power estimates</h2>
+<div id="power-estimates" class="section level3">
+<h3>Power estimates</h3>
 <p>In this case, the power estimates for the ANCOVA and change models (Models 3 and 4) are quite close to the power estimates for the difference in change model (Model 1). That is, if we do not model fixed period effects, the power of all three models is comparable.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="1056" /></p>
 </div>
 </div>
-<div id="all-random-effects" class="section level1">
-<h1>All random effects</h1>
+<div id="all-random-effects" class="section level2">
+<h2>All random effects</h2>
 <p>To compare with previous results, we generate data with both fixed and random period effects:</p>
 <pre class="r"><code>dd &lt;- base_swt(effect = 1, trend = 3, 20, 4, 5, 30, 4, 2, 44, 20)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-18-1.png" width="672" /></p>
@@ -3049,7 +3051,10 @@ tbl_regression(fit_1, tidy_fun = broom.mixed::tidy)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-20-1.png" width="1056" /></p>
 <p>
 <p><small><font color="darkkhaki">
-Support:</p>
+References:</p>
+<p>Hussey, Michael A., and James P. Hughes. “Design and analysis of stepped wedge cluster randomized trials.” Contemporary clinical trials 28, no. 2 (2007): 182-191.</p>
+<p>Teerenstra, Steven, Sandra Eldridge, Maud Graff, Esther de Hoop, and George F. Borm. “A simple sample size formula for analysis of covariance in cluster randomized trials.” Statistics in medicine 31, no. 20 (2012): 2169-2178.</p>
+<p>Support:</p>
 This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
 </font></small>
 </p>
