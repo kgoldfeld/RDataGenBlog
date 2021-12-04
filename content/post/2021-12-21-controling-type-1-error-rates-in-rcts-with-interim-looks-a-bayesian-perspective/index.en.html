@@ -1,0 +1,229 @@
+---
+title: 'Controlling Type I error in RCTs with interim looks: a Bayesian perspective'
+author: Keith Goldfeld
+date: '2021-12-21'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Recently, a colleague submitted a paper describing the results of a Bayesian adaptive trial, where the research team estimated the probability of effectiveness at various points during the trial. This trial was designed to stop as soon as the probability of effectiveness exceeded a pre-specified threshold. The journal rejected the paper on the grounds that these repeated interim looks inflated the Type I error rate, and increased the chances that any conclusions drawn from the study could have been misleading. Was this a reasonable position for the journal editors to take?</p>
+<p>My colleague’s experience resonated with me, as I’ve been thinking a bit about how frequentist concepts like Type I error and statistical power should be considered in the context of studies that are using Bayesian designs and modeling. Although these frequentist concepts are not necessarily a natural logical or philosophical fit with the Bayesian approach, many reviewers, funders, and regulators will often require that the Bayesian design be justified by confirming control of Type I error at a pre-specified level.</p>
+<p>If we avoid this dichotomisation and simply report the poster- ior probability of benefit, then we could potentially avoid having to specify the type I error of a Bayesian design. <a href="https://link.springer.com/article/10.1186/s12874-020-01042-7" target="_blank">Ryan et al</a></p>
+<p>The Bayesian approach is based on determining the probability of a hypothesis with a model using an “a priori” probability that is then updated based on data. On the contrary, the classical hypothesis testing does not admit assigning a probability to the null hypothesis, but just either accepting or refusing it. The error-I type is the probability of wrongly refusing the null hypothesis when it is true. Thus, it is something completely different from the Bayesian logic (since probability is referred to making a mistake, not to the hypothesis itself). <a href="https://stats.stackexchange.com/questions/330916/why-is-the-concept-of-type-1-error-incompatible-with-bayesianism/330917" target="_blank">stackexchange</a></p>
+<p>The probability of a treatment not being effective is the probability of “regulator’s regret.” One must be very clear on what is conditioned upon (assumed) in computing this probability. Does one condition on the true effectiveness or does one condition on the available data? Type I error conditions on the treatment having no effect and does not entertain the possibility that the treatment actually worsens the patients’ outcomes. Can one quantify evidence for making a wrong decision if one assumes that all conclusions of non-zero effect are wrong up front because H0 was assumed to be true? Aren’t useful error probabilities the ones that are not based on assumptions about what we are assessing but rather just on the data available to us? <a href="https://www.fharrell.com/post/pvalprobs/" target="_blank">Harrell</a></p>
+<p>Thus to claim that the null P value is the probability that chance alone produced the observed association is completely backwards: The P value is a probability computed assuming chance was operating alone. The absurdity of the common backwards interpretation might be appreciated by pondering how the P value, which is a probability deduced from a set of assumptions (the statistical model), can possibly refer to the probability of those assumptions. <a href="https://link.springer.com/article/10.1007/s10654-016-0149-3" target="_blank">Greenland et al</a></p>
+<p>Is it correct to say that a study design with a multiple (possibly non-pre-specified) number of interim looks and a planned Bayesian analysis has an inflated Type 1 error rate (above 5%)? The answer is, of course, it depends. I conducted a number of simulation studies to better understand when we can justify multiple interim looks and when we cannot. The bottom line is that controlling Type 1 error requires tuning the prior distribution assumptions and the stopping rules. And the only way to know if Type 1 error is less than 5% is via simulation.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(cmdstanr)
+library(posterior)
+
+bayes_fit &lt;- function(dx, p_sigma, m_effect, decision_rule, x) {
+  
+  data_list &lt;- list(N=nrow(dx), y=dx$y, rx=dx$rx, p_mu=0, p_sigma=p_sigma)
+
+  fit &lt;- mod$sample(
+    data = data_list,
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    step_size = 0.1,
+    show_messages = FALSE
+  )
+  
+  df &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;beta&quot;)))
+  
+  return( ((mean(df$beta &gt; 0) &gt; 0.95) &amp; (mean(df$beta &gt; m_effect ) &gt; 0.5)) )  
+
+}
+
+def &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+  
+dd &lt;- genData(1000, def)
+
+mod &lt;- cmdstan_model(&quot;code/multiple.stan&quot;)
+
+bayes_ci &lt;- sapply(seq(100, 1000, by = 100), 
+    function(x) bayes_fit(dd[1:x], p_sigma = 10, m_effect = 0.2, x))</code></pre>
+<pre class="r"><code>bayes_ci</code></pre>
+<pre><code>##  [1] FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE</code></pre>
+<pre class="r"><code>bayes_effect &lt;- any(bayes_ci)</code></pre>
+<div id="scenarios" class="section level3">
+<h3>Scenarios</h3>
+<p><a href="#addendum">addendum</a></p>
+<p>I conducted a number of simulations under different scenarios, assuming a continuously distributed outcome measure <span class="math inline">\(Y\)</span>, where <span class="math inline">\(Y\sim N(0, 1)\)</span> in both arms of a RCT.</p>
+<p>I considered a large and large sample size:</p>
+<ul>
+<li>1000 subjects, with interim looks every 100 subjects</li>
+<li>160 subjects, with interim looks every 20 subjects starting after the 80th subject has been enrolled</li>
+</ul>
+<p>For the decision criteria, I considered cases with one or two criteria. And in the case with two criteria, I considered three possible thresholds:</p>
+<ul>
+<li><span class="math inline">\(P(\delta &gt; 0) &gt; 95\%\)</span></li>
+<li><span class="math inline">\(P(\delta &gt; 0) &gt; 95\%\)</span> <strong>and</strong> <span class="math inline">\(P(\delta &gt; \theta) &gt; 50\%\)</span>, <span class="math inline">\(\theta \in \{0.2, 0.3, 0.4\}\)</span></li>
+</ul>
+<p>The simple estimation model to assess the effect size was <span class="math inline">\(Y_i = \alpha + \delta Z_i,\)</span> where <span class="math inline">\(Y_i\)</span> is the outcome and <span class="math inline">\(Z_i\)</span> is a treatment indicator, <span class="math inline">\(Z \in \{0,1\}\)</span>. <span class="math inline">\(\delta\)</span> is the treatment effect (and <span class="math inline">\(\delta = 0\)</span> is used in the data generation process).</p>
+<p>For the Bayesian models, I assumed three different prior distribution assumptions for <span class="math inline">\(\delta\)</span>, <span class="math inline">\(\delta \sim t_{\text{student}}(\text{df}=3, 0, \sigma)\)</span>, <span class="math inline">\(\sigma \in \{1, 5, 10\}\)</span></p>
+</div>
+<div id="results" class="section level3">
+<h3>Results</h3>
+<p>First, here are the estimates of the Type 1 error rate using only a single criteria for the threshold, comparing the frequentist analysis (without any adjustment for interim looks) and the Bayesian analysis. At both sample size levels, the Bayesian analysis has a slightly lower Type 1 error rate, although in both cases it is considerably inflated beyond 5%:</p>
+<pre><code>##    p_sigma m_effect  freq bayes
+## 1:       1        0 0.199 0.163
+## 2:       5        0 0.199 0.175
+## 3:      10        0 0.199 0.163</code></pre>
+<pre><code>##    p_sigma m_effect  freq bayes
+## 1:       1        0 0.122 0.111
+## 2:       5        0 0.127 0.118
+## 3:      10        0 0.130 0.115</code></pre>
+<p>Introducing the second criteria in this case substantially lowers the Type 1 error rate, particularly when the threshold for the second criteria is more conservative:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Ryan, Elizabeth G., Kristian Brock, Simon Gates, and Daniel Slade. “Do we need to adjust for interim analyses in a Bayesian adaptive trial design?.” BMC medical research methodology 20, no. 1 (2020): 1-9.</p>
+<p>Greenland, Sander, Stephen J. Senn, Kenneth J. Rothman, John B. Carlin, Charles Poole, Steven N. Goodman, and Douglas G. Altman. “Statistical tests, P values, confidence intervals, and power: a guide to misinterpretations.” European journal of epidemiology 31, no. 4 (2016): 337-350.</p>
+</font></small>
+</p>
+<p><a name="addendum"></a></p>
+<p> </p>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(parallel)
+library(cmdstanr)
+library(posterior)
+library(rslurm)
+
+### Two functions to estimate effect size parameters
+
+freq_fit &lt;- function(dx) {
+  
+  lmfit &lt;- lm(y ~ rx, data = dx)
+  coef(summary(lmfit))[&quot;rx&quot;, &quot;Pr(&gt;|t|)&quot;]
+  
+}
+
+bayes_fit &lt;- function(dx, p_sigma, m_effect, decision_rule, x) {
+  
+  data_list &lt;- list(N=nrow(dx), y=dx$y, rx=dx$rx, p_mu=0, p_sigma=p_sigma)
+
+  fit &lt;- mod$sample(
+    data = data_list,
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 500,
+    iter_sampling = 2500,
+    step_size = 0.1,
+    show_messages = FALSE
+  )
+  
+  df &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;beta&quot;)))
+  
+  if (decision_rule == 1) {
+    return((mean(df$beta &gt; 0) &gt; 0.95))
+  } else { # decision_rule == 2
+    return( ((mean(df$beta &gt; 0) &gt; 0.95) &amp; (mean(df$beta &gt; m_effect ) &gt; 0.5)) )  
+  }
+}
+
+### Function to estimate models at different time points
+
+seq_mods &lt;- function(dx, seq, iter, p_sigma, decision_rule, m_effect) {
+  
+  freq_ps &lt;- sapply(seq(start, end, by = by), function(x) freq_fit(dx[1:x]))
+  freq_effect &lt;- any(freq_ps &lt; 0.05)
+  
+  bayes_ci &lt;- sapply(seq(start, end, by = by), 
+    function(x) bayes_fit(dx[1:x], p_sigma, m_effect, decision_rule, x))
+  bayes_effect &lt;- any(bayes_ci)
+  
+  return(data.table(seq, iter, p_sigma, m_effect, decision_rule, freq_effect, bayes_effect))
+  
+}
+
+### Function to generate data and estimate parameters
+
+s_replicate &lt;- function(iter, p_sigma, decision_rule, m_effect, seq) {
+  
+  set_cmdstan_path(path = &quot;/gpfs/.../cmdstan/2.25.0&quot;)
+  
+  def &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+  def &lt;- defData(def, varname = &quot;y&quot;, formula = 0, variance = 1, dist = &quot;normal&quot;)
+  
+  dd &lt;- genData(end, def)
+  
+  seq_mods(dd, seq, iter, p_sigma, decision_rule, m_effect)
+  
+}
+
+### Set simulation parameters
+
+scenario_dt &lt;- function(...) {
+  argdt &lt;- data.table(expand.grid(...))
+  argdt[, seq := .I]
+  argdt[]
+}
+
+iter &lt;- c(1:1000)
+p_sigma &lt;- c(1, 5, 10)
+decision_rule = 2
+m_effect &lt;- c(0.2, 0.3, 0.4) # if decision_rule = 2
+# decision_rule = 1
+# m_effect &lt;- 0
+
+start &lt;- 100L
+end &lt;- 1000L
+by &lt;- 100L
+
+scenarios &lt;- scenario_dt(
+  iter = iter, 
+  p_sigma = p_sigma, 
+  decision_rule = decision_rule,
+  m_effect = m_effect
+)
+
+### Compile stan code
+
+set_cmdstan_path(path = &quot;/gpfs/.../cmdstan/2.25.0&quot;)
+mod &lt;- cmdstan_model(&quot;multiple.stan&quot;)
+
+### Set rslurm arguments
+
+sopts &lt;- list(time = &#39;12:00:00&#39;, partition = &quot;cpu_short&quot;, `mem-per-cpu` = &quot;5G&quot;)
+sobjs &lt;- c(&quot;seq_mods&quot;, &quot;freq_fit&quot;, &quot;bayes_fit&quot;, &quot;mod&quot;, &quot;start&quot;, &quot;end&quot;, &quot;by&quot;)
+
+### Replicate over iterations
+
+sjob &lt;- slurm_apply(
+  f = s_replicate, # the function
+  params = scenarios, # a data frame
+  jobname = &#39;mult_i&#39;,
+  nodes = 50, 
+  slurm_options = sopts,
+  global_objects = sobjs,
+  submit = TRUE
+)
+
+### Collect the results and save them
+
+res &lt;- get_slurm_out(sjob, outtype = &#39;table&#39;, wait = TRUE)
+save(res, file = &quot;/gpfs/.../mult.rda&quot;)</code></pre>
+</div>

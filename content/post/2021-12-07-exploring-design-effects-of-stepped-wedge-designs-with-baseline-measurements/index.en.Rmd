@@ -17,7 +17,7 @@ draft: TRUE
 options(digits = 2)
 ```
 
-In the [previous post](https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/){target="_blank"}, I described an incipient effort that I am undertaking with two colleagues, Monica Taljaard and Fan Li, to better understand the implications for collecting baseline measurements on sample size requirements for stepped wedge cluster randomized trials. (The three of us are on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}.) In that post, I conducted a series of simulations that illustrated the design effects in parallel cluster randomized trial designs that had been derived analytically in a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*. In this post, I am extending those simulations to stepped wedge trials, where design effects have yet to be derived; the actual derivation is the ultimate goal of this project.
+In the [previous post](https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/){target="_blank"}, I described an incipient effort that I am undertaking with two colleagues, Monica Taljaard and Fan Li, to better understand the implications for collecting baseline measurements on sample size requirements for stepped wedge cluster randomized trials. (The three of us are on the [Design and Statistics Core](https://impactcollaboratory.org/design-and-statistics-core/){target="_blank"} of the [NIA IMPACT Collaboratory](https://impactcollaboratory.org/){target="_blank"}.) In that post, I conducted a series of simulations that illustrated the design effects in parallel cluster randomized trials derived analytically in a [paper](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.5352){target="_blank"} by *Teerenstra et al*. In this post, I am extending those simulations to stepped wedge trials; the hope is that the design effects can be formally derived some point soon.
 
 ```{r, warning=FALSE, message=FALSE, echo=FALSE}
 RNGkind("L'Ecuyer-CMRG")
@@ -40,7 +40,7 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
   defCP <- defDataAdd(varname = "c.p", formula = 0, variance = "..s_cp")
   defS <- defDataAdd(varname = "s", formula = 0, variance = "..s_s")
   defSP <- defDataAdd(varname = "y",
-    formula = "..trend * s_per + ..effect * Z * p_fu + c + c.p + s", 
+    formula = "..trend * s_per + ..effect * Z * k + c + c.p + s", 
     variance = "..s_sp"
   )
   
@@ -57,14 +57,14 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
   dpat <- genCluster(dper, cLevelVar = "s_time", 
                      numIndsVar = n, level1ID = "id")
   dpat <- addColumns(defS, dpat)
-  dpat <- addPeriods(dpat, nPeriods = 2, idvars = "id", timeid = "p_time", perName = "p_fu")
+  dpat <- addPeriods(dpat, nPeriods = 2, idvars = "id", timeid = "p_time", perName = "k")
 
   setkey(dpat, "s_time", "site", "s_per", "id")
   dsw[, c("c", "c.p") := NULL]
   setkey(dsw, "s_time", "site", "s_per")
   
   dpat <- merge(dpat, dsw)
-  setkey(dpat, "id", "p_fu")
+  setkey(dpat, "id", "k")
   dpat <- addColumns(defSP, dpat)
 }
 ```
@@ -75,12 +75,12 @@ At the end of the previous post, I provided links to a few earlier entries where
 
 In the stepped-wedge design, all clusters in a trial will receive the intervention at some point, but the start of the intervention at different sites will be staggered. The amount of time in each state (control or intervention) will differ for each cluster (or group of clusters if there are waves of more than one cluster starting up at the same time). In this design, time is divided into discrete data collection/phase-in periods. 
 
-In the figure below there are four waves of clusters, with sets of five clusters in each wave. All waves are in the control condition in the first observation period, wave 1 starts the intervention in period 2, wave 2 starts in period 3, wave 3 in period 4, and the last wave starts in period 5. Data from individuals in each cluster are collected for all periods, regardless of intervention status. The points in the figure represent individual (follow-up) responses within each cluster and time period.
+In the figure below there are four waves of clusters (the rows), with sets of five clusters (the columns) in each wave. All waves are in the control condition in the first observation period, Wave 1 starts the intervention in period 2, Wave 2 starts in period 3, Wave 3 in period 4, and the last wave starts in period 5. Data from individuals in each cluster are collected for all periods, regardless of intervention status. The points in the figure represent individual (follow-up) responses within each cluster and time period.
 
 ```{r, echo = FALSE, fig.height=4}
 dd <- base_sw(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)
 
-dplot <- dd[p_fu == 1]
+dplot <- dd[k == 1]
 dplot[, s_per := s_per + 1]
 dplot[, startTrt := startTrt + 1]
 
@@ -93,7 +93,7 @@ ggplot(data = dplot, aes(y = y, x = s_per)) +
   theme(panel.grid = element_blank(),
         legend.position = "none") +
   # scale_color_manual(values = c("#0078b3", "#b33b00")) +
-  scale_x_continuous(limits = c(0.4, 5.4), breaks = c(1:5), name = "period") +
+  scale_x_continuous(limits = c(0.4, 5.4), breaks = c(1:5), name = "t") +
   scale_colour_paletteer_d(palette = "wesanderson::Moonrise2")
 ```
 
@@ -107,9 +107,9 @@ $$
 Y_{ijkt} = \tau  (t-1) +  \gamma k Z_{jt}   + c_j  + cp_{jt} + s_{ijt} + sp_{ijkt},
 $$
 
-where $Y_{ijkt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t,$ $t \in \{1,\dots, T\};$ $k \in \{0, 1\}, \ k=0$ if the measurement is taken at baseline  and $k=1$ if the measurement is the follow-up. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. (There is no reason that the there needs to be a linear time trend - it is just what I am using here to easily generate time period effects.)
+where $Y_{ijkt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t,$ $t \in \{1,\dots, T\};$ $k \in \{0, 1\}, \ k=0$ if the measurement is taken at baseline  and $k=1$ if the measurement is the follow-up. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. 
 
-The parameter $\tau$ is the general time trend. $\gamma$ is the treatment effect, which can only impact follow-up measurements. $c_j$ and $cp_{jt}$ are the cluster and cluster-period specific random effects with distributions $N(0, \sigma_c^2)$ and $N(0, \sigma_{cp}^2)$, respectively. $s_{ijt}$ is the subject-level effect (and is specific to period $t$ since the subject is only observed in that period), $s_{ijt} \sim N(0, \sigma_{s}^2)$. $sp_{ijkt}$ is the measurement noise, $sp_{ijkt} \sim N(0, \sigma_{sp}^2).$
+The parameter $\tau$ is the general time trend. (The linear time trend is not a requirement - it is just what I am using here to easily generate time period effects.) $\gamma$ is the treatment effect, which can only impact follow-up measurements. $c_j$ and $cp_{jt}$ are the cluster and cluster-period specific random effects with distributions $N(0, \sigma_c^2)$ and $N(0, \sigma_{cp}^2)$, respectively. $s_{ijt}$ is the subject-level effect (and is specific to period $t$ since the subject is only observed in that period), $s_{ijt} \sim N(0, \sigma_{s}^2)$. $sp_{ijkt}$ is the measurement noise, $sp_{ijkt} \sim N(0, \sigma_{sp}^2).$
 
 The <a href="#addendum">code</a> itself is a little involved, because there are two longitudinal processes that need to be combined - clusters are repeated over time and subjects are repeated over time within each cluster period. In addition, there are two possible layers of cluster and subject random effects.
 
@@ -142,7 +142,7 @@ dplot[, s_per := s_per + 1]
 dplot[, startTrt := startTrt + 1]
 
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
-dplot[, plotper := s_per - 0.5 + p_fu]
+dplot[, plotper := s_per - 0.5 + k]
   
 p_no <- ggplot(data = dplot, aes(y = y, x = plotper)) +
     geom_line(aes(group = id, color = factor(Z)),
@@ -153,7 +153,7 @@ p_no <- ggplot(data = dplot, aes(y = y, x = plotper)) +
           legend.position = "none",
           plot.title = element_text(size = 10, face = "bold"),
           axis.text = element_text(size = 7)) +
-    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "t") +
     scale_y_continuous(limits = c(-50, 50)) +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2") +
     ggtitle("no period effects: base_sw(1, 0, 10, 2, 5, 30, 6, 0, 44, 20)")
@@ -168,7 +168,7 @@ dplot[, s_per := s_per + 1]
 dplot[, startTrt := startTrt + 1]
 
 dplot[, sitef := factor(site, labels = c(1:5)), keyby = startTrt]
-dplot[, plotper := s_per - 0.5 + p_fu]
+dplot[, plotper := s_per - 0.5 + k]
   
 p_fixedtime <- ggplot(data = dplot, aes(y = y, x = plotper)) +
     geom_line(aes(group = id, color = factor(Z)),
@@ -179,7 +179,7 @@ p_fixedtime <- ggplot(data = dplot, aes(y = y, x = plotper)) +
           legend.position = "none",
           plot.title = element_text(size = 10, face = "bold"),
           axis.text = element_text(size = 7)) +
-    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "t") +
     scale_y_continuous(limits = c(-50, 50)) +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2") +
     ggtitle("no random period effects: base_sw(1, 3, 10, 2, 5, 30, 6, 0, 44, 20)")
@@ -193,7 +193,7 @@ dplot <- dd_3[startTrt <= 2]
 dplot[, s_per := s_per + 1]
 dplot[, startTrt := startTrt + 1]
 dplot[, sitef := factor(site,labels = c(1:5)), keyby = startTrt]
-dplot[, plotper := s_per - 0.5 + p_fu]
+dplot[, plotper := s_per - 0.5 + k]
   
 p_all <- ggplot(data = dplot, aes(y = y, x = plotper)) +
     geom_line(aes(group = id, color = factor(Z)),
@@ -204,7 +204,7 @@ p_all <- ggplot(data = dplot, aes(y = y, x = plotper)) +
           legend.position = "none",
           plot.title = element_text(size = 10, face = "bold"),
           axis.text = element_text(size = 7)) +
-    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "period") +
+    scale_x_continuous(limits = c(0.25, 5.75), breaks = c(1:5), name = "t") +
     scale_y_continuous(limits = c(-50, 50)) +
     scale_colour_paletteer_d(palette = "wesanderson::Moonrise2") +
     ggtitle("random cluster-period effects: base_sw(1, 3, 10, 2, 5, 30, 4, 2, 44, 20)")
@@ -216,42 +216,42 @@ ggpubr::ggarrange(p_no, p_fixedtime, p_all, nrow = 3)
 
 ## Models for estimating treatment effects
 
-Presented with a data set, there are many ways we can choose to analyze it. Which model we pick depends in large part on the structure of the data and the assumptions we are willing to make about the data generation process. Here, we are limiting ourselves to five models, all of which are linear mixed effects models. Ideally, we will choose the model that provides us with the most information given the data we have, and we hope these explorations might help clarify which of these five models is our best bet.
+Of course, given a data set, there are many ways we can choose to analyze it. Which model we pick depends in large part on the structure of the data and the assumptions we are willing to make about the data generation process. Here, we describe five models, all of which are linear mixed effects models. Ideally, we will choose the one that provides the most information given the data on hand, and we hope these explorations might help clarify which of these is our best bet.
 
-To start, we are focusing on a situation where there is no cluster-period effect (Scenario 2 from above), so that $cp_{jt} = 0$ for all $j$ and $t$. The true effect size $\gamma = 1$ and the time trend $\tau = 3$. There will be 20 clusters divided into 4 waves of 5 clusters, with each wave starting in period $t=1$, and subsequent waves starting in each consecutive period. There will be 30 subjects for each cluster, each period. $\sigma_c^2 = 6$, $\sigma_{cp}^2 = 0$, $\sigma_s^2 = 44$, and $\sigma_{sp}^2 = 20.$ (See the second part of the <a href="#addendum">addendum</a> for examples from Scenarios 1 and 3.)
+To start, we are focusing on a situation where there is no cluster-period effect (Scenario 2 from above), so that $cp_{jt} = 0$ for all $j$ and $t$. The true effect size $\gamma = 1$ and the time trend $\tau = 3$. There will be 20 clusters divided into 4 waves of 5 clusters, with each wave starting in period $t=1$, and the intervention is rolled out in periods 2 through 5, just as in the figure at the top. There will be 30 subjects for each cluster, each period. $\sigma_c^2 = 6$, $\sigma_{cp}^2 = 0$, $\sigma_s^2 = 44$, and $\sigma_{sp}^2 = 20.$ (See the second part of the <a href="#addendum">addendum</a> for examples from Scenarios 1 and 3.)
 
-Here is another, larger data set generated under these assumptions:
+Here is a data set generated under these assumptions:
 
 ```{r, message=FALSE, warning=FALSE}
 dd <- base_sw(1, 3, 20, 4, 5, 30, 6, 0, 44, 20)
-dd[, period := factor(s_per, labels = c(1:5))]
+dd[, t := factor(s_per, labels = c(1:5))]
 
 dd
 ```
 
-And here is the data set that we will actually be able to observe in the real world, which will be used to estimate the models:
+And here is a subset of the data that we will actually be able to observe in the real world, which will be used to estimate the models:
 
 ```{r}
-dd[, .(id, site, period, p_fu, Z, y)]
+dd[, .(id, site, t, k, Z, y)]
 ```
 
-Here is a description of each of the five models, along with code to estimate the model:
+Here is a description of each of the five models, along with code to estimate the models:
 
 **Model 1: Hussey & Hughes model with no baseline measurement**
 
 If we do not have access to the baseline data (or for some reason, choose to ignore it in the modeling), we could fit the stepped wedge model described by [Hussey & Hughes](https://www.sciencedirect.com/science/article/pii/S1551714406000632){target="_blank"}:
 
 $$
-Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j + sp_{ijt},
+Y_{ijt} = \alpha_t + \gamma Z_{jt} + c_j + s_{ijt},
 $$
 
-where $Y_{ijt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t$. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. The $\alpha_t\text{`s}$ are the period-specific fixed effects and $\gamma$ is the treatment effect. $c_j$ is the cluster specific random effects with distribution $N(0, \sigma_c^2)$. $sp_{ijt}$ is the subject-level effect or noise, $sp_{ijt} \sim N(0, \sigma_{s}^2).$ Since there is only a single measurement for each subject, there is only a single subject-level effect. And because we have assumed no cluster-period random effects, $cp_{jt}$ is not included in the model (and will also be the case for the subsequent models described below).
+where $Y_{ijt}$ is the outcome for subject $i$ in cluster $j$ measured in period $t$. $Z_{jt}$ is a treatment indicator for cluster $j$ during period $t$. The $\alpha_t\text{'s}$ are the period-specific fixed effects and $\gamma$ is the treatment effect. $c_j$ is the cluster specific random effects with distribution $N(0, \sigma_c^2)$. $s_{ijt}$ is the subject-level effect or noise, $s_{ijt} \sim N(0, \sigma_{s}^2).$ Since there is only a single measurement for each subject, there is only a single subject-level effect. And because we have assumed no cluster-period random effects, $cp_{jt}$ is not included in the model (and will also be the case for the other models described below).
 
 This model can be estimated using the `lmer` function in package `lme4`. Note that we are using only the follow-up data in the model estimation:
 
 ```{r, message=FALSE, warning=FALSE}
-d_std <- dd[p_fu == 1]
-fit_1 <-  lmer( y ~  period + Z  - 1 + (1|site), data = d_std)
+d_std <- dd[k == 1]
+fit_1 <-  lmer( y ~  t + Z  - 1 + (1|site), data = d_std)
 ```
 
 ```{r}
@@ -274,7 +274,7 @@ where $Y_{ijkt}$ is outcome $k$ for subject $i$ in cluster $j$ measured in perio
 Once again, the model estimates recover the true values pretty well:
 
 ```{r, message=FALSE, warning=FALSE}
-fit_2 <- lmer(y ~ period + p_fu:Z  - 1 +  (1|id:site) + (1|site), data = dd)
+fit_2 <- lmer(y ~ t + k:Z  - 1 +  (1|id:site) + (1|site), data = dd)
 ```
 
 ```{r, echo=FALSE}
@@ -290,10 +290,10 @@ $$
 Y_{ijkt} = \alpha_t + \gamma_0 k + \gamma_1 Z_{jt} + \gamma_2 k Z_{jt} + c_j + s_{ijt} + sp_{ijkt}
 $$
 
-This is essentially the same as *Model 2*, though this model makes slightly fewer assumptions. In particular, *Model 3* includes the additional parameters $\gamma_0$ and $\gamma_1$, where $\gamma_0$ is the change from baseline to follow-up in the control arm and $\gamma_{1}$ is the difference at baseline between control and treatment arms (we would expect this to be $0$ in a randomized trial). $\gamma_{2}$ is the difference in the change from baseline to follow-up between the two arms. In *Model 2*, we essentially make the assumption that both $\gamma_0 = 0$ and $\gamma_1=0$, which is probably true on average in a randomized trial with no secular trend between baseline and follow-up measurements (and is certainly true in our simulated data generation process). In this case, under the assumption of randomization and no within-period secular trend, $\gamma_2$ should be equivalent to $\gamma$ in *Model 2*.
+This is essentially the same as *Model 2*, though this expanded model makes slightly fewer assumptions. In particular, *Model 3* includes the additional parameters $\gamma_0$ and $\gamma_1$, where $\gamma_0$ is the change from baseline to follow-up in the control arm and $\gamma_{1}$ is the difference at baseline between control and treatment arms (we would expect this to be $0$ in a randomized trial). $\gamma_{2}$ is the difference in the change from baseline to follow-up between the two arms. In *Model 2*, we essentially make the assumption that both $\gamma_0 = 0$ and $\gamma_1=0$, which is probably true on average in a randomized trial with no secular trend between baseline and follow-up measurements (and is certainly true in our simulated data generation process). In this case, under the assumption of randomization and no within-period secular trend, $\gamma_2$ should be equivalent to $\gamma$ in *Model 2*.
 
 ```{r , message=FALSE, warning=FALSE}
-fit_3 <- lmer(y ~  period + p_fu * Z - 1 + (1|id:site) + (1|site), data = dd)
+fit_3 <- lmer(y ~  t + k * Z - 1 + (1|id:site) + (1|site), data = dd)
 ```
 
 ```{r, echo=FALSE}
@@ -305,19 +305,19 @@ The notable difference between the the *Model 2* and *Model 3* estimates is that
 
 **Model 4: ANCOVA**
 
-The next model is an ANCOVA model that adjusts each follow-up outcome $Y_1$ with the observed baseline measurement $Y_0.$ Because we have only a single outcome per subject, the subject-specific effect $sp_{ijkt}$ disappears, and $s_{ijt} is now individual subject-level noise.
+The next model is an ANCOVA model that adjusts each follow-up outcome $Y_1$ with the observed baseline measurement $Y_0.$ Because we have only a single outcome per subject, the subject-specific effect $sp_{ijkt}$ disappears, and $s_{ijt}$ is now individual subject-level noise.
 
 $$
 Y_{ijt} = \alpha_t +  \beta Y_0 + \gamma Z_{jt}  + c_j + s_{ijt}
 $$
 
 ```{r, message=FALSE, warning=FALSE}
-dd_b <- dd[p_fu ==0, .(id, y0 = y)]
-dd_f <- dd[p_fu ==1, ]
+dd_b <- dd[k ==0, .(id, y0 = y)]
+dd_f <- dd[k ==1, ]
 
 dd <- merge(dd_f, dd_b, by = "id")
 
-fit_4 <- lmer(y ~  period +  y0 + Z  - 1 + (1|site), data = dd)
+fit_4 <- lmer(y ~  t +  y0 + Z  - 1 + (1|site), data = dd)
 ```
 
 ```{r, echo=FALSE}
@@ -336,7 +336,7 @@ $$
 ```{r, message=FALSE, warning=FALSE}
 dd[, d := y - y0]
 
-fit_5 <- lmer(d ~  period + Z - 1 + (1|site), data = dd)
+fit_5 <- lmer(d ~  t + Z - 1 + (1|site), data = dd)
 ```
 
 ```{r, echo=FALSE}
@@ -492,7 +492,7 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
   defCP <- defDataAdd(varname = "c.p", formula = 0, variance = "..s_cp")
   defS <- defDataAdd(varname = "s", formula = 0, variance = "..s_s")
   defSP <- defDataAdd(varname = "y",
-    formula = "..trend * s_per + ..effect * Z * p_fu + c + c.p + s", 
+    formula = "..trend * s_per + ..effect * Z * k + c + c.p + s", 
     variance = "..s_sp"
   )
   
@@ -520,7 +520,7 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
   
   # generate two observation periods for each subject - baseline and follow-up
   
-  dpat <- addPeriods(dpat, nPeriods=2, idvars="id", timeid="p_time", perName="p_fu")
+  dpat <- addPeriods(dpat, nPeriods=2, idvars="id", timeid="p_time", perName="k")
 
   # merge subjects with stepped wedge assignments and generate outcome
   
@@ -529,7 +529,7 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
   setkey(dsw, "s_time", "site", "s_per")
   
   dpat <- merge(dpat, dsw)
-  setkey(dpat, "id", "p_fu")
+  setkey(dpat, "id", "k")
   dpat <- addColumns(defSP, dpat)
 }
 ```
@@ -550,7 +550,7 @@ $$
 ```{r , message=FALSE, warning=FALSE}
 dd <- base_sw(effect = 1, trend = 0, 20, 4, 5, 30, 6, 0, 44, 20)
 
-fit_1a <- lmer(y ~  p_fu * Z + (1|id:site) + (1|site), data = dd)
+fit_1a <- lmer(y ~  k * Z + (1|id:site) + (1|site), data = dd)
 ```
 
 ```{r, echo=FALSE}
@@ -568,9 +568,9 @@ $$
 
 ```{r , message=FALSE, warning=FALSE}
 dd <- base_sw(effect = 1, trend = 3, 20, 4, 5, 30, 4, 2, 44, 20)
-dd[, period := factor(s_per, labels = c(1, 2, 3, 4, 5))]
+dd[, t := factor(s_per, labels = c(1, 2, 3, 4, 5))]
 
-fit_2a <- lmer(y ~  period + p_fu * Z - 1 + (1|id:site) + (1|s_time:site) + (1|site), 
+fit_2a <- lmer(y ~  t + k * Z - 1 + (1|id:site) + (1|s_time:site) + (1|site), 
   data = dd)
 ```
 
