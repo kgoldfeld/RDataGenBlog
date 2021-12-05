@@ -350,7 +350,9 @@ The ultimate goal of simulating data under different scenarios is to compare how
 
 By repeatedly generate data sets, we can estimate the parameters using each of the models and compare the overall proportion of data sets where the observed *p-value* is less than 0.05 to evaluate the power of each modeling approach. We have generated data under a range of effect size and time trend assumptions, as well as under the different random effect assumptions to see if relative power changes across different sets of assumptions.
 
-The curves in the figures show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes). First up is Scenario 1:
+The simulations were conducted under a range of sample size assumptions (we assumed between 12 and 60 clusters) as well as two different time trends. (See the last section of the <a href="#addendum">addendum</a> for example code used for the power analysis.) Power was estimated for each set of assumptions using 1500 data sets.
+
+First up is Scenario 1:
 
 ```{r, echo=FALSE, fig.height=2.5, fig.width=11, eval=TRUE}
 load("data/res_np.rda")
@@ -384,7 +386,7 @@ ggplot(data = dd, aes( y = value, x = sites)) +
 
 ```
 
-In the case without any fixed or random period effects, there really is no difference between *Models 3, 4*, and *5*; power appears to be consistent under the different scenarios. *Model 2*, the Hussey & Hughes model for baseline and follow-up measures, has the most power; this is not surprising, given that the model has an embedded set of simplifying assumptions relative to *Model 3* (see above). On the flip side, if those assumptions are violated, the *Model 3* estimates for the treatment effect may be biased, so it is not the obvious choice. On the other end of the spectrum, *Model 1* that ignores the baseline measures provides the least power; it seems pretty clear that if the two measurements are available, it would be unwise to throw out one of them.
+The curves in the figures show estimated power under a range of effect size (the columns of plots), time trends (the rows of plots) and sample size assumptions (the x-axes). In the case without any fixed or random period effects, there really is no difference between *Models 3, 4*, and *5*; power appears to be consistent under the different scenarios. *Model 2*, the Hussey & Hughes model for baseline and follow-up measures, has the most power; this is not surprising, given that the model has an embedded set of simplifying assumptions relative to *Model 3* (see above). On the flip side, if those assumptions are violated, the *Model 3* estimates for the treatment effect may be biased, so it is not the obvious choice. On the other end of the spectrum, *Model 1* that ignores the baseline measures provides the least power; it seems pretty clear that if the two measurements are available, it would be unwise to throw out one of them.
 
 The relative weakness of *Model 1* and relative strength (though potential bias) of *Model 2* persist in the remaining two scenarios (below), so the interesting question is how the remaining three models fare. In the second scenario, where there are fixed period effects but no random period effects, differences emerge. *Model 3*, the difference in change or Teerenstra model, appears to have more power than the ANCOVA or change models across all effect sizes and secular trends.
 
@@ -481,7 +483,7 @@ This work was supported in part by the National Institute on Aging (NIA) of the 
 
 ## Addendum
 
-### General data generation code: function `base_sw`
+### (A) General data generation code: function `base_sw`
 
 ```{r, eval = FALSE}
 base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, s_sp) {
@@ -534,8 +536,7 @@ base_sw <- function(effect, trend, nsites, nwaves, nperiods, n, s_c, s_cp, s_s, 
 }
 ```
 
-
-### Model 3 under Scenarios 1 and 3
+### (B) Model 3 under Scenarios 1 and 3
 
 The modeling examples above were based on Scenario 2 assumptions. Here is *Model 3* under Scenarios 1 and 3. (The other models would be described and implemented in similar fashion.)
 
@@ -579,4 +580,117 @@ tbl_regression(fit_2a, tidy_fun = broom.mixed::tidy) %>%
    modify_footnote(ci ~ NA, abbreviation = TRUE)
 ```
 
-<br>
+### (C) Code to estimate statistical power
+
+Here is the code to estimate statistical power of each model under a range of parameter assumptions, assuming Scenario 2 with fixed period effects. The estimation was conducted using a high performance computing cluster, because the replication process is computationally intensive.
+
+```{r eval=FALSE}
+library(simstudy)
+library(data.table)
+library(slurmR)
+
+s_single_rep <- function(argsvec) {
+  
+  list2env(as.list(argsvec), envir = environment())
+
+  dd <- base_sw(effect, trend, sites, waves, periods, npat, 6, 0, 44, 20)
+  
+  # Model 1
+  
+  d_std <- dd[k == 1]
+  fit_1 <-  lmer( y ~  t + Z  - 1 + (1|site), data = d_std)  
+  pval_1 <- coef(summary(fit_1))["Z", "Pr(>|t|)"]
+  
+  # Model 2
+  
+  fit_2 <- lmer(y ~ t + k:Z  - 1 +  (1|id:site) + (1|site), data = dd)
+  pval_2 <- coef(summary(fit_2))["k:Z", "Pr(>|t|)"]
+  
+  # Model 3
+  
+  fit_3 <- lmer(y ~  t + k * Z - 1 + (1|id:site) + (1|site), data = dd)
+  pval_3 <- coef(summary(fit_3))["k:Z", "Pr(>|t|)"]
+  
+  # Model 4
+  
+  dd_b <- dd[p_fu == 0, .(id, y0 = y)]
+  dd_f <- dd[p_fu == 1, ]
+  dd_a <- merge(dd_f, dd_b, by = "id")
+  
+  fit_4 <- lmer(y ~  t + k * Z - 1 + (1|id:site) + (1|site), data = dd_a)
+  pval_4 <- coef(summary(fit_4))["Z", "Pr(>|t|)"]
+  
+  # Model 5
+  
+  dd[, d := y - y0]
+
+  fit_5 <- lmer(d ~  t + Z - 1 + (1|site), data = dd)
+  pval_5 <- coef(summary(fit_5))["Z", "Pr(>|t|)"]
+  
+  ###
+  
+  data.table(pval_1, pval_2, pval_3, pval_4, pval_5)
+  
+}
+
+s_replicate <- function(argsvec) {
+  
+  model_results <- rbindlist(
+    parallel::mclapply(
+      X = 1:1500, 
+      FUN = function(x) s_single_rep(argsvec), 
+      mc.cores = 8)
+  )
+  
+  #--- summary statistics ---#
+  
+  power <- model_results[, .(pval_1 = mean(pval_1 <= 0.05),
+                             pval_2 = mean(pval_2 <= 0.05),
+                             pval_3 = mean(pval_3 <= 0.05),
+                             pval_4 = mean(pval_4 <= 0.05),
+                             pval_5 = mean(pval_5 <= 0.05)
+  )]
+  
+  summary_stats <- data.table(t(argsvec), power)
+  
+  return(summary_stats) # summary_stats is a data.table}
+
+}
+
+### Set simulation parameters
+
+scenario_list <- function(...) {
+  argmat <- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+effect <- 1
+trend <- c(0, 3)
+sites <- c(12, 20, 28, 36, 44, 52, 60)
+npat <- 30
+waves <- 4
+periods = 5
+
+scenarios <- scenario_list(effect = effect, trend = trend, 
+  sites = sites, npat=npat, waves = waves, periods = periods)
+
+### Execute simulation
+
+job <- Slurm_lapply(
+  X = scenarios, 
+  FUN = s_replicate, 
+  njobs = min(length(scenarios), 90L), 
+  mc.cores = 8L,
+  job_name = "i_swt",
+  tmp_path = "/gpfs/.../scratch",
+  plan = "wait",
+  sbatch_opt = list(time = "03:00:00", partition = "cpu_short"),
+  export = c("simple_swt", "base_swt", "s_single_rep"),
+  overwrite = TRUE
+)
+
+### Gather and save results
+
+res <- Slurm_collect(job)
+save(res, file = "/gpfs/.../res.rda")
+```
