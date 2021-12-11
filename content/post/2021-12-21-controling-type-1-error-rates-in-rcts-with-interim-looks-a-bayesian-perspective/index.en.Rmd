@@ -222,18 +222,20 @@ d_at_0 <- function(dens){
 dnear0 <- sapply(x_dens, function(a) d_at_0(a))
 dnear0 <- data.table(n = 1:10, x = 0, xend = 0, y = 0, yend = dnear0)
 
-fill <- "#a1be97"
+fill <- "#96281B"
 
 ggplot(data = df_dens, aes(x=x, y = y)) +
   geom_line(color = "grey90") +
-  geom_area(fill = fill, alpha = .3) +
-  geom_area(data = subset(df_dens, x >= q95), fill = fill, alpha = .5) +
-  geom_segment(data = dnear0, aes(x=x, xend = xend, y = y, yend = yend), 
-    color = "white", size = .5) +
+  geom_area(fill = fill, alpha = .5) +
+  geom_area(data = subset(df_dens, x >= q95), fill = fill, alpha = 1) +
+  geom_vline(xintercept = 0, color = "grey96") +
+  # geom_segment(data = dnear0, aes(x=x, xend = xend, y = y, yend = yend),
+  #  color = "white", size = .5) +
   theme(panel.grid = element_blank()) +
   scale_y_continuous(name = "density") +
-  facet_wrap(~I(n*100), nrow = 2) + 
-  xlab(expression(beta))
+  scale_x_continuous(breaks = c(-0.5, 0, 0.5)) +
+  xlab(expression(beta)) +
+  facet_wrap(~I(n*100), nrow = 2)
 ```
 
 In practice, all we need to do is check whether *any* of the looks has resulted in a "success". In this case, there were no successes:
@@ -279,8 +281,6 @@ sumres <- res[, .(freq = mean(freq_effect), bayes = mean(bayes_effect)), keyby =
 sumres
 ```
 
-
-
 ### Two crieteria
 
 It is pretty clear in this simple scenario the single Bayesian criterion might not satisfy reviewers looking for control at the 5% level, so we might need to use a modified approach. The next set of simulations explore the double decision rule. In addition to the sample size variation and different prior distribution assumptions, I also considered three possible thresholds for the second criteria in exploring impacts on Type I error rates:
@@ -288,6 +288,25 @@ It is pretty clear in this simple scenario the single Bayesian criterion might n
 $$P(\beta > 0) > 95\% \ \ \textbf{and} \ \ P(\beta > \theta) > 50\%, \ \theta \in \{0.2, 0.3, 0.4\}$$
 
 Introducing the second criteria in this case substantially lowers the Type 1 error rate, particularly when the threshold for the second criteria is more conservative:
+
+```{r, fig.height = 4,echo=FALSE}
+load("data/mult_160_d2.rda")
+
+res <- data.table(res)
+sumres <- res[, .(freq = mean(freq_effect), bayes = mean(bayes_effect)), keyby = .(p_sigma, m_effect)]
+
+ggplot(data = sumres[p_sigma != 20], aes(y = bayes, x=factor(m_effect))) +
+  geom_line(aes(group = p_sigma, color = factor(p_sigma))) +
+  geom_point(aes(color = factor(p_sigma))) +
+  scale_y_continuous(limits = c(0, 0.15), breaks = seq(0.05, .15, by = 0.05), 
+                     name = "Type 1 error rate") +
+  theme(panel.grid.minor = element_blank(),
+        plot.title = element_text(size = 11, face="bold")) +
+  xlab("Standardized effect size for threshold") +
+  scale_color_paletteer_d("awtools::a_palette", name = "sd of prior", 
+                          guide = guide_legend(reverse = TRUE)) +
+  ggtitle("Type I error rates based on 160 subjects/5 interim looks")
+```
 
 ```{r, fig.height = 4, echo=FALSE}
 load("data/mult_1000_d2.rda")
@@ -308,24 +327,7 @@ ggplot(data = sumres[p_sigma != 20], aes(y = bayes, x=factor(m_effect))) +
   ggtitle("Type I error rates based on 1000 subjects/10 interim looks")
 ```
 
-```{r, fig.height = 4,echo=FALSE}
-load("data/mult_160_d2.rda")
 
-res <- data.table(res)
-sumres <- res[, .(freq = mean(freq_effect), bayes = mean(bayes_effect)), keyby = .(p_sigma, m_effect)]
-
-ggplot(data = sumres[p_sigma != 20], aes(y = bayes, x=factor(m_effect))) +
-  geom_line(aes(group = p_sigma, color = factor(p_sigma))) +
-  geom_point(aes(color = factor(p_sigma))) +
-  scale_y_continuous(limits = c(0, 0.15), breaks = seq(0.05, .15, by = 0.05), 
-                     name = "Type 1 error rate") +
-  theme(panel.grid.minor = element_blank(),
-        plot.title = element_text(size = 11, face="bold")) +
-  xlab("Standardized effect size for threshold") +
-  scale_color_paletteer_d("awtools::a_palette", name = "sd of prior", 
-                          guide = guide_legend(reverse = TRUE)) +
-  ggtitle("Type I error rates based on 160 subjects/5 interim looks")
-```
 
 
 <a href="#addendum">addendum</a>
