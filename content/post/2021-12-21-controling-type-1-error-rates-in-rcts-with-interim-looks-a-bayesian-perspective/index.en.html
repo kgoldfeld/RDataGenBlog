@@ -19,26 +19,26 @@ draft: TRUE
 <p>Recently, a colleague submitted a paper describing the results of a Bayesian adaptive trial where the research team estimated the probability of effectiveness at various points during the trial. This trial was designed to stop as soon as the probability of effectiveness exceeded a pre-specified threshold. The journal rejected the paper on the grounds that these repeated interim looks inflated the Type I error rate, and increased the chances that any conclusions drawn from the study could have been misleading. Was this a reasonable position for the journal editors to take?</p>
 <p>My colleague’s experience resonated with me, as I’ve been thinking a bit about how frequentist concepts like Type I error rates and statistical power should be considered in the context of studies that are using Bayesian designs and modeling. Although these frequentist probabilities are not necessarily a natural logical or philosophical fit with the Bayesian approach, many reviewers, funders, and regulators will often require that the Bayesian design be justified by confirming control of Type I error at a pre-specified level.</p>
 <p>My first inclination, of course, was to do a quick simulation to see if the journal’s concerns had any merit. So, I generated lots of data sets with two treatment arms but no treatment effect and simulated interim looks for each data set; my goal was to see how frequently we would be misled by the findings to draw unwarranted conclusions. Spoiler alert: the editor had reasons to be concerned; however, if we make some modifications to the evaluation criteria, we may be able to alleviate some of those concerns. This post documents the process and shows some results.</p>
-<div id="a-little-philosophy" class="section level3">
-<h3>A little philosophy</h3>
-<p>I think any post of Bayesian models, p-values, and Type I errors - even one focused on simulation - would be remiss without at least some discussion of underlying philosophical differences between the two approaches. To start, this statement pulled from <a href="https://stats.stackexchange.com/questions/330916/why-is-the-concept-of-type-1-error-incompatible-with-bayesianism/330917" target="_blank">stackexchange</a> succinctly describes a key conflict:</p>
+<div id="a-little-philosophy" class="section level2">
+<h2>A little philosophy</h2>
+<p>Any post describing Bayesian models, p-values, and Type I errors - even one focused on simulation - would be remiss without at least some discussion of underlying philosophical differences between the two approaches. To start, this <a href="https://stats.stackexchange.com/questions/330916/why-is-the-concept-of-type-1-error-incompatible-with-bayesianism/330917" target="_blank">statement</a> pulled from succinctly describes a key conflict:</p>
 <blockquote>
-<p>The Bayesian approach is based on determining the probability of a hypothesis with a model using an “a priori” probability that is then updated based on data. On the contrary, [in] classical hypothesis testing … the error-I type is the probability of wrongly refusing the null hypothesis when it is true. Thus, [the frequentist approach] is completely different from Bayesian logic (since probability is referred to making a mistake, not to the hypothesis itself).</p>
+<p>The Bayesian approach is based on determining the probability of a hypothesis with a model using an “a priori” probability that is then updated based on data. On the contrary, [in] classical hypothesis testing … the error-I type is the probability of wrongly refusing the null hypothesis when it is true. Thus, [frequentist logic] is completely different from Bayesian logic (since probability is referred to making a mistake, not to the hypothesis itself).</p>
 </blockquote>
 <p>So, the Bayesian approach is concerned with estimating <span class="math inline">\(P(hypothesis \ | \ data)\)</span>, whereas the frequentist <em>p-value</em> is an estimate of <span class="math inline">\(P(data \ | \ null \ hypothesis)\)</span>, quite different animals and it isn’t obvious they can be reconciled. Indeed, as Frank Harrell <a href="https://www.fharrell.com/post/pvalprobs/" target="_blank">points</a> out, there is a logical inconsistency with <em>assuming</em> that a particular (null) hypothesis is true and then trying to draw conclusions about that very same hypothesis:</p>
 <blockquote>
 <p>The probability of a treatment not being effective is the probability of ``regulator’s regret.’’ One must be very clear on what is conditioned upon (assumed) in computing this probability. Does one condition on the true effectiveness or does one condition on the available data? Type I error conditions on the treatment having no effect … Can one quantify evidence for making a wrong decision if one assumes that all conclusions of non-zero effect are wrong up front because <span class="math inline">\(H_0\)</span> was assumed to be true? <strong>Aren’t useful error probabilities the ones that are not based on assumptions about what we are assessing but rather just on the data available to us?</strong> [emphasis added]</p>
 </blockquote>
 <p>In addition to Harrell’s <a href="https://www.fharrell.com/post/pvalprobs/" target="_blank">post</a>, there is a paper by <a href="https://link.springer.com/article/10.1007/s10654-016-0149-3" target="_blank">Greenland et al</a> that describes how statistical tests, confidence intervals, and statistical power can easily be misinterpreted and abused. However, these points of view have not been fully adopted by the scientific community more broadly, and Type I error rates and statistical power are still the predominant way of evaluating study designs.</p>
-<p>This paper by <a href="https://link.springer.com/article/10.1186/s12874-020-01042-7" target="_blank">Ryan et al</a> acknowledges these realities while asking the question, “do we need to adjust for interim analyses in a Bayesian adaptive trial design?” The conclusion is “yes” if the goal is indeed to satisfy operating characteristics defined within the frequentist paradigm - and I will get to that in a second - but they conclude, maybe a little wistfully, that</p>
+<p>This paper by <a href="https://link.springer.com/article/10.1186/s12874-020-01042-7" target="_blank">Ryan et al</a> acknowledges these realities while asking whether “we need to adjust for interim analyses in a Bayesian adaptive trial design?” The conclusion is “yes” if the goal is indeed to satisfy operating characteristics defined within the frequentist paradigm - and I will get to that in a second - but they conclude, maybe a little wistfully, that</p>
 <blockquote>
 <p>if we avoid this dichotomisation [reject or fail to reject] and simply report the posterior probability of benefit, then we could potentially avoid having to specify the type I error of a Bayesian design.</p>
 </blockquote>
 <p>But until more reviewers and funders accept this, investigators who opt for a Bayesian approach will likely still be required to square this circle.</p>
 </div>
-<div id="simulating-interim-looks" class="section level3">
-<h3>Simulating interim looks</h3>
-<p>To assess the Type I error, I’ve used a very data generating process and estimation model. There is a continuous outcome <span class="math inline">\(Y\)</span> that is normally distributed, and the mean is entirely a function of the treatment arm assignment <span class="math inline">\(Z\)</span>. When <span class="math inline">\(Z_i = 0\)</span>, the subject is in the control arm and the mean is <span class="math inline">\(\alpha\)</span>; when <span class="math inline">\(Z_i = 1\)</span>, the subject is in the treatment arm, and the mean is <span class="math inline">\(\alpha + \beta\)</span>. The standard deviation for both groups is assumed to be the same, <span class="math inline">\(\sigma_s\)</span>:</p>
+<div id="simulating-interim-looks" class="section level2">
+<h2>Simulating interim looks</h2>
+<p>To assess the Type I error, I’ve used a relatively simple data generating process and estimation model. There is a continuous outcome <span class="math inline">\(Y\)</span> that is normally distributed, and the mean is entirely a function of the treatment arm assignment <span class="math inline">\(Z\)</span>. When <span class="math inline">\(Z_i = 0\)</span>, the subject is in the control arm and the mean is <span class="math inline">\(\alpha\)</span>; when <span class="math inline">\(Z_i = 1\)</span>, the subject is in the treatment arm, and the mean is <span class="math inline">\(\alpha + \beta\)</span>. The standard deviation for both groups is assumed to be the same, <span class="math inline">\(\sigma_s\)</span>:</p>
 <p><span class="math display">\[
 Y_i \sim N(\alpha + \beta Z_i, \sigma_s)
 \]</span></p>
@@ -46,7 +46,7 @@ Y_i \sim N(\alpha + \beta Z_i, \sigma_s)
 <p><span class="math display">\[
 \beta \sim t_\text{student}(df = 3, \mu = 0, \sigma = 10)
 \]</span></p>
-<p>Here is the <code>Stan</code> code to implement the model:</p>
+<p>In the model specification below, I have allowed the prior standard deviation of <span class="math inline">\(\beta\)</span> to be specified as an argument, so that we can explore the impact of different assumptions on the operating characteristics. Here is the <code>Stan</code> code to implement the model:</p>
 <pre class="stan"><code>data {
   int&lt;lower=0&gt; N;
   int&lt;lower=0,upper=1&gt; rx[N];
@@ -81,10 +81,10 @@ library(cmdstanr)
 library(posterior)
 
 mod &lt;- cmdstan_model(&quot;code/multiple.stan&quot;)</code></pre>
-<p>I’ve written a function <code>bayes_fit</code> that estimates the model, collects the samples of <span class="math inline">\(\beta\)</span> from the posterior distribution, and depending on the decision rule to be used, returns the probability of “success.” In this case, “success” is determined one of two ways. In the first, we evaluate <span class="math inline">\(P(\beta &gt; 0)\)</span> (using the posterior distribution) and declare success if this probability exceeds 95%. This is probability that the intervention is successful. The second decision rule uses the first criterion and adds additional one to ensure that the effect size is clinically meaningful by requiring <span class="math inline">\(P(\beta &gt; M) &gt; 50\%\)</span>. <span class="math inline">\(M\)</span> is some meaningful threshold that has been agreed upon prior to conducting the study. Under this two-part decision rule, both requirements need to be met in order to declare success.</p>
-<pre class="r"><code>### plot posteriors for each look
-
-bayes_fit &lt;- function(dx, p_sigma, m_effect, decision_rule, x) {
+<p>I’ve written a function <code>bayes_fit</code> that (1) estimates the model, (2) collects the samples of <span class="math inline">\(\beta\)</span> from the posterior distribution, and (3) returns the probability of “success.” Here, <em>success</em> is determined one of two ways. In the first, we evaluate <span class="math inline">\(P(\beta &gt; 0)\)</span> (using the posterior distribution) and declare success if this probability exceeds 95%; this is the probability that the intervention is successful. The second decision rule uses the first criterion and adds an additional one to ensure that the effect size is clinically meaningful by requiring <span class="math inline">\(P(\beta &gt; M) &gt; 50\%\)</span>. <span class="math inline">\(M\)</span> is some meaningful threshold that has been agreed upon prior to conducting the study. Under the two-part decision rule, both requirements ( <span class="math inline">\(P(\beta &gt; 0) &gt; 95\%\)</span> and <span class="math inline">\(P(\beta &gt; M) &gt; 50\%\)</span>) need to be satisfied in order to declare success.</p>
+<pre class="r"><code>bayes_fit &lt;- function(dx, p_sigma, m_effect, decision_rule, x) {
+  
+  # 1: estimate model
   
   data_list &lt;- list(N = nrow(dx), y = dx$y, rx = dx$rx, p_mu = 0, p_sigma = p_sigma)
 
@@ -99,7 +99,11 @@ bayes_fit &lt;- function(dx, p_sigma, m_effect, decision_rule, x) {
     show_messages = FALSE
   )
   
+  # 2: collect sample of betas from posterior
+  
   df &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;beta&quot;)))
+  
+  # 3: evaluate success based on desired decision rule
   
   if (decision_rule == 1) {
     return((mean(df$beta &gt; 0) &gt; 0.95))
@@ -134,31 +138,30 @@ dd</code></pre>
 ##  998:  998  1 -0.497
 ##  999:  999  0 -1.301
 ## 1000: 1000  0  0.282</code></pre>
-<p>And here we are at the key point where we simulate the interim looks. I’ve taken a crude, probably inefficient approach that has the advantage of being extremely easy to code. Using the R function <code>sapply</code>, we can sequentially estimate the model using larger segments of the data set. In the first round, the model is estimated for the first 100 observations, in the second round the model is estimated for the first 200, and so on. For each round, we get in an indicator for whether the trial would have been declared successful based on whatever criteria were being used. If any of the interim looks results in a success, then that simulated study would be deemed (inappropriately) successful. Now, this approach is inherently inefficient, because we are conducting all interim looks regardless of the outcome of earlier looks - so we are fitting too many models. But in the case where only a relatively small number of studies will be “successful”, this is a small price to pay for ease of coding.</p>
+<p>And here we are at the key point where we simulate the interim looks. I’ve taken a crude, probably inefficient approach that has the advantage of being extremely easy to code. Using the R function <code>sapply</code>, we can sequentially estimate models using incrementally larger segments of a particular data set. In the first round, the model is estimated for the first 100 observations, in the second round the model is estimated for the first 200, and so on. For each round, we get an indicator for whether the trial would have been declared successful based on whatever criteria were being used. If any of the interim looks results in a success, then that simulated study would be deemed (inappropriately) successful. This approach is inherently inefficient, because we are conducting all interim looks regardless of the outcome of earlier looks; in effect, we are fitting too many models. But in the case where only a relatively small number of studies will be “successful,” this is a small price to pay for ease of coding.</p>
 <pre class="r"><code>bayes_ci &lt;- sapply(seq(100, 1000, by = 100), 
     function(x) bayes_fit(dd[1:x], p_sigma = 10, m_effect = 0.2, x))</code></pre>
-<p>The function returns a vector of results, one for each interim look.</p>
+<p>The function returns a vector of <em>success</em> indicators, one for each interim look.</p>
 <pre class="r"><code>bayes_ci</code></pre>
 <pre><code>##  [1] FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE FALSE</code></pre>
-<p>This vector is a summary of the posterior distributions. It is clear that less than 95% of each density (shaded in darker green) falls to the right of <span class="math inline">\(0\)</span> at each stage of evaluation:</p>
+<p>Here is a visualization representing the underlying posterior densities at each interim look. It is clear that less than 95% of each density (shaded in darker red) falls to the right of <span class="math inline">\(0\)</span> at each stage of evaluation, and based on the single decision rule, the study would not have been declared successful at any interim look:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="864" /></p>
 <p>In practice, all we need to do is check whether <em>any</em> of the looks has resulted in a “success”. In this case, there were no successes:</p>
 <pre class="r"><code>any(bayes_ci)</code></pre>
 <pre><code>## [1] FALSE</code></pre>
 </div>
+<div id="operating-characteristics-type-i-error-rates" class="section level2">
+<h2>Operating characteristics: Type I error rates</h2>
 <div id="single-decision-rule" class="section level3">
 <h3>Single decision rule</h3>
-<p>In a frequentist paradigm, we typically evaluate whether an intervention is beneficial using a simple hypothesis test on the effect parameter estimate (in this case <span class="math inline">\(\hat{\beta}\)</span>). If we are doing this repeatedly over the course of the trial, we conduct a hypothesis test at each interim look.</p>
-<p>We can do the same thing in a Bayesian context, except our decision rule is based, not on a <em>p-value</em>, but on the posterior distribution of <span class="math inline">\(\beta\)</span>, for example.</p>
-<p><span class="math display">\[P(\beta &gt; 0) &gt; 95\%\]</span>
-To compare the Type I error rates for each approach, I considered large and large sample sizes:</p>
+<p>To compare the Type I error rates for each approach, I considered large and large sample sizes:</p>
 <ul>
-<li>1000 subjects, with interim looks every 100 subjects</li>
 <li>160 subjects, with interim looks every 20 subjects starting after the 80th subject has been enrolled</li>
+<li>1000 subjects, with interim looks every 100 subjects</li>
 </ul>
 <p>For the Bayesian models, I assumed three different prior distribution assumptions for <span class="math inline">\(\beta\)</span>:</p>
 <p><span class="math display">\[\beta \sim t_{\text{student}}(\text{df}=3, 0, \sigma), \ \sigma \in \{1, 5, 10\}\]</span></p>
-<p>Here are the estimates of the Type I error rate using the single criteria for the threshold, comparing the frequentist analysis and the Bayesian analysis. At both sample size levels, the Bayesian analysis has a slightly lower Type I error rate, although in both cases it is considerably inflated beyond 5%:</p>
+<p>I generated 3000 data sets under each different scenario, and the Type I error rate is the proportion of those 3000 iterations that were declared a “success” under each model. (Code for running these replications on a high performance computing cluster is shown below in the <a href="#addendum">addendum</a>.) Here are the estimates of the error rate using the single criteria for the threshold, comparing the frequentist analysis and the Bayesian analysis.</p>
 <div id="type-i-error-rates-based-on-160-subjects5-interim-looks" class="section level4">
 <h4>Type I error rates based on 160 subjects/5 interim looks</h4>
 <pre><code>##    p_sigma m_effect  freq  bayes
@@ -172,19 +175,21 @@ To compare the Type I error rates for each approach, I considered large and larg
 ## 1:       1        0 0.193 0.157
 ## 2:       5        0 0.197 0.166
 ## 3:      10        0 0.189 0.169</code></pre>
+<p>At both sample size levels, the Bayesian analysis has a slightly lower Type I error rate compared to the frequentist analysis, although in both cases it is considerably inflated beyond 5%. It does not appear that, in this setting at least, that the prior distribution assumptions have much impact on the estimated Type I error rate.</p>
 </div>
 </div>
 <div id="two-crieteria" class="section level3">
 <h3>Two crieteria</h3>
 <p>It is pretty clear in this simple scenario the single Bayesian criterion might not satisfy reviewers looking for control at the 5% level, so we might need to use a modified approach. The next set of simulations explore the double decision rule. In addition to the sample size variation and different prior distribution assumptions, I also considered three possible thresholds for the second criteria in exploring impacts on Type I error rates:</p>
-<p><span class="math display">\[P(\beta &gt; 0) &gt; 95\% \ \ \textbf{and} \ \ P(\beta &gt; \theta) &gt; 50\%, \ \theta \in \{0.2, 0.3, 0.4\}\]</span></p>
-<p>Introducing the second criteria in this case substantially lowers the Type 1 error rate, particularly when the threshold for the second criteria is more conservative:</p>
+<p><span class="math display">\[P(\beta &gt; 0) &gt; 95\% \ \ \textbf{and} \ \ P(\beta &gt; M) &gt; 50\%, \ M \in \{0.2, 0.3, 0.4\}\]</span></p>
+<p>Introducing the second criteria in this case substantially lowers the Type 1 error rate, particularly when the threshold for the second criteria is more conservative (higher):</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
-<p><a href="#addendum">addendum</a></p>
+<p>Once again, the prior distribution assumptions for <span class="math inline">\(\beta\)</span> are not very important, but the threshold <span class="math inline">\(M\)</span> is clearly key to controlling the Type I error, particularly when the sample size is smaller. With sample size of 160, 5% error rates are achieved with <span class="math inline">\(M=0.4\)</span>, though with 1000, we could use <span class="math inline">\(M=0.3\)</span>.</p>
+<p>The overall takeaway is that if funders and reviewers insist on Bayesian study designs controlling Type I error rates at a level of 5%, decision criteria and possibly modelling assumptions might need to be adjusted to accommodate those requirements. This is particularly true if the study design allows for interim evaluations of the data, as is common in a study using an adaptive Bayesian design. Simulations similar to what I have done here will be required to demonstrate that these conditions are satisfied.</p>
 <p>
 <p><small><font color="darkkhaki">
-Reference:</p>
+References:</p>
 <p>Ryan, Elizabeth G., Kristian Brock, Simon Gates, and Daniel Slade. “Do we need to adjust for interim analyses in a Bayesian adaptive trial design?.” BMC medical research methodology 20, no. 1 (2020): 1-9.</p>
 <p>Greenland, Sander, Stephen J. Senn, Kenneth J. Rothman, John B. Carlin, Charles Poole, Steven N. Goodman, and Douglas G. Altman. “Statistical tests, P values, confidence intervals, and power: a guide to misinterpretations.” European journal of epidemiology 31, no. 4 (2016): 337-350.</p>
 </font></small>
@@ -192,30 +197,16 @@ Reference:</p>
 <p><a name="addendum"></a></p>
 <p> </p>
 </div>
+</div>
 <div id="addendum" class="section level2">
 <h2>Addendum</h2>
+<p>Code used to generate p-value estimates for a variety of scenarios was written to be executed on a high performance computing cluster, which is a highly parallel computing environment. I am using package <code>rslurm</code> to manage the parallelization of the process (there is an alternative package called <code>slurmR</code> which I have used in the past). The replications of each of the scenarios (represented by a set of simulation parameters) are stored in data frame <code>scenarios</code>, and the function <code>slurm_apply</code> cycles through the data frame, with many replications executed in parallel. The function <code>s_replication</code> calls the two functions <code>bayes_fit</code> and <code>freq_fit</code> described above.</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(parallel)
 library(cmdstanr)
 library(posterior)
 library(rslurm)
-
-### Function to estimate models at different time points
-
-seq_mods &lt;- function(dx, seq, iter, p_sigma, decision_rule, m_effect) {
-  
-  freq_ps &lt;- sapply(seq(start, end, by = by), function(x) freq_fit(dx[1:x]))
-  freq_effect &lt;- any(freq_ps &lt; 0.05)
-  
-  bayes_ci &lt;- sapply(seq(start, end, by = by), 
-    function(x) bayes_fit(dx[1:x], p_sigma, m_effect, decision_rule, x))
-  bayes_effect &lt;- any(bayes_ci)
-  
-  return(data.table(seq, iter, p_sigma, m_effect, decision_rule, 
-    freq_effect, bayes_effect))
-  
-}
 
 ### Function to generate data and estimate parameters
 
@@ -228,8 +219,15 @@ s_replicate &lt;- function(iter, p_sigma, decision_rule, m_effect, seq) {
   
   dd &lt;- genData(end, def)
   
-  seq_mods(dd, seq, iter, p_sigma, decision_rule, m_effect)
+  freq_ps &lt;- sapply(seq(start, end, by = by), function(x) freq_fit(dd[1:x]))
+  freq_effect &lt;- any(freq_ps &lt; 0.05)
   
+  bayes_ci &lt;- sapply(seq(start, end, by = by), 
+    function(x) bayes_fit(dd[1:x], p_sigma, m_effect, decision_rule, x))
+  bayes_effect &lt;- any(bayes_ci)
+  
+  return(data.table(seq, iter, p_sigma, m_effect, decision_rule, 
+    freq_effect, bayes_effect))  
 }
 
 ### Set simulation parameters
@@ -266,7 +264,7 @@ mod &lt;- cmdstan_model(&quot;multiple.stan&quot;)
 ### Set rslurm arguments
 
 sopts &lt;- list(time = &#39;12:00:00&#39;, partition = &quot;cpu_short&quot;, `mem-per-cpu` = &quot;5G&quot;)
-sobjs &lt;- c(&quot;seq_mods&quot;, &quot;freq_fit&quot;, &quot;bayes_fit&quot;, &quot;mod&quot;, &quot;start&quot;, &quot;end&quot;, &quot;by&quot;)
+sobjs &lt;- c(&quot;freq_fit&quot;, &quot;bayes_fit&quot;, &quot;mod&quot;, &quot;start&quot;, &quot;end&quot;, &quot;by&quot;)
 
 ### Replicate over iterations
 
