@@ -1,0 +1,220 @@
+---
+title: Minimize skepticism about subgroup analyses with skeptical Bayesian decison rules
+author: Keith Goldfeld
+date: '2022-01-04'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+Over the past couple of years, I have been working with an amazing group of investigators as part of the CONTAIN trial to study whether COVID-19 convalescent plasma (CCP) can improve the clinical status of patients hospitalized with COVID-19 and requiring noninvasive supplemental oxygen. This was a multi-site study in the US that randomized 941 patients to either CCP or a saline solution placebo. The overall [findings]((https://jamanetwork.com/journals/jamainternalmedicine/article-abstract/2787090){target="_blank"}) suggest that CCP did not benefit the patients who received it, but if you drill down a little deeper, the story may be more complicated than that.
+
+Of course, it is the "drilling down" part that gets people (and biostatisticians) a little nervous. Once we get beyond the primary analysis, all bets are off. If we look hard enough at the data, we may eventually find something that is interesting to report on. But, just because we find something with the data in hand, it does not mean that we would find it again in another data set from another study. Any conclusions we draw may be unwarranted:
+
+<br>
+
+![Source: [XKCD](https://xkcd.com/882/){target="_blank"}](extra/significant.png){width=50%}
+
+The CONTAIN trial was conducted under very difficult circumstances, where the context was rapidly changing over time. Particularly challenging was the fact that new therapies were introduced for hospitalized patients over the course of the trial. And when we looked at the data, we noticed that while all patients had poor clinical outcomes in the first several months of the study, the CCP arm appeared to offer some benefits. Later on in the study, when corticosteroids and remdesivir were standard of care, patient outcomes were dramatically improved, and CCP was no longer providing any benefits. This was a very interesting finding that we felt merited some discussion.
+
+Not surprisingly, we have received some push back, suggesting that this finding is a classic case of [regression to the mean](https://www.rdatagen.net/post/regression-to-the-mean/){target="_blank"}. Normally, I would not have been comfortable presenting those findings, particularly not in a highly visible journal article. But we had used a Bayesian modelling framework with quite conservative decision criteria and quite skeptical prior distribution assumptions to evaluate the primary outcome and the exploratory outcomes, so we felt that while there is still a non-trivial chance that the findings are spurious, these were not green jelly bean findings. Add to this strong biological plausibility, and we felt quite strongly about presenting this to the growing body of literature about CCP.
+
+In this post, I am exploring through a series of simulations how conservative our conservative approach really is to make an assessment of how to interpret our exploratory analyses. This is [another look](https://www.rdatagen.net/post/2021-12-21-controling-type-1-error-rates-in-rcts-with-interim-looks-a-bayesian-perspective/){target="_blank"} at assessing Type I error rates, a frequentist notion, in the context of a Bayesian study design.
+
+## The data
+
+
+
+
+ 
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(data.table)
+library(posterior)
+library(cmdstanr)
+library(gtsummary)
+```
+
+## Data generation
+
+```{r}
+genRepeatDef <- function(nvars, prefix, formula, variance, dist, link = "identity") {
+  varnames <- paste0(prefix, 1 : nvars)
+  data.table(varname = varnames, formula = formula, variance = variance, 
+             dist = dist, link = link)
+}
+
+def <- genRepeatDef(3, "g", "1/3;1/3;1/3", 0, "categorical")
+def <- defData(def, "rx", formula = "1;1", dist = "trtAssign")
+def <- defData(def, "y", formula = "0.10", dist = "binary")
+
+def
+```
+
+A single data set based on these definitions looks like this:
+
+```{r}
+RNGkind("L'Ecuyer-CMRG")
+set.seed(2386212)
+
+dd <- genData(1000, def)
+dd
+```
+
+## Logistic regression
+
+```{r}
+fitglm <- glm(y ~ factor(g2) + rx:factor(g2) - 1, data = dd)
+tbl_regression(fitglm, exponentiate = TRUE)
+```
+
+## Bayesian model
+
+```{r}
+listdat <- function(dx, grpvar) {
+  
+  dx[, grp := factor(get(grpvar))]
+  
+  N <- dx[, .N]
+  L <- dx[, nlevels(grp)]
+  y <- dx[, y]
+  rx <- dx[, rx]
+  grp <-dx[, as.numeric(grp)]
+  
+  list(N = N, L = L, y = y, rx = rx, grp = grp)
+}
+
+dat <- listdat(dd, "g2")
+```
+
+```{r}
+mod <- cmdstan_model("extra/simulation.stan")
+
+fitbayes <- mod$sample(
+    data = dat,
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 1500,
+    iter_sampling = 3000
+)
+
+fitbayes$summary("OR")
+  
+OR <- as_draws_rvars(fitbayes$draws(variables = "OR"))$OR
+Pr(OR < 1)
+
+# any((Pr(OR < 1) > 0.95) & (Pr(OR < 0.80 ) > 0.5)) 
+any((quantile(OR, .025) > 1) | (quantile(OR, .975) < 1))
+```
+
+## Fit models for multiple subgroups
+
+```{r}
+fitmods <-function(dx, grpvar) {
+  
+  # GLM
+  
+  dx[, grp := factor(get(grpvar))]
+  fitglm <- glm(y ~ grp + rx:grp - 1, data = dx)
+  
+  pvals <- coef(summary(fitglm))[, "Pr(>|t|)"]
+
+  lpval <- length(pvals)
+  freq_res <- any(pvals[(lpval/2 + 1) : lpval] < 0.05)
+  
+  # Bayes
+  
+  dat <- listdat(dx, grpvar)
+  
+  fitbayes <- mod$sample(
+    data = dat,
+    refresh = 0,
+    chains = 4L,
+    parallel_chains = 4L,
+    iter_warmup = 1500,
+    iter_sampling = 3000
+  )
+  
+  OR <- as_draws_rvars(fitbayes$draws(variables = "OR"))$OR
+  # bayes_res <- any((Pr(OR < 1) > 0.95) & (Pr(OR < 0.80 ) > 0.5)) 
+  bayes_res <- any((quantile(OR, .025) > 1) | (quantile(OR, .975) < 1))
+
+  
+  return(data.table(var = grpvar, bayes_res, freq_res))
+}
+
+res <- rbindlist(lapply(paste0("g", 1:3), function(a) fitmods(dd, a)))
+res
+```
+
+```{r}
+first_true <- sapply(res[, c(2,3)], function(x) match(TRUE, x))
+first_true
+```
+
+```{r, echo = FALSE, fig.height=3.5}
+library(ggplot2)
+library(paletteer)
+
+load("extra/simulation.rda")
+res <- data.table(res)
+
+res[is.na(bayes_2), bayes_2 := 99]
+res[is.na(bayes_ci), bayes_ci := 99]
+res[is.na(freq), freq := 99]
+
+error_rate <- function(dx, nvars) {
+  dx[, .(
+    bayes_2 = mean(bayes_2 <= nvars),
+    bayes_ci = mean(bayes_ci <= nvars), 
+    frequentist = mean(freq <= nvars))]
+}
+
+error_dt <- rbindlist(lapply(1:20, function(a) error_rate(res, a)))
+error_dt[, nvars := .I]
+
+error_dt <- melt(error_dt, 
+     id.vars = "nvars",
+     measure.vars = c("bayes_2","bayes_ci", "frequentist"), 
+     variable.name = "method"
+)
+
+ggplot(data = error_dt[method != "bayes_2"], aes(x = nvars, y = value, group = method)) +
+  geom_line(aes(color = method), size = .9) +
+  scale_y_continuous(limits = c(0, 1), name = "type I error rate",
+                     labels = scales::percent) +
+  xlab("number of subgroups") +
+  theme(panel.grid = element_blank()) +
+  scale_color_manual(values = c("#2A363B", "#019875"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("bayes","frequentist")) 
+  
+                         
+ggplot(data = error_dt[method != "frequentist"], aes(x = nvars, y = value, group = method)) +
+  geom_line(aes(color = method), size = .9) +
+  scale_y_continuous(limits = c(0, .27), name = "type I error rate",
+                     labels = scales::percent) +
+  xlab("number of subgroups") +
+  theme(panel.grid = element_blank()) +
+  scale_color_manual(values = c("#2A363B", "#FECEA8"),
+                     labels = c("credible interval", "one-sided test"))
+```
+
+
+## Simulation 
+
+I’ve simulated scenarios where there are different numbers of subgroups that we might explore. I’d say we explored between 10 and 15. I am counting con-meds as one subgroup, although in reality this really included 4 sub-subgroups (in the final analysis): No/No, Yes/No, No/Yes, and Yes/Yes for steroids/remdesivir. Another subgroup would have been baseline WHO. In my simulations, I assumed that each subgroup had 3 sub-categories, which seems reasonable since the actual subgroups ranged from 2 to 4 sub-categories. In the simulations I used scenarios ranging from 1 to 20 subgroups.
+ 
+My goal was to see what the type 1 error rate is based on the number of subgroup analyses that are conducted. If we conduct only 1 analysis, there is less opportunity to make a mistake, so the type I error will be lower. With many analyses, there is more chance we will make at least one mistake. The skeptical tweeters (and JAMA) feel that the type 1 error rate is extremely high, so they are not impressed.
+ 
+For each scenario, I generated 1000 data sets and fit a model to each on (actually two, one frequentist and one bayes). I tracked how many of these data sets would have been declare “interesting” based on the decision criteria. I used our decision threshold P(OR < 1) > 95% and P(OR < 0.8) > 50% to evaluate the Bayes models, and I used a p-value < 0.05 to evaluate the frequentist model. Each declared success is an “error” since the data were generated without any subgroup-specific treatment effects. The proportion of the 1000 datasets that is an error is our error rate. The attached plot shows the error rates for the two methods (frequentist and Bayes) across different numbers of subgroups that are evaluated.
+
+How to interpret? If we conducted single analysis of a subgroup, the error rate using Bayes is about 5%, and using the frequentist, it is about 13%. Why is the frequentist so high? Well, we are actually conducting three statistical tests for the subgroup, so the error rate will certainly be greater than 5%. As we start looking at more and more subgroups, the error rate for the frequentist approach blows up pretty fast – heading to 70% for 12 subgroups. So, if we find some group that looks interesting, there is a very high probability that the finding is spurious. This is what is driving some of the deep skepticism. However, for the Bayes approach, the error rate is close to 20% for 12 subgroups, so much, much better. But, we still need to be careful in drawing conclusions. It is OK for generating hypotheses, but not great. People have a right to be skeptical, but there is no reason to completely dismiss the finding out of hand. It suggests that more work needs to be done. I think that is the way it has been presented.
