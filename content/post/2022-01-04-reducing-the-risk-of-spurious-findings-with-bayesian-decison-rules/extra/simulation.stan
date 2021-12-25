@@ -10,22 +10,22 @@ data {
   int<lower=0> N;              // number of observations
   int<lower=1> L;              // number of levels
   int<lower=0,upper=1> y[N];   // vector of categorical outcomes
-  int<lower=0,upper=1> rx[N];  // treatment arm for individual
+  int<lower=0,upper=1> a[N];   // treatment arm for individual
   int<lower=1,upper=4> grp[N]; // grp for individual  
 }
 
 parameters {
   vector[L] alpha_g;           // group effect
-  real delta[L];               // treatment effects
-  real Delta;
+  real delta_g[L];             // group treatment effects
+  real delta;                  // overall treatment effect
 }
 
 transformed parameters{ 
   
   vector[N] yhat;
-  
+
   for (i in 1:N)  
-      yhat[i] = alpha_g[grp[i]] + rx[i] * delta[grp[i]];
+    yhat[i] = alpha_g[grp[i]] + a[i] * delta_g[grp[i]];
 }
 
 model {
@@ -33,9 +33,8 @@ model {
   // priors
   
   alpha_g ~ normal(0, 10);
-  // delta ~ normal(0, 0.3537);
-  delta ~ normal(Delta, 0.3537);
-  Delta ~ normal(0, 0.3537);
+  delta_g ~ normal(delta, 0.3537);
+  delta ~ normal(0, 0.3537);
   
   // outcome model
   
@@ -45,14 +44,17 @@ model {
 
 generated quantities {
   
-  real<lower = 0> OR[L];
-  real<lower = 0> OR_D;
+  real<lower = 0> OR_g[L];
+  real<lower = 0> Odds_g[L];
+
+  real<lower = 0> OR;
 
   for (i in 1:L) {
-    OR[i] = exp(delta[i]);   
+    OR_g[i] = exp(delta_g[i]);   
+    Odds_g[i] = exp(alpha_g[i]);
   }
   
-  OR_D = exp(Delta);
+  OR = exp(delta);
   
 }
 

@@ -13,7 +13,7 @@ image: ''
 draft: TRUE
 ---
 
-Over the past couple of years, I have been working with an amazing group of investigators as part of the CONTAIN trial to study whether COVID-19 convalescent plasma (CCP) can improve the clinical status of patients hospitalized with COVID-19 and requiring noninvasive supplemental oxygen. This was a multi-site study in the US that randomized 941 patients to either CCP or a saline solution placebo. The overall [findings]((https://jamanetwork.com/journals/jamainternalmedicine/article-abstract/2787090){target="_blank"}) suggest that CCP did not benefit the patients who received it, but if you drill down a little deeper, the story may be more complicated than that.
+Over the past couple of years, I have been working with an amazing group of investigators as part of the CONTAIN trial to study whether COVID-19 convalescent plasma (CCP) can improve the clinical status of patients hospitalized with COVID-19 and requiring noninvasive supplemental oxygen. This was a multi-site study in the US that randomized 941 patients to either CCP or a saline solution placebo. The overall [findings](https://jamanetwork.com/journals/jamainternalmedicine/article-abstract/2787090){target="_blank"} suggest that CCP did not benefit the patients who received it, but if you drill down a little deeper, the story may be more complicated than that.
 
 Of course, it is the "drilling down" part that gets people (and biostatisticians) a little nervous. Once we get beyond the primary analysis, all bets are off. If we look hard enough at the data, we may eventually find something that is interesting to report on. But, just because we find something with the data in hand, it does not mean that we would find it again in another data set from another study. Any conclusions we draw may be unwarranted:
 
@@ -27,42 +27,43 @@ Not surprisingly, we have received some push back, suggesting that this finding 
 
 In this post, I am exploring through a series of simulations how conservative our conservative approach really is to make an assessment of how to interpret our exploratory analyses. This is [another look](https://www.rdatagen.net/post/2021-12-21-controling-type-1-error-rates-in-rcts-with-interim-looks-a-bayesian-perspective/){target="_blank"} at assessing Type I error rates, a frequentist notion, in the context of a Bayesian study design.
 
-## The data
+## The general idea
 
+Let's say I have a data generation process individual $i$ with a (binary) outcome $Y$ with some (binary) treatment or exposure $A$ that looks like
 
+$$log\left(\frac{P(Y_i=1)}{P(Y_i=0)}\right ) = \alpha + \delta A_i.$$
 
+The log-odds is dependent only on the level of exposure $A$. 
 
+Let's say that we've also measured some characteristic $G$, which is a categorical variable with three levels. While the primary aim of the study is to estimate $\delta$, the log-odds ratio comparing treated with controls, we might also be interested in a subgroup analysis based on $G$. That is, is there a unique group-level treatment effect for any level of $G$, $G \in \{1,2,3\}$? In terms of the model, this would be
+
+$$ log\left(\frac{P(Y_i=1|G_i=g)}{P(Y_i=0|G_i=g)}\right ) = \alpha_g + \delta_g A_i, \ \  g \in \{1,2,3\}.$$
  
+In the case here, we know that $\alpha_g = \alpha$ and $\delta_g = \deltaa$ for all $g$ because the data generation process is independent of $G$. However, due to sampling error it is quite possible that we will observe some differences in the data.
+
+We can start by simulating this. But first, here are all the libraries used to create the examples in this post:
 
 ```{r, message=FALSE, warning=FALSE}
 library(simstudy)
 library(data.table)
 library(posterior)
+library(bayesplot)
 library(cmdstanr)
 library(gtsummary)
+library(paletteer)
+library(ggplot2)
+library(ggdist)
 ```
 
 ## Data generation
 
 ```{r}
-genRepeatDef <- function(nvars, prefix, formula, variance, dist, link = "identity") {
-  varnames <- paste0(prefix, 1 : nvars)
-  data.table(varname = varnames, formula = formula, variance = variance, 
-             dist = dist, link = link)
-}
-
-def <- genRepeatDef(3, "g", "1/3;1/3;1/3", 0, "categorical")
-def <- defData(def, "rx", formula = "1;1", dist = "trtAssign")
+def <- defData(varname = "g", formula = "1/3;1/3;1/3", dist = "categorical")
+def <- defData(def, "a", formula = "1;1", dist = "trtAssign")
 def <- defData(def, "y", formula = "0.10", dist = "binary")
 
-def
-```
-
-A single data set based on these definitions looks like this:
-
-```{r}
 RNGkind("L'Ecuyer-CMRG")
-set.seed(2386212)
+set.seed(67)
 
 dd <- genData(1000, def)
 dd
@@ -70,12 +71,44 @@ dd
 
 ## Logistic regression
 
+We can fit a simple logistic model to evaluate estimate $\delta$, the overall effect of the treatment. We see that the estimate of the OR is very close to 1, suggesting the odds of $Y=1$ is similar for both groups, so no apparent treatment effect. (Note that the exponentiated intercept is an estimate of the odds of $Y=1$ for the control arm. The data generation process assumed $P(Y=1) = 0.10$, so the odds are $0.11$.)
+
 ```{r}
-fitglm <- glm(y ~ factor(g2) + rx:factor(g2) - 1, data = dd)
+fitglm <- glm(y ~ a, data = dd, family = "binomial")
+tbl_regression(fitglm, intercept = TRUE, exponentiate = TRUE)
+```
+
+So, we could not infer that for the entire group treatment $A$ has any effect. But, maybe for some subgroups there is a treatment effect? We can fit a generalized linear model that allows the intercept and effect estimate vary by level of $G$, and assess whether this is the case for subgroups defined by $G$.
+
+```{r}
+fitglm <- glm(y ~ factor(g) + a:factor(g) - 1, data = dd, family = "binomial")
 tbl_regression(fitglm, exponentiate = TRUE)
 ```
 
+While there is more variability in the estimates, we still wouldn't conclude that there are treatment effects within each level of $G$.
+
 ## Bayesian model
+
+The purpose of this post is to illustrate how a appropriately specified Bayesian model can provide slightly more reliable estimates, particularly in the case where there really are no underlying treatment effects. So, here is a Bayes model that estimates subgroup-level intercepts and treatment effects:
+
+$$Y_{ig} \sim Bin(p_{ig})$$
+$$log\left(\frac{p_{ig}}{1-p_{ig}}\right) = \alpha_g + \delta_gA_i, \ \ g \in \{1,2,3\}  $$
+
+The prior distribution assumptions for the parameters $\alpha_g$ and $\delta_g$ are
+
+\begin{aligned}
+  \alpha_g &\sim N(\mu = 0, \sigma = 10), \ \ g \in \{1,2,3\} \\
+
+  \delta_g &\sim N(\mu=\delta, \sigma = 0.3537), \ \ g \in \{1,2,3\} \\
+
+  \delta &\sim N(\mu = 0, \sigma = 0.3537)
+\end{aligned}
+
+Note that the variance of the $\delta_g\text{'s}$ around $\delta$ has been specified, but it could be estimated. However, since there are very few levels of $G$,  estimation of the variance can be slow; to speed the simulations, I've chosen a quicker path by specifying a pretty informative prior.
+
+#### Fitting the Bayes model
+
+The `Stan` code for the model can be found in the appendix. To estimate the model, the the data needs to be passed as a list - and here is a function to convert the `R` data into the proper format:
 
 ```{r}
 listdat <- function(dx, grpvar) {
@@ -85,37 +118,97 @@ listdat <- function(dx, grpvar) {
   N <- dx[, .N]
   L <- dx[, nlevels(grp)]
   y <- dx[, y]
-  rx <- dx[, rx]
+  a <- dx[, a]
   grp <-dx[, as.numeric(grp)]
   
-  list(N = N, L = L, y = y, rx = rx, grp = grp)
+  list(N = N, L = L, y = y, a = a, grp = grp)
 }
-
-dat <- listdat(dd, "g2")
 ```
+
+After compiling the program, samples from the posterior are drawn using four chains. There will be a total of 12000 samples (not including the warm-up samples):
 
 ```{r}
 mod <- cmdstan_model("extra/simulation.stan")
 
 fitbayes <- mod$sample(
-    data = dat,
+    data = listdat(dd, "g"),
     refresh = 0,
     chains = 4L,
     parallel_chains = 4L,
     iter_warmup = 1500,
     iter_sampling = 3000
 )
-
-fitbayes$summary("OR")
-  
-OR <- as_draws_rvars(fitbayes$draws(variables = "OR"))$OR
-Pr(OR < 1)
-
-# any((Pr(OR < 1) > 0.95) & (Pr(OR < 0.80 ) > 0.5)) 
-any((quantile(OR, .025) > 1) | (quantile(OR, .975) < 1))
 ```
 
-## Fit models for multiple subgroups
+The estimates are quite similar to the `glm` estimates, though the ORs are pulled slightly towards 1 as a result of the informative prior. This is going to be the trick that ultimately protects the Type I error rate from completely blowing up.
+
+```{r}
+fitbayes$summary(c("Odds_g","OR_g"))
+```
+
+And here is a plot of the posterior distributions for the treatment effect at each subgroup defined by the levels of $G$:
+
+```{r, fig.height = 3.5, fig.width = 4}
+OR_df <- data.frame(as_draws_rvars(fitbayes$draws(variables = "OR_g")))
+
+p_data <- with(OR_df, data.frame(
+  cat = c("c1", "c2", "c3"),
+  OR_g = OR_g
+))
+
+ggplot(data = p_data, aes(dist = OR_g, y = cat)) +
+  geom_vline(xintercept = 1, color = "grey80", size = .3) +
+  stat_dist_halfeye(fill = palettes_d$awtools$a_palette[6], position="dodge") +
+  theme(panel.grid = element_blank()) +
+  ylab("category") +
+  scale_x_continuous(limits = c(0, 2), name = "OR")
+```
+
+It is easy to see that the 95% credible intervals all include the value of 1, no treatment effect, so we wouldn't be tempted to conclude that there is any treatment effect. We can also check manually to see if at least one of the credible intervals excludes 1. The answer is still "no."
+
+```{r}
+with(OR_df, any((quantile(OR_g, .025) > 1) | (quantile(OR_g, .975) < 1)))
+```
+
+## Multiple characteristics that define many subgroups
+
+As the jelly beans make clear, things can really start to go awry when we start to investigate many possible subgroups. This can either be a single characteristic (like color) that has many, many levels, each of which can be a subgroup, or this can be many different characteristics that each have a few different levels. In our trial, we had the latter, all based on baseline data collection (and all reported as categories). These included health status, age, blood type, time between COVID symptom onset, medications, quarter of enrollment, and others.
+
+My interest here is to see how Type I error increases as the number of subgroups increases. I consider that a Type I error has occurred if *any* of the subgroups would be declared what I am calling "interesting". "Interesting" and by no means definitive, because while the results might suggest that treatment effects are stronger in a particular subgroup, we do need to be aware that these are exploratory analyses.
+
+To explore Type I error rates, I will generate 20 categories, each of which has three levels. I can then use the model estimates from each of the subgroup analyses to evaluate how many times I would draw the wrong conclusion.
+
+#### Generating multiple categories
+
+To illustrate how I code all of this, I am starting with a case where there are four categories, each with three levels. In the data set, these categories are named *g1*, *g2*, *g3*, and *g4*:
+
+```{r}
+genRepeatDef <- function(nvars, prefix, formula, variance, dist, link = "identity") {
+  varnames <- paste0(prefix, 1 : nvars)
+  data.table(varname = varnames, 
+             formula = formula, 
+             variance = variance, 
+             dist = dist, link = link)
+}
+
+def <- genRepeatDef(4, "g", "1/3;1/3;1/3", 0, "categorical")
+def <- defData(def, "a", formula = "1;1", dist = "trtAssign")
+def <- defData(def, "y", formula = "0.10", dist = "binary")
+
+def
+```
+
+A single data set based on these definitions looks like this:
+
+```{r}
+RNGkind("L'Ecuyer-CMRG")
+set.seed(67) #4386212 83861 7611291
+
+dd <- genData(1000, def)
+dd
+```
+
+The function `fitmods` estimates both the `glm` and `stan` models for a single category. The models provide subgroup estimates of treatment effects, just as the example above did:
 
 ```{r}
 fitmods <-function(dx, grpvar) {
@@ -123,9 +216,9 @@ fitmods <-function(dx, grpvar) {
   # GLM
   
   dx[, grp := factor(get(grpvar))]
-  fitglm <- glm(y ~ grp + rx:grp - 1, data = dx)
+  fitglm <- glm(y ~ grp + a:grp - 1, data = dx, family = "binomial")
   
-  pvals <- coef(summary(fitglm))[, "Pr(>|t|)"]
+  pvals <- coef(summary(fitglm))[, "Pr(>|z|)"]
 
   lpval <- length(pvals)
   freq_res <- any(pvals[(lpval/2 + 1) : lpval] < 0.05)
@@ -143,22 +236,62 @@ fitmods <-function(dx, grpvar) {
     iter_sampling = 3000
   )
   
-  OR <- as_draws_rvars(fitbayes$draws(variables = "OR"))$OR
-  # bayes_res <- any((Pr(OR < 1) > 0.95) & (Pr(OR < 0.80 ) > 0.5)) 
-  bayes_res <- any((quantile(OR, .025) > 1) | (quantile(OR, .975) < 1))
-
+  OR_df <- data.frame(as_draws_rvars(fitbayes$draws(variables = "OR_g")))
+  bayes_res <- with(OR_df, 
+    any((quantile(OR_g, .025) > 1) | (quantile(OR_g, .975) < 1)))
   
-  return(data.table(var = grpvar, bayes_res, freq_res))
-}
+  # Return results
 
-res <- rbindlist(lapply(paste0("g", 1:3), function(a) fitmods(dd, a)))
-res
+  list(type1_dt = data.table(var = grpvar, bayes_res, freq_res),
+       OR_post = data.frame(var = grpvar, cat = paste0("c",1:3), OR_df)
+  )
+  
+}
 ```
+
+In this case, I am calling the function `fitmods` for each of the four categorical groupings *g1* through *g4*:
 
 ```{r}
-first_true <- sapply(res[, c(2,3)], function(x) match(TRUE, x))
+res <- lapply(paste0("g", 1:4), function(a) fitmods(dd, a))
+```
+
+One of the arguments returned by `fitmods` is a data.table of summary results for each of the four categorical grouping. If any of the effect estimates for one or more of the three subgroup levels in a category was deemed "interesting" (based on a p-value < 0.05 for the `glm` model, and the value 1 falling outside the 95% credible interval for the `stan` model), then the function returned a value of 1 or TRUE. In this case, at least one of the subgroups within *g4* would have been declared interesting based on the `glm` and `stan` models; at least one of the subgroups within *g2* would have been deemed interesting, but only based on the `glm` model:
+
+```{r}
+type1_dt <- rbindlist(lapply(res, function(x) x$type1_dt))
+type1_dt
+```
+
+We can see this visually for the `stan` models by looking at the density plots for each subgroup within each category:
+
+```{r, fig.height = 5}
+dc <- do.call("rbind", lapply(res, function(x) x$OR_post))
+
+ggplot(data = dc, aes(dist = OR_g, y = cat)) +
+  geom_vline(xintercept = 1, color = "grey80", size = .3) +
+  stat_dist_halfeye(fill = palettes_d$awtools$a_palette[7], alpha = .8) +
+  theme(panel.grid = element_blank()) +
+  xlab("OR") +
+  # scale_x_continuous(limits = c(0, 4)) +
+  facet_wrap(~ var)
+```
+
+We calculate the first occurrence of an *interesting* subgroup by looking across *g1* through *g4*. This will be useful for figuring out the Type I error rates for different numbers of categories. In this case, the first interesting subgroup based on the `stan` model is found when there are four categories; for the `glm` model, the first interesting subgroup is with two categories.
+
+```{r}
+first_true <- sapply(type1_dt[, c(2,3)], function(x) match(TRUE, x))
 first_true
 ```
+
+## Simulation study results
+
+Now, having provided you with all that background, here are the results based on 1050 simulated data sets (because I had access to 75 cores on a high performance computing cluster) with 20 categorical groups of three levels each. For each data set $r, \ r \in \{1,\dots,1050\}$, I determined the first occurrence of an "interesting" finding among the 20 categories for each model, and stored this in $F_{br}$ and $F_{fr}$ for the Bayes and frequentist models, respectively. $T_m(g)$ is the error rate for the model type $m$, $m \in \{b, f\}$ with $g$ number of categories, and
+
+$$
+T_m(g) = \frac{\sum_{r=1}^{1050} I(F_{mr} \le g)}{1050}
+$$
+
+Here is a plot of the Type I error rates calculated different numbers of categories. We can see for the frequentist model based on p-values, the error rates get quite large quite quickly, exceeding 50% by the time we reach 8 categories. In comparison, the error rates under the Bayes model with quite skeptical prior assumptions are held in check quite a bit better.
 
 ```{r, echo = FALSE, fig.height=3.5}
 library(ggplot2)
@@ -189,32 +322,25 @@ error_dt <- melt(error_dt,
 
 ggplot(data = error_dt[method != "bayes_2"], aes(x = nvars, y = value, group = method)) +
   geom_line(aes(color = method), size = .9) +
-  scale_y_continuous(limits = c(0, 1), name = "type I error rate",
+  scale_y_continuous(limits = c(0, 1), 
+                     name = bquote( paste("type I error rate ", T[m](g) )),
                      labels = scales::percent) +
-  xlab("number of subgroups") +
+  xlab("number of categories (g)") +
   theme(panel.grid = element_blank()) +
   scale_color_manual(values = c("#2A363B", "#019875"),
                      guide = guide_legend(reverse = TRUE),
                      labels = c("bayes","frequentist")) 
   
                          
-ggplot(data = error_dt[method != "frequentist"], aes(x = nvars, y = value, group = method)) +
-  geom_line(aes(color = method), size = .9) +
-  scale_y_continuous(limits = c(0, .27), name = "type I error rate",
-                     labels = scales::percent) +
-  xlab("number of subgroups") +
-  theme(panel.grid = element_blank()) +
-  scale_color_manual(values = c("#2A363B", "#FECEA8"),
-                     labels = c("credible interval", "one-sided test"))
+# ggplot(data = error_dt[method != "frequentist"], aes(x = nvars, y = value, group = method)) +
+#   geom_line(aes(color = method), size = .9) +
+#   scale_y_continuous(limits = c(0, .30), name = "type I error rate",
+#                      labels = scales::percent) +
+#   xlab("number of subgroups") +
+#   theme(panel.grid = element_blank()) +
+#   scale_color_manual(values = c("#2A363B", "#FECEA8"),
+#                      labels = c("credible interval", "one-sided test"))
 ```
 
 
-## Simulation 
-
-I’ve simulated scenarios where there are different numbers of subgroups that we might explore. I’d say we explored between 10 and 15. I am counting con-meds as one subgroup, although in reality this really included 4 sub-subgroups (in the final analysis): No/No, Yes/No, No/Yes, and Yes/Yes for steroids/remdesivir. Another subgroup would have been baseline WHO. In my simulations, I assumed that each subgroup had 3 sub-categories, which seems reasonable since the actual subgroups ranged from 2 to 4 sub-categories. In the simulations I used scenarios ranging from 1 to 20 subgroups.
- 
-My goal was to see what the type 1 error rate is based on the number of subgroup analyses that are conducted. If we conduct only 1 analysis, there is less opportunity to make a mistake, so the type I error will be lower. With many analyses, there is more chance we will make at least one mistake. The skeptical tweeters (and JAMA) feel that the type 1 error rate is extremely high, so they are not impressed.
- 
-For each scenario, I generated 1000 data sets and fit a model to each on (actually two, one frequentist and one bayes). I tracked how many of these data sets would have been declare “interesting” based on the decision criteria. I used our decision threshold P(OR < 1) > 95% and P(OR < 0.8) > 50% to evaluate the Bayes models, and I used a p-value < 0.05 to evaluate the frequentist model. Each declared success is an “error” since the data were generated without any subgroup-specific treatment effects. The proportion of the 1000 datasets that is an error is our error rate. The attached plot shows the error rates for the two methods (frequentist and Bayes) across different numbers of subgroups that are evaluated.
-
-How to interpret? If we conducted single analysis of a subgroup, the error rate using Bayes is about 5%, and using the frequentist, it is about 13%. Why is the frequentist so high? Well, we are actually conducting three statistical tests for the subgroup, so the error rate will certainly be greater than 5%. As we start looking at more and more subgroups, the error rate for the frequentist approach blows up pretty fast – heading to 70% for 12 subgroups. So, if we find some group that looks interesting, there is a very high probability that the finding is spurious. This is what is driving some of the deep skepticism. However, for the Bayes approach, the error rate is close to 20% for 12 subgroups, so much, much better. But, we still need to be careful in drawing conclusions. It is OK for generating hypotheses, but not great. People have a right to be skeptical, but there is no reason to completely dismiss the finding out of hand. It suggests that more work needs to be done. I think that is the way it has been presented.
+However, even for the Bayes approach, the error rate is close to 20% for 12 categories. So, we still need to be careful in drawing conclusions. In the case that we do find some potentially interesting results (which we did in the case of the CCP CONTAIN  trial), readers certainly have a right to be skeptical, but there is no reason to completely dismiss the findings out of hand. These sorts of findings suggest that more work needs to be done to better understand the nature of the treatment effects.
