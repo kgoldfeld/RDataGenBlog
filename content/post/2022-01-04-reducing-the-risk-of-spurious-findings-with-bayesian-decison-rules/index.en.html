@@ -1,5 +1,5 @@
 ---
-title: Minimize skepticism about subgroup analyses with skeptical Bayesian decison rules
+title: Skeptical Bayesian priors might help minimize skepticism about subgroup analyses
 author: Keith Goldfeld
 date: '2022-01-04'
 slug: []
@@ -23,18 +23,21 @@ draft: TRUE
 <img src="extra/significant.png" style="width:50.0%" alt="" />
 <p class="caption">Source: <a href="https://xkcd.com/882/" target="_blank">XKCD</a></p>
 </div>
-<p>The CONTAIN trial was conducted under very difficult circumstances, where the context was rapidly changing over time. Particularly challenging was the fact that new therapies were introduced for hospitalized patients over the course of the trial. And when we looked at the data, we noticed that while all patients had poor clinical outcomes in the first several months of the study, the CCP arm appeared to offer some benefits. Later on in the study, when corticosteroids and remdesivir were standard of care, patient outcomes were dramatically improved, and CCP was no longer providing any benefits. This was a very interesting finding that we felt merited some discussion.</p>
-<p>Not surprisingly, we have received some push back, suggesting that this finding is a classic case of <a href="https://www.rdatagen.net/post/regression-to-the-mean/" target="_blank">regression to the mean</a>. Normally, I would not have been comfortable presenting those findings, particularly not in a highly visible journal article. But we had used a Bayesian modelling framework with quite conservative decision criteria and quite skeptical prior distribution assumptions to evaluate the primary outcome and the exploratory outcomes, so we felt that while there is still a non-trivial chance that the findings are spurious, these were not green jelly bean findings. Add to this strong biological plausibility, and we felt quite strongly about presenting this to the growing body of literature about CCP.</p>
-<p>In this post, I am exploring through a series of simulations how conservative our conservative approach really is to make an assessment of how to interpret our exploratory analyses. This is <a href="https://www.rdatagen.net/post/2021-12-21-controling-type-1-error-rates-in-rcts-with-interim-looks-a-bayesian-perspective/" target="_blank">another look</a> at assessing Type I error rates, a frequentist notion, in the context of a Bayesian study design.</p>
-<div id="the-general-idea" class="section level2">
-<h2>The general idea</h2>
-<p>Let’s say I have a data generation process individual <span class="math inline">\(i\)</span> with a (binary) outcome <span class="math inline">\(Y\)</span> with some (binary) treatment or exposure <span class="math inline">\(A\)</span> that looks like</p>
+<p>The CONTAIN trial was conducted under very difficult circumstances, where the context was rapidly changing over time. Particularly challenging was the fact that new therapies were introduced for hospitalized patients over the course of the trial. And when we looked at the data, we noticed that while all patients had poor clinical outcomes in the first several months of the study, CCP appeared to offer some benefits. Later on in the study, when corticosteroids and remdesivir were standard of care, overall patient outcomes were dramatically improved, and CCP was no longer providing any benefits. This was a very interesting finding that we felt merited some discussion.</p>
+<p>Not surprisingly, we have received some push back, suggesting that this finding is a classic case of <a href="https://www.rdatagen.net/post/regression-to-the-mean/" target="_blank">regression to the mean</a>. Normally, I would not have been comfortable presenting those findings, particularly not in a highly visible journal article. But we had used a Bayesian modelling framework with quite quite skeptical prior distribution assumptions to evaluate the primary outcome and the exploratory outcomes, so we felt that while we needed to be cautious in how we presented the results, these were not green jelly bean findings. Given the strong biological plausibility, we felt quite strongly about adding these findings to the growing body of literature about CCP.</p>
+<p>In this post, I am sharing a series of simulations to explore how conservative our conservative approach really is. This is <a href="https://www.rdatagen.net/post/2021-12-21-controling-type-1-error-rates-in-rcts-with-interim-looks-a-bayesian-perspective/" target="_blank">another look</a> at assessing Type I error rates, a frequentist notion, in the context of a Bayesian study design.</p>
+<div id="the-subgroup-specific-treatment-effect" class="section level2">
+<h2>The subgroup-specific treatment effect</h2>
+<p>Let’s say there is a data generation process for individual <span class="math inline">\(i\)</span> with a (binary) outcome <span class="math inline">\(Y_i\)</span> with some (binary) treatment or exposure <span class="math inline">\(A_i\)</span> that looks like</p>
 <p><span class="math display">\[log\left(\frac{P(Y_i=1)}{P(Y_i=0)}\right ) = \alpha + \delta A_i.\]</span></p>
 <p>The log-odds is dependent only on the level of exposure <span class="math inline">\(A\)</span>.</p>
 <p>Let’s say that we’ve also measured some characteristic <span class="math inline">\(G\)</span>, which is a categorical variable with three levels. While the primary aim of the study is to estimate <span class="math inline">\(\delta\)</span>, the log-odds ratio comparing treated with controls, we might also be interested in a subgroup analysis based on <span class="math inline">\(G\)</span>. That is, is there a unique group-level treatment effect for any level of <span class="math inline">\(G\)</span>, <span class="math inline">\(G \in \{1,2,3\}\)</span>? In terms of the model, this would be</p>
 <p><span class="math display">\[ log\left(\frac{P(Y_i=1|G_i=g)}{P(Y_i=0|G_i=g)}\right ) = \alpha_g + \delta_g A_i, \ \  g \in \{1,2,3\}.\]</span></p>
-<p>In the case here, we know that <span class="math inline">\(\alpha_g = \alpha\)</span> and <span class="math inline">\(\delta_g = \deltaa\)</span> for all <span class="math inline">\(g\)</span> because the data generation process is independent of <span class="math inline">\(G\)</span>. However, due to sampling error it is quite possible that we will observe some differences in the data.</p>
-<p>We can start by simulating this. But first, here are all the libraries used to create the examples in this post:</p>
+<p>In the case here, we actually know that <span class="math inline">\(\alpha_g = \alpha\)</span> and <span class="math inline">\(\delta_g = \delta\)</span> for all <span class="math inline">\(g\)</span> because the data generation process is independent of <span class="math inline">\(G\)</span>. However, due to sampling error it is quite possible that we will observe some differences in the data.</p>
+</div>
+<div id="simulation" class="section level2">
+<h2>Simulation</h2>
+<p>We start by simulating this case of a single grouping with three potential subgroup analyses. First, here are the libraries used to create the examples in this post:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(posterior)
@@ -44,9 +47,9 @@ library(gtsummary)
 library(paletteer)
 library(ggplot2)
 library(ggdist)</code></pre>
-</div>
-<div id="data-generation" class="section level2">
-<h2>Data generation</h2>
+<div id="data-generation" class="section level4">
+<h4>Data generation</h4>
+<p>I’m generating 1000 subjects, with 500 in each treatment arm <span class="math inline">\(A\)</span>. About a third fall into each level of <span class="math inline">\(G\)</span>, and the binary outcome <span class="math inline">\(Y\)</span> takes a value of <span class="math inline">\(1\)</span> <span class="math inline">\(10\%\)</span> of the time for all subjects regardless of their treatment or group level</p>
 <pre class="r"><code>def &lt;- defData(varname = &quot;g&quot;, formula = &quot;1/3;1/3;1/3&quot;, dist = &quot;categorical&quot;)
 def &lt;- defData(def, &quot;a&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
 def &lt;- defData(def, &quot;y&quot;, formula = &quot;0.10&quot;, dist = &quot;binary&quot;)
@@ -68,10 +71,7 @@ dd</code></pre>
 ##  998:  998 1 1 0
 ##  999:  999 3 0 0
 ## 1000: 1000 3 1 0</code></pre>
-</div>
-<div id="logistic-regression" class="section level2">
-<h2>Logistic regression</h2>
-<p>We can fit a simple logistic model to evaluate estimate <span class="math inline">\(\delta\)</span>, the overall effect of the treatment. We see that the estimate of the OR is very close to 1, suggesting the odds of <span class="math inline">\(Y=1\)</span> is similar for both groups, so no apparent treatment effect. (Note that the exponentiated intercept is an estimate of the odds of <span class="math inline">\(Y=1\)</span> for the control arm. The data generation process assumed <span class="math inline">\(P(Y=1) = 0.10\)</span>, so the odds are <span class="math inline">\(0.11\)</span>.)</p>
+<p>We can fit a simple <strong>logistic regression model</strong> to estimate <span class="math inline">\(\delta\)</span>, the overall effect of the treatment. We see that the estimate of the OR is very close to 1, suggesting the odds of <span class="math inline">\(Y=1\)</span> is similar for both groups, so no apparent treatment effect. (Note that the exponentiated intercept is an estimate of the odds of <span class="math inline">\(Y=1\)</span> for the control arm. The data generation process assumed <span class="math inline">\(P(Y=1) = 0.10\)</span>, so the odds are <span class="math inline">\(0.1/0.9 = 0.11\)</span>.)</p>
 <pre class="r"><code>fitglm &lt;- glm(y ~ a, data = dd, family = &quot;binomial&quot;)
 tbl_regression(fitglm, intercept = TRUE, exponentiate = TRUE)</code></pre>
 <div id="mzrpzijtnm" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
@@ -449,7 +449,7 @@ tbl_regression(fitglm, intercept = TRUE, exponentiate = TRUE)</code></pre>
   </tfoot>
 </table>
 </div>
-<p>So, we could not infer that for the entire group treatment <span class="math inline">\(A\)</span> has any effect. But, maybe for some subgroups there is a treatment effect? We can fit a generalized linear model that allows the intercept and effect estimate vary by level of <span class="math inline">\(G\)</span>, and assess whether this is the case for subgroups defined by <span class="math inline">\(G\)</span>.</p>
+<p>So, we could not infer that for the entire group treatment <span class="math inline">\(A\)</span> has any effect. But, maybe for some subgroups there is a treatment effect? We can fit a generalized linear model that allows the intercept and effect estimate to vary by level of <span class="math inline">\(G\)</span>, and assess whether this is the case for subgroups defined by <span class="math inline">\(G\)</span>.</p>
 <pre class="r"><code>fitglm &lt;- glm(y ~ factor(g) + a:factor(g) - 1, data = dd, family = &quot;binomial&quot;)
 tbl_regression(fitglm, exponentiate = TRUE)</code></pre>
 <div id="vrfcerwkzj" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
@@ -853,9 +853,9 @@ tbl_regression(fitglm, exponentiate = TRUE)</code></pre>
 </div>
 <p>While there is more variability in the estimates, we still wouldn’t conclude that there are treatment effects within each level of <span class="math inline">\(G\)</span>.</p>
 </div>
-<div id="bayesian-model" class="section level2">
-<h2>Bayesian model</h2>
-<p>The purpose of this post is to illustrate how a appropriately specified Bayesian model can provide slightly more reliable estimates, particularly in the case where there really are no underlying treatment effects. So, here is a Bayes model that estimates subgroup-level intercepts and treatment effects:</p>
+<div id="the-bayesian-model" class="section level4">
+<h4>The Bayesian model</h4>
+<p>Since the purpose of this post is to illustrate how an appropriately specified Bayesian model can provide slightly more reliable estimates, particularly in the case where there really are no underlying treatment effects, here is a Bayes model that estimates subgroup-level intercepts and treatment effects:</p>
 <p><span class="math display">\[Y_{ig} \sim Bin(p_{ig})\]</span>
 <span class="math display">\[log\left(\frac{p_{ig}}{1-p_{ig}}\right) = \alpha_g + \delta_gA_i, \ \ g \in \{1,2,3\}  \]</span></p>
 <p>The prior distribution assumptions for the parameters <span class="math inline">\(\alpha_g\)</span> and <span class="math inline">\(\delta_g\)</span> are</p>
@@ -867,9 +867,10 @@ tbl_regression(fitglm, exponentiate = TRUE)</code></pre>
   \delta &amp;\sim N(\mu = 0, \sigma = 0.3537)
 \end{aligned}\]</span>
 <p>Note that the variance of the <span class="math inline">\(\delta_g\text{&#39;s}\)</span> around <span class="math inline">\(\delta\)</span> has been specified, but it could be estimated. However, since there are very few levels of <span class="math inline">\(G\)</span>, estimation of the variance can be slow; to speed the simulations, I’ve chosen a quicker path by specifying a pretty informative prior.</p>
+</div>
 <div id="fitting-the-bayes-model" class="section level4">
 <h4>Fitting the Bayes model</h4>
-<p>The <code>Stan</code> code for the model can be found in the appendix. To estimate the model, the the data needs to be passed as a list - and here is a function to convert the <code>R</code> data into the proper format:</p>
+<p>The <code>Stan</code> code that implements this model can be found in the <a href="#addendum">addendum</a>. To estimate the model, the the data need to be passed as a list - and here is a function to convert the <code>R</code> data into the proper format:</p>
 <pre class="r"><code>listdat &lt;- function(dx, grpvar) {
   
   dx[, grp := factor(get(grpvar))]
@@ -895,14 +896,14 @@ fitbayes &lt;- mod$sample(
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 3 finished in 5.4 seconds.
-## Chain 2 finished in 5.8 seconds.
-## Chain 1 finished in 6.0 seconds.
-## Chain 4 finished in 6.2 seconds.
+## Chain 3 finished in 5.5 seconds.
+## Chain 2 finished in 5.9 seconds.
+## Chain 1 finished in 6.2 seconds.
+## Chain 4 finished in 6.3 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 5.8 seconds.
-## Total execution time: 6.3 seconds.</code></pre>
+## Mean chain execution time: 6.0 seconds.
+## Total execution time: 6.4 seconds.</code></pre>
 <p>The estimates are quite similar to the <code>glm</code> estimates, though the ORs are pulled slightly towards 1 as a result of the informative prior. This is going to be the trick that ultimately protects the Type I error rate from completely blowing up.</p>
 <pre class="r"><code>fitbayes$summary(c(&quot;Odds_g&quot;,&quot;OR_g&quot;))</code></pre>
 <pre><code>## # A tibble: 6 × 10
@@ -934,10 +935,10 @@ ggplot(data = p_data, aes(dist = OR_g, y = cat)) +
 <pre><code>## [1] FALSE</code></pre>
 </div>
 </div>
-<div id="multiple-characteristics-that-define-many-subgroups" class="section level2">
-<h2>Multiple characteristics that define many subgroups</h2>
+<div id="increasing-the-number-of-subgroups" class="section level2">
+<h2>Increasing the number of subgroups</h2>
 <p>As the jelly beans make clear, things can really start to go awry when we start to investigate many possible subgroups. This can either be a single characteristic (like color) that has many, many levels, each of which can be a subgroup, or this can be many different characteristics that each have a few different levels. In our trial, we had the latter, all based on baseline data collection (and all reported as categories). These included health status, age, blood type, time between COVID symptom onset, medications, quarter of enrollment, and others.</p>
-<p>My interest here is to see how Type I error increases as the number of subgroups increases. I consider that a Type I error has occurred if <em>any</em> of the subgroups would be declared what I am calling “interesting”. “Interesting” and by no means definitive, because while the results might suggest that treatment effects are stronger in a particular subgroup, we do need to be aware that these are exploratory analyses.</p>
+<p>My interest here is to see how fast the Type I error increases as the number of subgroups increases. I consider that a Type I error has occurred if <em>any</em> of the subgroups would be declared what I am calling potentially “interesting”. “Interesting” and by no means definitive, because while the results might suggest that treatment effects are stronger in a particular subgroup, we do need to be aware that these are exploratory analyses.</p>
 <p>To explore Type I error rates, I will generate 20 categories, each of which has three levels. I can then use the model estimates from each of the subgroup analyses to evaluate how many times I would draw the wrong conclusion.</p>
 <div id="generating-multiple-categories" class="section level4">
 <h4>Generating multiple categories</h4>
@@ -1021,19 +1022,19 @@ dd</code></pre>
 <pre class="r"><code>res &lt;- lapply(paste0(&quot;g&quot;, 1:4), function(a) fitmods(dd, a))</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 1 finished in 5.7 seconds.
-## Chain 2 finished in 5.6 seconds.
-## Chain 4 finished in 5.8 seconds.
-## Chain 3 finished in 6.0 seconds.
+## Chain 2 finished in 5.5 seconds.
+## Chain 1 finished in 5.5 seconds.
+## Chain 4 finished in 5.7 seconds.
+## Chain 3 finished in 5.8 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 5.8 seconds.
-## Total execution time: 6.0 seconds.
+## Mean chain execution time: 5.6 seconds.
+## Total execution time: 5.8 seconds.
 ## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 5.5 seconds.
 ## Chain 1 finished in 5.6 seconds.
-## Chain 4 finished in 5.5 seconds.
+## Chain 2 finished in 5.5 seconds.
+## Chain 4 finished in 5.6 seconds.
 ## Chain 3 finished in 5.6 seconds.
 ## 
 ## All 4 chains finished successfully.
@@ -1041,24 +1042,24 @@ dd</code></pre>
 ## Total execution time: 5.7 seconds.
 ## Running MCMC with 4 parallel chains...
 ## 
-## Chain 4 finished in 5.8 seconds.
-## Chain 2 finished in 5.9 seconds.
-## Chain 1 finished in 6.1 seconds.
-## Chain 3 finished in 6.1 seconds.
+## Chain 4 finished in 5.5 seconds.
+## Chain 2 finished in 5.6 seconds.
+## Chain 1 finished in 5.9 seconds.
+## Chain 3 finished in 5.9 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 6.0 seconds.
-## Total execution time: 6.2 seconds.
+## Mean chain execution time: 5.7 seconds.
+## Total execution time: 5.9 seconds.
 ## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 5.7 seconds.
-## Chain 1 finished in 5.7 seconds.
-## Chain 3 finished in 5.8 seconds.
-## Chain 4 finished in 5.9 seconds.
+## Chain 1 finished in 5.5 seconds.
+## Chain 2 finished in 5.5 seconds.
+## Chain 3 finished in 5.6 seconds.
+## Chain 4 finished in 5.7 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 5.8 seconds.
-## Total execution time: 5.9 seconds.</code></pre>
+## Mean chain execution time: 5.6 seconds.
+## Total execution time: 5.8 seconds.</code></pre>
 <p>One of the arguments returned by <code>fitmods</code> is a data.table of summary results for each of the four categorical grouping. If any of the effect estimates for one or more of the three subgroup levels in a category was deemed “interesting” (based on a p-value &lt; 0.05 for the <code>glm</code> model, and the value 1 falling outside the 95% credible interval for the <code>stan</code> model), then the function returned a value of 1 or TRUE. In this case, at least one of the subgroups within <em>g4</em> would have been declared interesting based on the <code>glm</code> and <code>stan</code> models; at least one of the subgroups within <em>g2</em> would have been deemed interesting, but only based on the <code>glm</code> model:</p>
 <pre class="r"><code>type1_dt &lt;- rbindlist(lapply(res, function(x) x$type1_dt))
 type1_dt</code></pre>
@@ -1075,7 +1076,6 @@ ggplot(data = dc, aes(dist = OR_g, y = cat)) +
   stat_dist_halfeye(fill = palettes_d$awtools$a_palette[7], alpha = .8) +
   theme(panel.grid = element_blank()) +
   xlab(&quot;OR&quot;) +
-  # scale_x_continuous(limits = c(0, 4)) +
   facet_wrap(~ var)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="672" /></p>
 <p>We calculate the first occurrence of an <em>interesting</em> subgroup by looking across <em>g1</em> through <em>g4</em>. This will be useful for figuring out the Type I error rates for different numbers of categories. In this case, the first interesting subgroup based on the <code>stan</code> model is found when there are four categories; for the <code>glm</code> model, the first interesting subgroup is with two categories.</p>
@@ -1087,11 +1087,66 @@ first_true</code></pre>
 </div>
 <div id="simulation-study-results" class="section level2">
 <h2>Simulation study results</h2>
-<p>Now, having provided you with all that background, here are the results based on 1050 simulated data sets (because I had access to 75 cores on a high performance computing cluster) with 20 categorical groups of three levels each. For each data set <span class="math inline">\(r, \ r \in \{1,\dots,1050\}\)</span>, I determined the first occurrence of an “interesting” finding among the 20 categories for each model, and stored this in <span class="math inline">\(F_{br}\)</span> and <span class="math inline">\(F_{fr}\)</span> for the Bayes and frequentist models, respectively. <span class="math inline">\(T_m(g)\)</span> is the error rate for the model type <span class="math inline">\(m\)</span>, <span class="math inline">\(m \in \{b, f\}\)</span> with <span class="math inline">\(g\)</span> number of categories, and</p>
+<p>Now, with that background, here are the results based on 1050 simulated data sets (because I had access to 75 cores on a high performance computing cluster) with 20 categorical groups of three levels each. For each data set <span class="math inline">\(r, \ r \in \{1,\dots,1050\}\)</span>, I determined the first occurrence of an “interesting” finding among the 20 categories for each model, and stored this in <span class="math inline">\(F_{br}\)</span> and <span class="math inline">\(F_{fr}\)</span> for the Bayes and frequentist models, respectively. <span class="math inline">\(T_m(g)\)</span> is the error rate for the model type <span class="math inline">\(m\)</span>, <span class="math inline">\(m \in \{b, f\}\)</span> with <span class="math inline">\(g\)</span> number of categories, and</p>
 <p><span class="math display">\[
 T_m(g) = \frac{\sum_{r=1}^{1050} I(F_{mr} \le g)}{1050}
 \]</span></p>
-<p>Here is a plot of the Type I error rates calculated different numbers of categories. We can see for the frequentist model based on p-values, the error rates get quite large quite quickly, exceeding 50% by the time we reach 8 categories. In comparison, the error rates under the Bayes model with quite skeptical prior assumptions are held in check quite a bit better.</p>
+<p>Here is a plot of the Type I error rates calculated different numbers of categories. With the frequentist model (based on p-values) the error rates get quite large quite quickly, exceeding 50% by the time we reach 8 categories. In comparison, the error rates under the Bayes model with skeptical prior assumptions are held in check quite a bit better.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-17-1.png" width="672" /></p>
-<p>However, even for the Bayes approach, the error rate is close to 20% for 12 categories. So, we still need to be careful in drawing conclusions. In the case that we do find some potentially interesting results (which we did in the case of the CCP CONTAIN trial), readers certainly have a right to be skeptical, but there is no reason to completely dismiss the findings out of hand. These sorts of findings suggest that more work needs to be done to better understand the nature of the treatment effects.</p>
+<p>Even for the Bayes approach, however, the error rate is close to 20% for 12 categories. So, we still need to be careful in drawing conclusions. In the case that we do find some potentially interesting results (which we did in the case of the CCP CONTAIN trial), readers certainly have a right to be skeptical, but there is no reason to completely dismiss the findings out of hand. These sorts of findings suggest that more work needs to be done to better understand the nature of the treatment effects.</p>
+<p><a name="addendum"></a></p>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<pre class="stan"><code>data {
+  int&lt;lower=0&gt; N;              // number of observations
+  int&lt;lower=1&gt; L;              // number of levels
+  int&lt;lower=0,upper=1&gt; y[N];   // vector of categorical outcomes
+  int&lt;lower=0,upper=1&gt; a[N];   // treatment arm for individual
+  int&lt;lower=1,upper=4&gt; grp[N]; // grp for individual  
+}
+
+parameters {
+  vector[L] alpha_g;           // group effect
+  real delta_g[L];             // group treatment effects
+  real delta;                  // overall treatment effect
+}
+
+transformed parameters{ 
+  
+  vector[N] yhat;
+
+  for (i in 1:N)  
+    yhat[i] = alpha_g[grp[i]] + a[i] * delta_g[grp[i]];
+}
+
+model {
+  
+  // priors
+  
+  alpha_g ~ normal(0, 10);
+  delta_g ~ normal(delta, 0.3537);
+  delta ~ normal(0, 0.3537);
+  
+  // outcome model
+  
+  for (i in 1:N)
+    y[i] ~  bernoulli_logit(yhat[i]);
+}
+
+generated quantities {
+  
+  real&lt;lower = 0&gt; OR_g[L];
+  real&lt;lower = 0&gt; Odds_g[L];
+
+  real&lt;lower = 0&gt; OR;
+
+  for (i in 1:L) {
+    OR_g[i] = exp(delta_g[i]);   
+    Odds_g[i] = exp(alpha_g[i]);
+  }
+  
+  OR = exp(delta);
+  
+}</code></pre>
+</div>
 </div>
