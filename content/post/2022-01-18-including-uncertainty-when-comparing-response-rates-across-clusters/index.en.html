@@ -1,0 +1,551 @@
+---
+title: Including uncertainty when comparing response rates across clusters
+author: Package Build
+date: '2022-01-18'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+type: ''
+subtitle: ''
+image: ''
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Since this is a holiday weekend here in the US, I thought I would write up something relatively short and simple since I am supposed to be relaxing. A few weeks ago, someone presented me with some data that showed response rates to a survey that was conducted at about 30 different locations. The team that collected the data was interested in understanding if there were some sites that had response rates that might have been too low. To determine this, they generated a plot that looked something like this:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-1-1.png" width="672" /></p>
+<p>It looks like a few sites are far enough below the target threshold of 75% to merit concern. The question is, is this concern justified? Is this the best we can do to draw such a conclusion?</p>
+<p>Actually, the data I’ve shown here are simulated under the assumption that each site has the same 80% underlying probability of response, so in truth, there is no need to be concerned that some sites are under performers; if they fell short, it was only because they were unlucky. The problem with the plot is that it ignores any uncertainty that might highlight this. I thought it would be fun to show a couple of ways how we might estimate that uncertainty for each site, and then plot those solutions.</p>
+<div id="data-simulation" class="section level2">
+<h2>Data simulation</h2>
+<p>The data simulation has two key elements. First, the size of the sites (i.e. the total number of possible responses) is assumed to have a negative binomial distribution with a mean <span class="math inline">\(\mu\)</span> of 80 and dispersion parameter <span class="math inline">\(d\)</span> set at 0.3; the average size of the sites is 80 with standard deviation of <span class="math inline">\(\sqrt{\mu + \mu^2*d} = 44.7\)</span>. This is important, because the estimates for the smaller sites should reflect more uncertainty. Second, the probability of response has a binomial distribution with mean 0.80. I am using a <em>logit</em> link, and the log odds ratio is <span class="math inline">\(log(.8/.2) = 1.386\)</span>. In the last step of the data generation, I’m calculating the observed probability of response <span class="math inline">\(p\)</span>:</p>
+<pre class="r"><code>library(ggplot2)
+library(simstudy)
+library(data.table)
+library(cmdstanr)
+library(posterior)
+library(bayesplot)
+library(ggdist)
+library(gtsummary)
+
+def &lt;- defData(varname = &quot;n&quot;, formula = 80, variance = .3, dist=&quot;negBinomial&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, formula = 1.386, 
+          variance = &quot;n&quot;, link = &quot;logit&quot;, dist = &quot;binomial&quot;)
+def &lt;- defData(def, varname = &quot;p&quot;, formula = &quot;y/n&quot;, dist = &quot;nonrandom&quot;)
+
+set.seed(4601)
+dd &lt;- genData(30, def, id = &quot;site&quot;)</code></pre>
+<p>We can fit a generalized linear model with just an intercept to show that we can recover the log odds used to generate the data. Note that in the <code>glm</code> modeling statement, we are modeling the responses and non-responses in aggregate form, as opposed to individual 1’s and 0’s:</p>
+<pre class="r"><code>fit1 &lt;- glm(cbind(y, n - y) ~ 1, data = dd, family = &quot;binomial&quot;)
+
+tbl_regression(fit1, intercept = TRUE)</code></pre>
+<div id="wzasyxmhfn" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#wzasyxmhfn .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#wzasyxmhfn .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#wzasyxmhfn .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#wzasyxmhfn .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#wzasyxmhfn .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#wzasyxmhfn .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#wzasyxmhfn .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#wzasyxmhfn .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#wzasyxmhfn .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#wzasyxmhfn .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#wzasyxmhfn .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#wzasyxmhfn .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#wzasyxmhfn .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#wzasyxmhfn .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#wzasyxmhfn .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#wzasyxmhfn .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#wzasyxmhfn .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#wzasyxmhfn .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#wzasyxmhfn .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#wzasyxmhfn .gt_left {
+  text-align: left;
+}
+
+#wzasyxmhfn .gt_center {
+  text-align: center;
+}
+
+#wzasyxmhfn .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#wzasyxmhfn .gt_font_normal {
+  font-weight: normal;
+}
+
+#wzasyxmhfn .gt_font_bold {
+  font-weight: bold;
+}
+
+#wzasyxmhfn .gt_font_italic {
+  font-style: italic;
+}
+
+#wzasyxmhfn .gt_super {
+  font-size: 65%;
+}
+
+#wzasyxmhfn .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>log(OR)</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">(Intercept)</td>
+<td class="gt_row gt_center">1.4</td>
+<td class="gt_row gt_center">1.3, 1.5</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          OR = Odds Ratio, CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+<p>It is easy to recover the estimated probability by extracting the parameter estimate for the log odds (<em>lodds</em>) and converting it to a probability using</p>
+<p><span class="math display">\[p = \frac{1}{1 + e^{(-lodds)}}\]</span></p>
+<pre class="r"><code>lOR &lt;- coef(summary(fit1))[1]
+1/(1+exp(-lOR))</code></pre>
+<pre><code>## [1] 0.8</code></pre>
+<p>And here is a 95% confidence interval for the estimated probability:</p>
+<pre class="r"><code>ci &lt;- data.table(t(confint(fit1)))
+setnames(ci, c(&quot;l95_lo&quot;, &quot;u95_lo&quot;))
+ci[, .(1/(1+exp(-l95_lo)), 1/(1+exp(-u95_lo)))] </code></pre>
+<pre><code>##      V1   V2
+## 1: 0.78 0.82</code></pre>
+<p>For completeness, here is the observed probability:</p>
+<pre class="r"><code>with(dd, sum(y)/sum(n))</code></pre>
+<pre><code>## [1] 0.8</code></pre>
+</div>
+<div id="site-specific-probabilities" class="section level2">
+<h2>Site-specific probabilities</h2>
+<p>So far what we’ve done doesn’t really help us with getting at the site-level estimates. One way to do this is to fit the same model, but with site-specific intercepts.</p>
+<pre class="r"><code>fit2 &lt;- glm(cbind(y, n - y) ~ factor(site) - 1, data = dd, family = &quot;binomial&quot;)</code></pre>
+<p>Just as before we can get point estimates and 95% confidence intervals for each location based on the model’s estimated site-specific log odds.</p>
+<pre class="r"><code>sites &lt;- rownames(coef(summary(fit2)))
+p_est &lt;- 1/(1 + exp(-coef(summary(fit2))[,&quot;Estimate&quot;]))
+
+ci &lt;- data.table(confint(fit2)) 
+setnames(ci, c(&quot;l95_lo&quot;, &quot;u95_lo&quot;))
+ci[, `:=`(l95_p = 1/(1+exp(-l95_lo)), u95_p = 1/(1+exp(-u95_lo)))] </code></pre>
+<p>Plotting the point estimates with confidence intervals gives us a slightly different picture than the initial bar plot. The outliers at the bottom all have confidence intervals that cross the desired 75% threshold, suggesting that any differences might be due to chance.</p>
+<pre class="r"><code>dp &lt;- data.table(sites, p_est, ci[, .(l95_p, u95_p)])
+
+setkey(dp, p_est)
+dp[, index := .I]
+
+ggplot(data = dp, aes(x = p_est, y = index)) +
+  geom_vline(xintercept = 0.75, color = &quot;white&quot;, size = .8) +
+  geom_point(size = .8, color = &quot;#23518e&quot;) +
+  geom_segment(aes(x = l95_p, xend = u95_p, yend = index),
+               color = &quot;grey40&quot;, size = .2) +
+  theme(panel.grid = element_blank(),
+        axis.text.y= element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(size = 11, face = &quot;bold&quot;)) +
+  scale_x_continuous(limits = c(0.2,1), breaks = seq(0.2,1, by = 0.2),
+                     name = &quot;response rate&quot;) +
+  ylab(&quot;site&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+</div>
+<div id="bayesian-estimation" class="section level2">
+<h2>Bayesian estimation</h2>
+<p>This problem also lends itself very nicely to a hierarchical Bayesian approach, which is the second estimation method that we’ll use here. Taking this approach, we can assume that each site <span class="math inline">\(s\)</span> has its own underlying response probability <span class="math inline">\(\theta_s\)</span>, and these probabilities are drawn from a common <em>Beta</em> distribution (where values range from 0 to 1) with unknown parameters <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta\)</span>:</p>
+<p><span class="math display">\[\theta_s \sim Beta(\alpha, \beta), \ \ s \in \{1,2,\dots,30\}\]</span></p>
+<p>The model is implemented easily in <code>Stan</code>. The output of the model is joint distribution of <span class="math inline">\(\alpha\)</span>, <span class="math inline">\(\beta\)</span>, the <span class="math inline">\(\theta_s\text{&#39;s}\)</span>, and <span class="math inline">\(\mu\)</span>. <span class="math inline">\(\mu\)</span> is really the overall mean response rate based on the <em>Beta</em> distribution parameter estimates for <span class="math inline">\(\alpha\)</span> and <span class="math inline">\(\beta\)</span>:</p>
+<p><span class="math display">\[\mu = \frac{\alpha}{\alpha + \beta}\]</span>
+Here is the <code>Stan</code> implementation:</p>
+<pre class="stan"><code>data {
+  int&lt;lower=0&gt; S;
+  int&lt;lower=0&gt; y[S]; // numerator
+  int&lt;lower=0&gt; n[S]; // total observations (denominator)
+}
+
+parameters {
+  real&lt;lower=0,upper=1&gt; theta[S];
+  real&lt;lower=0&gt; alpha;
+  real&lt;lower=0&gt; beta;
+}
+
+model {
+  alpha ~ normal(0, 10);
+  beta ~ normal(0, 10);
+  
+  theta ~ beta(alpha, beta);
+  
+  y ~ binomial(n, theta);
+}
+
+generated quantities {
+  real mu;
+  mu = alpha/(alpha + beta);
+}</code></pre>
+<p>The <code>Stan</code> model is compiled and sampled using the <code>cmdstanr</code> package. I’m generating 20,000 samples (using 4 chains), following a warm-up of 1,000 samples in each of the chains.</p>
+<pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/binom.stan&quot;)
+
+data_list &lt;- list(S = nrow(dd), y = dd$y, n = dd$n)
+
+fit &lt;- mod$sample(
+  data = data_list,
+  refresh = 0,
+  chains = 4L,
+  parallel_chains = 4L,
+  iter_warmup = 1000,
+  iter_sampling = 5000,
+  show_messages = FALSE
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 1 finished in 0.6 seconds.
+## Chain 2 finished in 0.6 seconds.
+## Chain 3 finished in 0.6 seconds.
+## Chain 4 finished in 0.6 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 0.6 seconds.
+## Total execution time: 0.7 seconds.</code></pre>
+<p>Here are summary statistics for the key parameters <span class="math inline">\(\alpha\)</span>, <span class="math inline">\(\beta\)</span>, and <span class="math inline">\(\mu\)</span>. I’ve also included estimates of <span class="math inline">\(\theta_s\)</span> for two of the sites:</p>
+<pre class="r"><code>fit$summary(c(&quot;alpha&quot;, &quot;beta&quot;, &quot;mu&quot;,&quot;theta[1]&quot;, &quot;theta[3]&quot;))</code></pre>
+<pre><code>## # A tibble: 5 × 10
+##   variable   mean median     sd    mad     q5    q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 alpha    26.2   25.9   5.90   5.84   17.1   36.5    1.00   11589.   11646.
+## 2 beta      6.84   6.74  1.57   1.54    4.42   9.58   1.00   10767.   12191.
+## 3 mu        0.793  0.793 0.0157 0.0155  0.767  0.818  1.00   19683.   17110.
+## 4 theta[1]  0.824  0.827 0.0450 0.0444  0.746  0.893  1.00   28680.   14184.
+## 5 theta[3]  0.739  0.740 0.0401 0.0400  0.670  0.802  1.00   32542.   14816.</code></pre>
+<p>And finally, we can plot the site-specific estimates of <span class="math inline">\(\theta_s\)</span>, showing the median and 95% credible intervals of the posterior distribution. This biggest difference between this plot and the one above based on the <em>generalized linear model</em> is that the medians seem to shrink towards the common median and the credible intervals are narrower. Even the smaller sites have narrower credible intervals, because the estimates are pooling information across the sites.</p>
+<p>In the end, we would draw the same conclusions either way: we have no reason to believe that any sites are under performing.</p>
+<pre class="r"><code>post_array &lt;- fit$draws()
+
+df &lt;- data.frame(as_draws_rvars(fit$draws(variables = &quot;theta&quot;)))
+df$index &lt;- rank(median(df$theta))
+
+ggplot(data = df, aes(dist = theta, y = index)) +
+  geom_vline(xintercept = 0.75, color = &quot;white&quot;, size = .8) +
+  stat_dist_pointinterval(.width = c(.95), 
+                          point_color = &quot;#23518e&quot;,
+                          interval_color = &quot;grey80&quot;,
+                          interval_size = 1,
+                          point_size = .4) +
+  theme(panel.grid = element_blank(),
+        axis.text.y= element_blank(),
+        axis.ticks.y = element_blank(),
+        plot.title = element_text(size = 11, face = &quot;bold&quot;)) +
+  scale_x_continuous(limits = c(0.2,1), breaks = seq(0.2,1, by = 0.2),
+                     name = &quot;response rate&quot;) +
+  ylab(&quot;site&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="672" /></p>
+<p>I did conduct some simulations where there <em>were</em> actually true underlying differences between the sites, but to keep this post more manageable, I will not include that here - I leave that data generation to you as an exercise.</p>
+</div>
