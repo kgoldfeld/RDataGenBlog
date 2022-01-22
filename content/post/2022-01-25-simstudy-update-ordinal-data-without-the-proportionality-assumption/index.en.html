@@ -1,0 +1,165 @@
+---
+title: 'simstudy update: ordinal data generation that violates proportionality'
+author: Package Build
+date: '2022-01-25'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>Version 0.4.0 of <code>simstudy</code> is now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a> and <a href="https://github.com/kgoldfeld/simstudy" target="_blank">GitHub</a>. This update includes two enhancements (and at least one major bug fix). <code>genOrdCat</code> now includes an argument to generate ordinal data without an assumption of cumulative proportional odds. And two new functions <code>defRepeat</code> and <code>defRepeatAdd</code> make it a bit easier to define multiple variables that share the same distribution assumptions.</p>
+<div id="ordinal-data" class="section level2">
+<h2>Ordinal data</h2>
+<p>In <code>simstudy</code>, it is relatively easy to specify multinomial distributions that characterize categorical data. Order becomes relevant when the categories take on meanings related to strength of opinion or agreement (as in a Likert-type response) or frequency. A motivating example could be when a response variable takes on four possible values: (1) strongly disagree, (2) disagree, (4) agree, (5) strongly agree. There is a natural order to the response possibilities.</p>
+<p>If we are interested in comparing responses for two groups (say an <em>exposed</em> group and an <em>unexposed</em> group), we can look at the cumulative odds of the response a each level <span class="math inline">\(x\)</span> of the response:</p>
+<p><span class="math display">\[\small{\frac{P(response &gt; x|exposed)}{P(response \le x|exposed)} \ \ vs. \ \frac{P(response &gt; x|unexposed)}{P(response \le x|unexposed)}},\]</span></p>
+<p>The comparison is often a ratio of those two odds - the cumulative odds ratio - or a log of the odds ratio.</p>
+<div id="genordcat" class="section level3">
+<h3>genOrdCat</h3>
+<p>The way to generate ordered categorical data in <code>simstudy</code> is with the function <code>genOrdCat</code>. The probability of responses or categories is specified for the reference group - in this case the <em>unexposed</em>. The effect of exposure (and any other covariates) is expressed in an <em>adjustment variable</em> (here <em>z</em>). In the data generating process defined below, we are saying that the cumulative odds for the <em>exposed</em> is about 1/2 the odds for the <em>unexposed</em> at each level of response <em>x</em>. This is the proportional odds assumption, and on the log(OR) scale this is <span class="math inline">\(log(0.5) = -0.7\)</span>.</p>
+<pre class="r"><code>baseprobs &lt;- c(0.35, 0.25, 0.20, 0.20)
+
+defA &lt;- defData(varname = &quot;exposed&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+defA &lt;- defData(defA, varname = &quot;z&quot;, formula = &quot;-0.7 * exposed&quot;, dist = &quot;nonrandom&quot;)
+
+set.seed(230)
+
+dd &lt;- genData(25000, defA)
+dx &lt;- genOrdCat(dd, adjVar = &quot;z&quot;, baseprobs, catVar = &quot;response&quot;)</code></pre>
+<p>Here is a manual calculation of the observed probabilities and odds (for a more visual interpretation of all of this, see this <a href="https://kgoldfeld.github.io/simstudy/articles/ordinal.html" target="_blank">description</a>):</p>
+<pre class="r"><code>dp &lt;- dx[, .(n = .N), keyby = .(exposed, response)]
+dp[, p := n/sum(n), keyby = .(exposed)]
+dp[, cump := round(cumsum(p),3), keyby = .(exposed)]
+dp[, codds := (1-cump)/cump]
+dp[, lcodds := log(codds)]
+dp</code></pre>
+<pre><code>##    exposed response    n    p cump codds lcodds
+## 1:       0        1 4406 0.35 0.35  1.84   0.61
+## 2:       0        2 3168 0.25 0.61  0.65  -0.43
+## 3:       0        3 2471 0.20 0.80  0.24  -1.41
+## 4:       0        4 2455 0.20 1.00  0.00   -Inf
+## 5:       1        1 6616 0.53 0.53  0.89  -0.12
+## 6:       1        2 2860 0.23 0.76  0.32  -1.14
+## 7:       1        3 1638 0.13 0.89  0.12  -2.08
+## 8:       1        4 1386 0.11 1.00  0.00   -Inf</code></pre>
+<p>We can calculate the cumulative odds ratio at each response level …</p>
+<pre class="r"><code>dc &lt;- dcast(dp, response ~ exposed, value.var = &quot;codds&quot;)
+dc [, cOR := `1`/`0`]
+dc</code></pre>
+<pre><code>##    response    0    1  cOR
+## 1:        1 1.84 0.89 0.48
+## 2:        2 0.65 0.32 0.49
+## 3:        3 0.24 0.12 0.51
+## 4:        4 0.00 0.00  NaN</code></pre>
+<p>and the log(cOR):</p>
+<pre class="r"><code>dc &lt;- dcast(dp, response ~ exposed, value.var = &quot;lcodds&quot;)
+dc [, lcOR := `1` - `0`]
+dc</code></pre>
+<pre><code>##    response     0     1  lcOR
+## 1:        1  0.61 -0.12 -0.73
+## 2:        2 -0.43 -1.14 -0.71
+## 3:        3 -1.41 -2.08 -0.67
+## 4:        4  -Inf  -Inf   NaN</code></pre>
+<p>Estimating the parameters of the model using function <code>clm</code> in the <code>ordinal</code> package, we can recover the original parameters quite well. Note that the threshold coefficients are log cumulative odds at each response level for the reference group, the <em>unexposed</em>.</p>
+<pre class="r"><code>library(ordinal)
+clmFit &lt;- clm(response ~ exposed, data = dx)
+summary(clmFit)</code></pre>
+<pre><code>## formula: response ~ exposed
+## data:    dx
+## 
+##  link  threshold nobs  logLik    AIC      niter max.grad cond.H 
+##  logit flexible  25000 -31750.20 63508.39 4(0)  6.05e-07 1.9e+01
+## 
+## Coefficients:
+##         Estimate Std. Error z value Pr(&gt;|z|)    
+## exposed  -0.7146     0.0236   -30.3   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Threshold coefficients:
+##     Estimate Std. Error z value
+## 1|2  -0.6017     0.0176   -34.3
+## 2|3   0.4305     0.0173    24.9
+## 3|4   1.3941     0.0201    69.3</code></pre>
+<p>A plot of the modeled cumulative probabilities (the lines) shows that the proportionality assumption fit the observed data (the points) quite well.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="576" /></p>
+</div>
+<div id="non-proportional-odds" class="section level3">
+<h3>Non-proportional odds</h3>
+<p>With the recent update, it is now possible to generate data that violate the proportionality assumption by using new arguments <code>npVar</code> and <code>npAdj</code>. <code>npVar</code> indicates the variable(s) for which the non-proportional assumption is violated, and <code>npAdj</code> is a vector that specifies the extent and direction of the violation at each level of the response (on the logit scale). (Since the log odds ratio for the highest level response is infinite, the final value in the vector has no impact.)</p>
+<pre class="r"><code>dx &lt;- genOrdCat(dd, baseprobs = baseprobs, catVar = &quot;response&quot;, adjVar = &quot;z&quot;,
+                npVar = &quot;exposed&quot;, npAdj = c(1.0, 0, -1.0, 0))</code></pre>
+<pre class="r"><code>dp &lt;- dx[, .(n = .N), keyby = .(exposed, response)]
+dp[, p := n/sum(n), keyby = .(exposed)]
+dp[, cump := round(cumsum(p),3), keyby = .(exposed)]
+dp[, codds := (1-cump)/cump]
+dp[, lcodds := log(codds)]
+dp</code></pre>
+<pre><code>##    exposed response    n     p cump codds lcodds
+## 1:       0        1 4351 0.348 0.35 1.874   0.63
+## 2:       0        2 3145 0.252 0.60 0.667  -0.41
+## 3:       0        3 2444 0.196 0.80 0.258  -1.36
+## 4:       0        4 2560 0.205 1.00 0.000   -Inf
+## 5:       1        1 3506 0.280 0.28 2.571   0.94
+## 6:       1        2 5784 0.463 0.74 0.346  -1.06
+## 7:       1        3 2629 0.210 0.95 0.048  -3.03
+## 8:       1        4  581 0.046 1.00 0.000   -Inf</code></pre>
+<p>We can see that the cumulative OR for response level 2 remains close to 0.5, but the cORs shift away from 0.5 response levels 1 and 3.</p>
+<pre class="r"><code>dc &lt;- dcast(dp, response ~ exposed, value.var = &quot;codds&quot;)
+dc [, cOR := `1`/`0`]
+dc</code></pre>
+<pre><code>##    response    0     1  cOR
+## 1:        1 1.87 2.571 1.37
+## 2:        2 0.67 0.346 0.52
+## 3:        3 0.26 0.048 0.19
+## 4:        4 0.00 0.000  NaN</code></pre>
+<p>On the log odds scale, it is possible to see the direct effect of the values specified in the adjustment vector <code>npAdj</code>. The observed log cumulative OR at response level 1 is <span class="math inline">\(1.0 - 0.7 = 0.3\)</span>, and the at level 3 it is <span class="math inline">\(-1.0 - 0.7 = -1.7:\)</span></p>
+<pre class="r"><code>dc &lt;- dcast(dp, response ~ exposed, value.var = &quot;lcodds&quot;)
+dc [, lcOR := `1` - `0`]
+dc</code></pre>
+<pre><code>##    response     0     1  lcOR
+## 1:        1  0.63  0.94  0.32
+## 2:        2 -0.41 -1.06 -0.66
+## 3:        3 -1.36 -3.03 -1.68
+## 4:        4  -Inf  -Inf   NaN</code></pre>
+<p>The lack of proportionality is confirmed by a plot of the model fit with a proportional odds assumption along with the observed cumulative proportions. Since the model imposes proportionality, the observed points no longer lie along the prediction line:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="576" /></p>
+</div>
+</div>
+<div id="generating-multiple-variables-with-a-single-definition" class="section level2">
+<h2>Generating multiple variables with a single definition</h2>
+<p><code>defRepeat</code> is a new function that allows us to specify multiple versions of a variable based on a single set of distribution assumptions. (There is an similar function <code>defRepeatAdd</code> to be used for definitions when adding data to an existing data set.) The function will add <code>nvar</code> variables to the <em>data definition</em> table, each of which will be specified with a single set of distribution assumptions. The names of the variables will be based on the <code>prefix</code> argument and the distribution assumptions are specified as they are in the <code>defData</code> function. Calls to <code>defRepeat</code> can be integrated with calls to <code>defData</code>.</p>
+<pre class="r"><code>def &lt;- defRepeat(nVars = 4, prefix = &quot;g&quot;, formula = &quot;1/3;1/3;1/3&quot;, 
+   variance = 0, dist = &quot;categorical&quot;)
+def &lt;- defData(def, varname = &quot;a&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+def &lt;- defRepeat(def, 3, &quot;b&quot;, formula = &quot;5 + a&quot;, variance = 3, dist = &quot;normal&quot;)
+def &lt;- defData(def, &quot;y&quot;, formula = &quot;0.10&quot;, dist = &quot;binary&quot;)
+
+def</code></pre>
+<pre><code>##    varname     formula variance        dist     link
+## 1:      g1 1/3;1/3;1/3        0 categorical identity
+## 2:      g2 1/3;1/3;1/3        0 categorical identity
+## 3:      g3 1/3;1/3;1/3        0 categorical identity
+## 4:      g4 1/3;1/3;1/3        0 categorical identity
+## 5:       a         1;1        0   trtAssign identity
+## 6:      b1       5 + a        3      normal identity
+## 7:      b2       5 + a        3      normal identity
+## 8:      b3       5 + a        3      normal identity
+## 9:       y        0.10        0      binary identity</code></pre>
+<pre class="r"><code>genData(5, def)</code></pre>
+<pre><code>##    id g1 g2 g3 g4 a  b1  b2  b3 y
+## 1:  1  1  3  3  1 1 8.7 8.2 7.2 0
+## 2:  2  1  2  2  1 0 2.0 4.6 2.8 0
+## 3:  3  2  2  2  1 1 3.2 6.7 4.8 0
+## 4:  4  1  2  2  1 1 6.3 6.6 8.5 0
+## 5:  5  2  3  1  2 0 5.2 5.1 9.5 0</code></pre>
+</div>

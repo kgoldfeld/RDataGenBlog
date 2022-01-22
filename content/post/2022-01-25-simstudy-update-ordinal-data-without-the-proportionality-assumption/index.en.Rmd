@@ -1,0 +1,215 @@
+---
+title: 'simstudy update: ordinal data generation that violates proportionality'
+author: Package Build
+date: '2022-01-25'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+Version 0.4.0 of `simstudy` is now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"} and [GitHub](https://github.com/kgoldfeld/simstudy){target="_blank"}. This update includes two enhancements (and at least one major bug fix). `genOrdCat` now includes an argument to generate ordinal data without an assumption of cumulative proportional odds. And two new functions `defRepeat` and `defRepeatAdd` make it a bit easier to define multiple variables that share the same distribution assumptions.
+
+```{r, echo = FALSE, message = FALSE}
+library(simstudy)
+library(ggplot2)
+library(scales)
+library(grid)
+library(gridExtra)
+library(survival)
+library(gee)
+library(data.table)
+library(ordinal)
+
+options(digits = 2)
+
+odds <- function (p)  p/(1 - p) # TODO temporary remove when added to package
+plotcolors <- c("#B84226", "#1B8445", "#1C5974")
+
+cbbPalette <- c("#B84226","#B88F26", "#A5B435", "#1B8446",
+                "#B87326","#B8A526", "#6CA723", "#1C5974") 
+
+ggtheme <- function(panelback = "white") {
+  
+  ggplot2::theme(
+    panel.background = element_rect(fill = panelback),
+    panel.grid = element_blank(),
+    axis.ticks =  element_line(colour = "black"),
+    panel.spacing =unit(0.25, "lines"),  # requires package grid
+    panel.border = element_rect(fill = NA, colour="gray90"), 
+    plot.title = element_text(size = 8,vjust=.5,hjust=0),
+    axis.text = element_text(size=8),
+    axis.title = element_text(size = 8)
+  )  
+  
+}
+
+```
+
+## Ordinal data
+
+In `simstudy`, it is relatively easy to specify multinomial distributions that characterize categorical data. Order becomes relevant when the categories take on meanings related to strength of opinion or agreement (as in a Likert-type response) or frequency. A motivating example could be when a response variable takes on four possible values: (1) strongly disagree, (2) disagree, (4) agree, (5) strongly agree. There is a natural order to the response possibilities.
+
+If we are interested in comparing responses for two groups (say an *exposed* group and an *unexposed* group), we can look at the cumulative odds of the response a each level $x$ of the response:
+
+$$\small{\frac{P(response > x|exposed)}{P(response \le x|exposed)} \ \ vs. \ \frac{P(response > x|unexposed)}{P(response \le x|unexposed)}},$$
+
+The comparison is often a ratio of those two odds - the cumulative odds ratio - or a log of the odds ratio.
+
+### genOrdCat
+
+The way to generate ordered categorical data in `simstudy` is with the function `genOrdCat`. The probability of responses or categories is specified for the reference group - in this case the *unexposed*. The effect of exposure (and any other covariates) is expressed in an *adjustment variable* (here *z*). In the data generating process defined below, we are saying that the cumulative odds for the *exposed* is about 1/2 the odds for the *unexposed* at each level of response *x*. This is the proportional odds assumption, and on the log(OR) scale this is $log(0.5) = -0.7$.
+
+```{r acuts}
+baseprobs <- c(0.35, 0.25, 0.20, 0.20)
+
+defA <- defData(varname = "exposed", formula = "1;1", dist = "trtAssign")
+defA <- defData(defA, varname = "z", formula = "-0.7 * exposed", dist = "nonrandom")
+
+set.seed(230)
+
+dd <- genData(25000, defA)
+dx <- genOrdCat(dd, adjVar = "z", baseprobs, catVar = "response")
+```
+
+Here is a manual calculation of the observed probabilities and odds (for a more visual interpretation of all of this, see this [description](https://kgoldfeld.github.io/simstudy/articles/ordinal.html){target="_blank"}):
+
+```{r}
+dp <- dx[, .(n = .N), keyby = .(exposed, response)]
+dp[, p := n/sum(n), keyby = .(exposed)]
+dp[, cump := round(cumsum(p),3), keyby = .(exposed)]
+dp[, codds := (1-cump)/cump]
+dp[, lcodds := log(codds)]
+dp
+```
+
+We can calculate the cumulative odds ratio at each response level ...
+
+```{r}
+dc <- dcast(dp, response ~ exposed, value.var = "codds")
+dc [, cOR := `1`/`0`]
+dc
+```
+
+and the log(cOR):
+
+```{r}
+dc <- dcast(dp, response ~ exposed, value.var = "lcodds")
+dc [, lcOR := `1` - `0`]
+dc
+```
+
+Estimating the parameters of the model using function `clm` in the `ordinal` package, we can recover the original parameters quite well. Note that the threshold coefficients are log cumulative odds at each response level for the reference group, the *unexposed*.
+
+```{r ordinal}
+library(ordinal)
+clmFit <- clm(response ~ exposed, data = dx)
+summary(clmFit)
+```
+
+A plot of the modeled cumulative probabilities (the lines) shows that the proportionality assumption fit the observed data (the points) quite well.
+
+```{r, echo=FALSE, fig.width=6, fig.height=3.5}
+getCumProbs <- function(coefs) {
+  
+  cumprob0 <- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != "exposed")])), 1),
+    response = factor(1 : nrow(coefs)),
+    exposed = 0
+  )
+  
+  cumprob1 <- data.table(
+    cumprob = c(1/(1 + exp(-coefs[which(rownames(coefs) != "exposed")] + 
+                             coefs["exposed", 1])), 1),
+    response = factor(1 : nrow(coefs)),
+    exposed = 1
+  )
+  
+  rbind(cumprob0, cumprob1)[]
+ 
+}
+
+fitPlot <- function(dx) {
+  
+  clmFit <- clm(response ~ exposed, data = dx)
+  coefs <- coef(summary(clmFit))
+  cumModProbs <- getCumProbs(coefs)
+
+  cumObsProbs <- dx[, .N, keyby = .(exposed, response)]
+  cumObsProbs[, cumprob := cumsum(N)/sum(N) , keyby = exposed]
+  
+  ggplot(data = cumObsProbs, aes(x = response, 
+                                 y = cumprob, color = factor(exposed))) +
+    geom_line(data = cumModProbs, alpha = 1, aes(group=exposed)) +
+    geom_point(size = 1.25) +
+    ylab("cumulative probability") +
+    xlab("ordinal category") +
+    theme(panel.grid = element_blank(),
+          legend.title = element_blank()) +
+    scale_color_manual(values = c("#7c8e8f", "#8f7c8e"), 
+                       labels = c("Not exposed", "Exposed"))
+}
+
+fitPlot(dx)
+```
+
+### Non-proportional odds 
+
+With the recent update, it is now possible to generate data that violate the proportionality assumption by using new arguments `npVar` and `npAdj`.  `npVar` indicates the variable(s) for which the non-proportional assumption is violated, and `npAdj` is a vector that specifies the extent and direction of the violation at each level of the response (on the logit scale). (Since the log odds ratio for the highest level response is infinite, the final value in the vector has no impact.)
+
+```{r}
+dx <- genOrdCat(dd, baseprobs = baseprobs, catVar = "response", adjVar = "z",
+                npVar = "exposed", npAdj = c(1.0, 0, -1.0, 0))
+```
+
+
+```{r}
+dp <- dx[, .(n = .N), keyby = .(exposed, response)]
+dp[, p := n/sum(n), keyby = .(exposed)]
+dp[, cump := round(cumsum(p),3), keyby = .(exposed)]
+dp[, codds := (1-cump)/cump]
+dp[, lcodds := log(codds)]
+dp
+```
+
+We can see that the cumulative OR for response level 2 remains close to 0.5, but the cORs shift away from 0.5 response levels 1 and 3.
+
+```{r}
+dc <- dcast(dp, response ~ exposed, value.var = "codds")
+dc [, cOR := `1`/`0`]
+dc
+```
+
+On the log odds scale, it is possible to see the direct effect of the values specified in the adjustment vector `npAdj`. The observed log cumulative OR at response level 1 is $1.0 - 0.7 = 0.3$, and the at level 3 it is $-1.0 - 0.7 = -1.7:$
+
+```{r}
+dc <- dcast(dp, response ~ exposed, value.var = "lcodds")
+dc [, lcOR := `1` - `0`]
+dc
+```
+
+The lack of proportionality is confirmed by a plot of the model fit with a proportional odds assumption along with the observed cumulative proportions. Since the model imposes proportionality, the observed points no longer lie along the prediction line:
+  
+```{r, echo=FALSE, fig.width=6, fig.height=3.5, warning=FALSE}
+fitPlot(dx)
+```
+
+## Generating multiple variables with a single definition
+
+`defRepeat` is a new function that allows us to specify multiple versions of a variable based on a single set of distribution assumptions. (There is an similar function `defRepeatAdd` to be used for definitions when adding data to an existing data set.) The function will add `nvar` variables to the *data definition* table, each of which will be specified with a single set of distribution assumptions. The names of the variables will be based on the `prefix` argument and the distribution assumptions are specified as they are in the `defData` function. Calls to `defRepeat` can be integrated with calls to `defData`.
+
+```{r}
+def <- defRepeat(nVars = 4, prefix = "g", formula = "1/3;1/3;1/3", 
+   variance = 0, dist = "categorical")
+def <- defData(def, varname = "a", formula = "1;1", dist = "trtAssign")
+def <- defRepeat(def, 3, "b", formula = "5 + a", variance = 3, dist = "normal")
+def <- defData(def, "y", formula = "0.10", dist = "binary")
+
+def
+genData(5, def)
+```
