@@ -1,0 +1,86 @@
+---
+title: 'Simulating survival outcomes: setting the parameters for the desired distribution'
+author: Package Build
+date: '2022-02-08'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+  - survival analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>The package <code>simstudy</code> has some functions that facilitate generating of survival data using an underlying Weibull distribution. Originally, I added this, because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I’ve started to try to simulate a simplified version of the data that we have.</p>
+<p>Hopefully in the future, I’ll be able to describe the motivating simulations in more detail. But here, I want to go into more detail about the general survival data generating process using <code>simstudy</code>, focusing in particular on how to identify the parameters to make the simulated data as realistic as possible.</p>
+<p><span class="math display">\[T = \left[ \frac{-\text{log}(u)}{exp(f)}  \right] ^ \nu\]</span></p>
+<span class="math display">\[\begin{aligned}
+log(T) &amp;= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
+\\ 
+&amp;= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
+\end{aligned}\]</span>
+<p><span class="math display">\[ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)\]</span></p>
+<p><span class="math display">\[ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)\]</span></p>
+<p><span class="math display">\[\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2\]</span></p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(survival)
+library(ggplot2)
+library(gganimate)
+
+get_surv &lt;- function(f, shape, n = 100) {
+  
+  u &lt;- seq(1, 0.001, length = n)
+  
+  dd &lt;- data.table(
+    f = f,
+    shape = shape,
+    T = (-(log(u)/exp(f)))^(shape),
+    p = round(1 - cumsum(rep(1/length(u), length(u))), 3)
+  )
+  
+  dd
+
+}
+
+f &lt;- c(-26, -27, -28, -29)
+shape &lt;- c(0.16, .18, .20, .22)
+
+eg &lt;- expand.grid(f=f, shape=shape)
+eg &lt;- asplit(eg, MARGIN = 1)
+
+l &lt;- lapply(eg, function(x) get_surv(x[1], x[2]))
+l &lt;- rbindlist(l)
+
+ggplot(data = l, aes(x = T, y = p)) +
+  geom_line(aes(group = f, color = factor(f))) +
+  ylim(0,1) +
+  xlim(0, 800) +
+  facet_grid ( ~ shape) +
+  theme(panel.grid = element_blank()) +
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size = 7.5)) +
+  scale_color_manual(
+    values = c(&quot;#7D9D33&quot;, &quot;#CED38C&quot;, &quot;#DCC949&quot;, &quot;#BCA888&quot;, &quot;#CD8862&quot;, &quot;#775B24&quot;),
+    name = &quot;  f&quot;
+  )</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-1-1.png" width="768" /></p>
+<p>See <a href="#addendum">addendum</a> for code.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.gif" /><!-- --></p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Bender, Ralf, Thomas Augustin, and Maria Blettner. “Generating survival times to simulate Cox proportional hazards models.” Statistics in medicine 24, no. 11 (2005): 1713-1723.</p>
+</font></small>
+</p>
+<p><a name="addendum"></a></p>
+<p> </p>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
+</div>
