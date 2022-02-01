@@ -18,23 +18,22 @@ draft: TRUE
 
 
 <p>The package <code>simstudy</code> has some functions that facilitate generating of survival data using an underlying Weibull distribution. Originally, I added this, because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I’ve started to try to simulate a simplified version of the data that we have.</p>
-<p>Hopefully in the future, I’ll be able to describe the motivating simulations in more detail. But here, I want to go into more detail about the general survival data generating process using <code>simstudy</code>, focusing in particular on how to identify the parameters to make the simulated data as realistic as possible.</p>
-<p><span class="math display">\[T = \left[ \frac{-\text{log}(u)}{exp(f)}  \right] ^ \nu\]</span></p>
-<span class="math display">\[\begin{aligned}
-log(T) &amp;= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
-\\ 
-&amp;= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
-\end{aligned}\]</span>
-<p><span class="math display">\[ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)\]</span></p>
-<p><span class="math display">\[ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)\]</span></p>
-<p><span class="math display">\[\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2\]</span></p>
+<p>At some point, I’d like to describe the motivating simulations in more detail. But here, I want to focus more generally on the survival data generating process using <code>simstudy</code>, looking in particular at how to identify the parameters that allow the simulated data to match the desired characteristics.</p>
+<div id="weibull-cox-proprtional-hazard-data-generation-process" class="section level2">
+<h2>Weibull-Cox proprtional hazard data generation process</h2>
+<p><code>simstudy</code> uses an underlying data generating process for survival outcomes that draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this <a href="https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059" target="_blank"><em>Bender, Augustin, and Blettner</em></a> paper, so head over there if you really want the details.</p>
+<p>The times to survival <span class="math inline">\(T\)</span> are generated using three parameters, <span class="math inline">\(\lambda\)</span> (scale), <span class="math inline">\(\nu\)</span> (shape), and <span class="math inline">\(f\)</span>, which is really <span class="math inline">\(\mathbf{\beta^\prime x}\)</span> from a Cox proportional hazard model.</p>
+<p><span class="math display">\[T = \left[ \frac{- \lambda \ \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
+<p>A single instance <span class="math inline">\(T\)</span> is “drawn” from the Weibull distribution by generating <span class="math inline">\(u\)</span> from the uniform <span class="math inline">\(U(0,1)\)</span> distribution. It will be the case that <span class="math inline">\((1-u) \%\)</span> of the survival times <span class="math inline">\(T\)</span> will fall below the values of <span class="math inline">\(T\)</span> determined by <span class="math inline">\(u\)</span>; this will be helpful later when we need to generate data with specific distributions in mind.</p>
+<p>It turns out that we don’t really need the scale parameter <span class="math inline">\(\lambda\)</span>, because it can be absored into <span class="math inline">\(f\)</span>, so in all the examples that follow, we’ll set <span class="math inline">\(\lambda = 1\)</span>, which leaves us with</p>
+<p><span class="math display">\[T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
+<p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
-library(survival)
 library(ggplot2)
-library(gganimate)
-
-get_surv &lt;- function(f, shape, n = 100) {
+library(gganimate)</code></pre>
+<p>The function <code>get_surv</code> generates data for the survival curve. It is deterministic in that it does not generate draws of <span class="math inline">\(u\)</span>, but calculates a specific <span class="math inline">\(T\)</span> for each value of <span class="math inline">\(u\)</span> distribution evenly between 0 and 1.</p>
+<pre class="r"><code>get_surv &lt;- function(f, shape, n = 100) {
   
   u &lt;- seq(1, 0.001, length = n)
   
@@ -45,11 +44,24 @@ get_surv &lt;- function(f, shape, n = 100) {
     p = round(1 - cumsum(rep(1/length(u), length(u))), 3)
   )
   
-  dd
+  return(dd)
 
 }
 
-f &lt;- c(-26, -27, -28, -29)
+get_surv(-10, .3, n = 10)</code></pre>
+<pre><code>##       f shape        T   p
+##  1: -10   0.3  0.00000 0.9
+##  2: -10   0.3 10.56988 0.8
+##  3: -10   0.3 13.26785 0.7
+##  4: -10   0.3 15.31471 0.6
+##  5: -10   0.3 17.11875 0.5
+##  6: -10   0.3 18.85288 0.4
+##  7: -10   0.3 20.64903 0.3
+##  8: -10   0.3 22.68619 0.2
+##  9: -10   0.3 25.40811 0.1
+## 10: -10   0.3 35.86613 0.0</code></pre>
+<p>Here are 16 possible distributions using four different values of <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span>. Each panel represents a different value of <span class="math inline">\(\nu\)</span>, ranging from 0.16 to 0.22.</p>
+<pre class="r"><code>f &lt;- c(-26, -27, -28, -29)
 shape &lt;- c(0.16, .18, .20, .22)
 
 eg &lt;- expand.grid(f=f, shape=shape)
@@ -70,9 +82,21 @@ ggplot(data = l, aes(x = T, y = p)) +
     values = c(&quot;#7D9D33&quot;, &quot;#CED38C&quot;, &quot;#DCC949&quot;, &quot;#BCA888&quot;, &quot;#CD8862&quot;, &quot;#775B24&quot;),
     name = &quot;  f&quot;
   )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-1-1.png" width="768" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
+</div>
+<div id="generating-a-particular-distribution" class="section level2">
+<h2>Generating a particular distribution</h2>
+<p>The interpretation of the parameters is a bit opaque. If we have covariates embedded in <span class="math inline">\(f\)</span> the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set <span class="math inline">\(\lambda = 1\)</span>) really defines the scale. So how do we go about selecting values for <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> to get the desired distribution.</p>
+<span class="math display">\[\begin{aligned}
+log(T) &amp;= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
+\\ 
+&amp;= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
+\end{aligned}\]</span>
+<p><span class="math display">\[ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)\]</span></p>
+<p><span class="math display">\[ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)\]</span></p>
+<p><span class="math display">\[\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2\]</span></p>
 <p>See <a href="#addendum">addendum</a> for code.</p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.gif" /><!-- --></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.gif" /><!-- --></p>
 <p>
 <p><small><font color="darkkhaki">
 Reference:</p>
@@ -81,6 +105,61 @@ Reference:</p>
 </p>
 <p><a name="addendum"></a></p>
 <p> </p>
+</div>
 <div id="addendum" class="section level2">
 <h2>Addendum</h2>
+<pre class="r"><code>sdd &lt;- list()
+
+sdd[[1]] &lt;- get_surv(-6,  1, n = 1000)
+sdd[[2]] &lt;- get_surv(-7.566, 0.783 , n = 1000)
+sdd[[3]] &lt;- get_surv(-9.981, 0.587, n = 1000)
+sdd[[4]] &lt;- get_surv(-11.137, 0.521, n = 1000)
+sdd[[5]] &lt;- get_surv(-13.814, 0.417, n = 1000)
+sdd[[6]] &lt;- get_surv(-16.014, 0.358, n = 1000)
+sdd[[7]] &lt;- get_surv(-6,  1, n = 1000)
+sdd[[8]] &lt;- get_surv(-8.125, 0.777 , n = 1000)
+sdd[[9]] &lt;- get_surv(-10.183, 0.619, n = 1000)
+sdd[[10]] &lt;- get_surv(-12.481, 0.490, n = 1000)
+sdd[[11]] &lt;- get_surv(-14.595, 0.414, n = 1000)
+sdd[[12]] &lt;- get_surv(-18.139, 0.327, n = 1000)
+
+k &lt;- length(sdd)
+
+sdds &lt;- lapply(1:k, function(x) sdd[[x]][ , c(&quot;iter&quot;, &quot;color&quot;) := list(x, &quot;black&quot;)])
+sdds[[k/2]][, color := &quot;green&quot;]
+sdds[[k]][, color := &quot;green&quot;]
+sdd &lt;- rbindlist(sdds)
+
+targets &lt;- data.table(iter = 1:k, days1 = rep(180, k), days2 = rep(365, k),
+  p1 = rep(c(.8, .9), each = k/2), p2 = rep(c(.2, .4), each = k/2))
+
+dt_anot &lt;- sdd[, .SD[1,], keyby = iter]
+dt_anot[iter &lt;= (k/2), targets := 1]
+dt_anot[iter &gt; (k/2), targets := 2]
+dt_anot[, targets := factor(targets, labels = c(&quot;Scenario one&quot;, &quot;Scenario two&quot;))]
+dt_anot[, color := &quot;black&quot;]
+dt_anot[iter == (k/2), color := &quot;green&quot;]
+dt_anot[iter == k, color := &quot;green&quot;]
+
+a &lt;- ggplot() +
+  geom_point(data = targets, aes(x = days1, y=p1), pch = 1, size = 2) +
+  geom_point(data = targets, aes(x = days2, y=p2), pch = 1, size = 2) +
+  geom_point(data = sdd, aes(x = T, y = p, group = p, color = color), size = .2) +
+  geom_vline(xintercept = c(180, 365), lty = 1, size = .3, color = &quot;grey70&quot;) +
+  geom_text(x = 750, y = .68, size = 5.5, hjust = &quot;left&quot;, fontface = &quot;bold&quot;,
+            aes(label = targets), data = dt_anot) +
+  geom_text(x = 750, y = .6, size = 5.5, hjust = &quot;left&quot;,
+            aes(label = paste(&quot;f:&quot;, f), color = color), data = dt_anot) +
+  geom_text(x = 750, y = .54, size = 5.5, hjust = &quot;left&quot;,
+            aes(label = paste(&quot;shape:&quot;, shape), color = color), data = dt_anot) +
+  scale_x_continuous(limits = c(0, 1250), 
+                     breaks = c(seq(0, 1250, by = 250), 180, 365), name = &quot;time&quot;) +
+  scale_color_manual(values = c(&quot;black&quot;,&quot;#7D9D33&quot;)) +
+  scale_y_continuous(limits = c(0.05, 0.995), 
+                     breaks = c(0.2, 0.4, 0.6, 0.8), name = &quot;probability of survival&quot;) +
+  theme(panel.grid = element_blank(),
+        legend.position = &quot;none&quot;) +
+  transition_states(iter, state_length = 1, transition_length = 1) 
+
+animate(a, duration = 24, fps = 10, height = 350, width = 550)</code></pre>
 </div>

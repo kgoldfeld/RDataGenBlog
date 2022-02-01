@@ -16,31 +16,34 @@ draft: TRUE
 
 The package `simstudy` has some functions that facilitate generating of survival data using an underlying Weibull distribution. Originally, I added this, because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I've started to try to simulate a simplified version of the data that we have.
 
-Hopefully in the future, I'll be able to describe the motivating simulations in more detail. But here, I want to go into more detail about the general survival data generating process using `simstudy`, focusing in particular on how to identify the parameters to make the simulated data as realistic as possible.
+At some point, I'd like to describe the motivating simulations in more detail. But here, I want to focus more generally on the survival data generating process using `simstudy`, looking in particular at how to identify the parameters that allow the simulated data to match the desired characteristics.
 
-$$T = \left[ \frac{-\text{log}(u)}{exp(f)}  \right] ^ \nu$$
+## Weibull-Cox proprtional hazard data generation process
 
-\begin{aligned}
-log(T) &= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
-\\ 
-&= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
-\end{aligned}
+`simstudy` uses an underlying data generating process for survival outcomes that draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this [*Bender, Augustin, and Blettner*](https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059){target="_blank"} paper, so head over there if you really want the details.
 
-$$ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)$$
+The times to survival $T$ are generated using three parameters, $\lambda$ (scale), $\nu$ (shape), and $f$, which is really $\mathbf{\beta^\prime x}$ from a Cox proportional hazard model. 
 
-$$ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)$$
+$$T = \left[ \frac{- \lambda \ \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 
-$$\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2$$
+A single instance $T$ is "drawn" from the Weibull distribution by generating $u$ from the uniform $U(0,1)$ distribution. It will be the case that $(1-u) \%$ of the survival times $T$ will fall below the values of $T$ determined by $u$; this will be helpful later when we need to generate data with specific distributions in mind.
 
+It turns out that we don't really need the scale parameter $\lambda$, because it can be absored into $f$, so in all the examples that follow, we'll set $\lambda = 1$, which leaves us with
 
+$$T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
+
+Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:
 
 ```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
 library(simstudy)
 library(data.table)
-library(survival)
 library(ggplot2)
 library(gganimate)
+```
 
+The function `get_surv` generates data for the survival curve. It is deterministic in that it does not generate draws of $u$, but calculates a specific $T$ for each value of $u$ distribution evenly between 0 and 1.
+
+```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
 get_surv <- function(f, shape, n = 100) {
   
   u <- seq(1, 0.001, length = n)
@@ -52,10 +55,16 @@ get_surv <- function(f, shape, n = 100) {
     p = round(1 - cumsum(rep(1/length(u), length(u))), 3)
   )
   
-  dd
+  return(dd)
 
 }
 
+get_surv(-10, .3, n = 10)
+```
+
+Here are 16 possible distributions using four different values of $f$ and $\nu$. Each panel represents a different value of $\nu$, ranging from 0.16 to 0.22.
+
+```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
 f <- c(-26, -27, -28, -29)
 shape <- c(0.16, .18, .20, .22)
 
@@ -80,7 +89,25 @@ ggplot(data = l, aes(x = T, y = p)) +
  
 ```
 
-See <a href="#addendum">addendum</a> for code.
+## Generating a particular distribution
+
+The interpretation of the parameters is a bit opaque. If we have covariates embedded in $f$ the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set $\lambda = 1$) really defines the scale. So how do we go about selecting values for $f$ and $\nu$ to get the desired distribution.
+
+\begin{aligned}
+log(T) &= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
+\\ 
+&= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
+\end{aligned}
+
+$$ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)$$
+
+$$ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)$$
+
+$$\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2$$
+
+
+
+See <a href="#addendum">addendum</a> for code.    
 
 ```{r, echo = FALSE, warning=FALSE}
 sdd <- list()
@@ -91,36 +118,52 @@ sdd[[3]] <- get_surv(-9.981, 0.587, n = 1000)
 sdd[[4]] <- get_surv(-11.137, 0.521, n = 1000)
 sdd[[5]] <- get_surv(-13.814, 0.417, n = 1000)
 sdd[[6]] <- get_surv(-16.014, 0.358, n = 1000)
+sdd[[7]] <- get_surv(-6,  1, n = 1000)
+sdd[[8]] <- get_surv(-8.125, 0.777 , n = 1000)
+sdd[[9]] <- get_surv(-10.183, 0.619, n = 1000)
+sdd[[10]] <- get_surv(-12.481, 0.490, n = 1000)
+sdd[[11]] <- get_surv(-14.595, 0.414, n = 1000)
+sdd[[12]] <- get_surv(-18.139, 0.327, n = 1000)
 
 k <- length(sdd)
 
 sdds <- lapply(1:k, function(x) sdd[[x]][ , c("iter", "color") := list(x, "black")])
+sdds[[k/2]][, color := "green"]
 sdds[[k]][, color := "green"]
 sdd <- rbindlist(sdds)
 
+targets <- data.table(iter = 1:k, days1 = rep(180, k), days2 = rep(365, k),
+  p1 = rep(c(.8, .9), each = k/2), p2 = rep(c(.2, .4), each = k/2))
+
 dt_anot <- sdd[, .SD[1,], keyby = iter]
+dt_anot[iter <= (k/2), targets := 1]
+dt_anot[iter > (k/2), targets := 2]
+dt_anot[, targets := factor(targets, labels = c("Scenario one", "Scenario two"))]
 dt_anot[, color := "black"]
+dt_anot[iter == (k/2), color := "green"]
 dt_anot[iter == k, color := "green"]
 
-a <- ggplot(data = sdd, aes(x = T, y = p, group = p)) +
-  geom_point(x = 180, y=0.8, pch = 1, size = 2) +
-  geom_point(x = 365, y=0.2, pch = 1, size = 2) +
-  geom_point(size = .2, aes(color = color)) +
+a <- ggplot() +
+  geom_point(data = targets, aes(x = days1, y=p1), pch = 1, size = 2) +
+  geom_point(data = targets, aes(x = days2, y=p2), pch = 1, size = 2) +
+  geom_point(data = sdd, aes(x = T, y = p, group = p, color = color), size = .2) +
   geom_vline(xintercept = c(180, 365), lty = 1, size = .3, color = "grey70") +
-  geom_text(x = 950, y = .6, size = 5.5, hjust = "right",
-    aes(label = paste("f:", f), color = color), data = dt_anot) +
-  geom_text(x = 950, y = .54, size = 5.5, hjust = "right",
+  geom_text(x = 750, y = .68, size = 5.5, hjust = "left", fontface = "bold",
+            aes(label = targets), data = dt_anot) +
+  geom_text(x = 750, y = .6, size = 5.5, hjust = "left",
+            aes(label = paste("f:", f), color = color), data = dt_anot) +
+  geom_text(x = 750, y = .54, size = 5.5, hjust = "left",
             aes(label = paste("shape:", shape), color = color), data = dt_anot) +
   scale_x_continuous(limits = c(0, 1250), 
-    breaks = c(seq(0, 1250, by = 250), 180, 365), name = "time") +
+                     breaks = c(seq(0, 1250, by = 250), 180, 365), name = "time") +
   scale_color_manual(values = c("black","#7D9D33")) +
-    scale_y_continuous(limits = c(0.05, 0.995), 
-    breaks = c(0.2, 0.4, 0.6, 0.8), name = "probability of survival") +
+  scale_y_continuous(limits = c(0.05, 0.995), 
+                     breaks = c(0.2, 0.4, 0.6, 0.8), name = "probability of survival") +
   theme(panel.grid = element_blank(),
         legend.position = "none") +
   transition_states(iter, state_length = 1, transition_length = 1) 
-  
-animate(a, duration = 14, fps = 10, height = 350, width = 550)
+
+animate(a, duration = 24, fps = 10, height = 350, width = 550)
 
 ```
 
@@ -139,4 +182,60 @@ Bender, Ralf, Thomas Augustin, and Maria Blettner. "Generating survival times to
 
 ## Addendum
 
+```{r, eval = FALSE, warning=FALSE}
+sdd <- list()
 
+sdd[[1]] <- get_surv(-6,  1, n = 1000)
+sdd[[2]] <- get_surv(-7.566, 0.783 , n = 1000)
+sdd[[3]] <- get_surv(-9.981, 0.587, n = 1000)
+sdd[[4]] <- get_surv(-11.137, 0.521, n = 1000)
+sdd[[5]] <- get_surv(-13.814, 0.417, n = 1000)
+sdd[[6]] <- get_surv(-16.014, 0.358, n = 1000)
+sdd[[7]] <- get_surv(-6,  1, n = 1000)
+sdd[[8]] <- get_surv(-8.125, 0.777 , n = 1000)
+sdd[[9]] <- get_surv(-10.183, 0.619, n = 1000)
+sdd[[10]] <- get_surv(-12.481, 0.490, n = 1000)
+sdd[[11]] <- get_surv(-14.595, 0.414, n = 1000)
+sdd[[12]] <- get_surv(-18.139, 0.327, n = 1000)
+
+k <- length(sdd)
+
+sdds <- lapply(1:k, function(x) sdd[[x]][ , c("iter", "color") := list(x, "black")])
+sdds[[k/2]][, color := "green"]
+sdds[[k]][, color := "green"]
+sdd <- rbindlist(sdds)
+
+targets <- data.table(iter = 1:k, days1 = rep(180, k), days2 = rep(365, k),
+  p1 = rep(c(.8, .9), each = k/2), p2 = rep(c(.2, .4), each = k/2))
+
+dt_anot <- sdd[, .SD[1,], keyby = iter]
+dt_anot[iter <= (k/2), targets := 1]
+dt_anot[iter > (k/2), targets := 2]
+dt_anot[, targets := factor(targets, labels = c("Scenario one", "Scenario two"))]
+dt_anot[, color := "black"]
+dt_anot[iter == (k/2), color := "green"]
+dt_anot[iter == k, color := "green"]
+
+a <- ggplot() +
+  geom_point(data = targets, aes(x = days1, y=p1), pch = 1, size = 2) +
+  geom_point(data = targets, aes(x = days2, y=p2), pch = 1, size = 2) +
+  geom_point(data = sdd, aes(x = T, y = p, group = p, color = color), size = .2) +
+  geom_vline(xintercept = c(180, 365), lty = 1, size = .3, color = "grey70") +
+  geom_text(x = 750, y = .68, size = 5.5, hjust = "left", fontface = "bold",
+            aes(label = targets), data = dt_anot) +
+  geom_text(x = 750, y = .6, size = 5.5, hjust = "left",
+            aes(label = paste("f:", f), color = color), data = dt_anot) +
+  geom_text(x = 750, y = .54, size = 5.5, hjust = "left",
+            aes(label = paste("shape:", shape), color = color), data = dt_anot) +
+  scale_x_continuous(limits = c(0, 1250), 
+                     breaks = c(seq(0, 1250, by = 250), 180, 365), name = "time") +
+  scale_color_manual(values = c("black","#7D9D33")) +
+  scale_y_continuous(limits = c(0.05, 0.995), 
+                     breaks = c(0.2, 0.4, 0.6, 0.8), name = "probability of survival") +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  transition_states(iter, state_length = 1, transition_length = 1) 
+
+animate(a, duration = 24, fps = 10, height = 350, width = 550)
+
+```
