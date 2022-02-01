@@ -38,7 +38,6 @@ Weibull distribution data generation is extremely flexible, and can provide an i
 library(simstudy)
 library(data.table)
 library(ggplot2)
-library(gganimate)
 ```
 
 The function `get_surv` generates data for the survival curve. It is deterministic in that it does not generate draws of $u$, but calculates a specific $T$ for each value of $u$ distribution evenly between 0 and 1.
@@ -62,7 +61,7 @@ get_surv <- function(f, shape, n = 100) {
 get_surv(-10, .3, n = 10)
 ```
 
-Here are 16 possible distributions using four different values of $f$ and $\nu$. Each panel represents a different value of $\nu$, ranging from 0.16 to 0.22.
+Here are 16 arbitrary distributions using four different values of $f$ and $\nu$. Each panel represents a different value of $\nu$, ranging from 0.16 to 0.22.
 
 ```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
 f <- c(-26, -27, -28, -29)
@@ -79,7 +78,6 @@ ggplot(data = l, aes(x = T, y = p)) +
   ylim(0,1) +
   xlim(0, 800) +
   facet_grid ( ~ shape) +
-  theme(panel.grid = element_blank()) +
   theme(panel.grid = element_blank(),
         axis.text = element_text(size = 7.5)) +
   scale_color_manual(
@@ -91,25 +89,13 @@ ggplot(data = l, aes(x = T, y = p)) +
 
 ## Generating a particular distribution
 
-The interpretation of the parameters is a bit opaque. If we have covariates embedded in $f$ the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set $\lambda = 1$) really defines the scale. So how do we go about selecting values for $f$ and $\nu$ to get the desired distribution.
+The interpretation of the parameters is a bit opaque. If we have covariates embedded in $f$ the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set $\lambda = 1$) really defines the scale. So how do we go about selecting values for $f$ and $\nu$ to get the desired distribution?
 
-\begin{aligned}
-log(T) &= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
-\\ 
-&= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
-\end{aligned}
-
-$$ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)$$
-
-$$ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)$$
-
-$$\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2$$
-
-
-
-See <a href="#addendum">addendum</a> for code.    
+If we can reasonably characterize the desired distribution by two single points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, in the first scenario, we may want a distribution with 80% survival at day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting $f$ and $\nu$ (see <a href="#addendum">addendum</a> for code to generate this):
 
 ```{r, echo = FALSE, warning=FALSE}
+library(gganimate)
+
 sdd <- list()
 
 sdd[[1]] <- get_surv(-6,  1, n = 1000)
@@ -158,7 +144,7 @@ a <- ggplot() +
                      breaks = c(seq(0, 1250, by = 250), 180, 365), name = "time") +
   scale_color_manual(values = c("black","#7D9D33")) +
   scale_y_continuous(limits = c(0.05, 0.995), 
-                     breaks = c(0.2, 0.4, 0.6, 0.8), name = "probability of survival") +
+                     breaks = c(0.2, 0.4, 0.8, 0.9), name = "probability of survival") +
   theme(panel.grid = element_blank(),
         legend.position = "none") +
   transition_states(iter, state_length = 1, transition_length = 1) 
@@ -166,6 +152,66 @@ a <- ggplot() +
 animate(a, duration = 24, fps = 10, height = 350, width = 550)
 
 ```
+
+### Determining the parameter values
+
+If we have two points in mind, there is an extremely simple analytic solution that can derive $f$ and $\nu$ so that we can identify a Weibull-Cox based survival curve that is guaranteed to pass through both points.
+
+For any time point $T$, we have from the equation above
+
+\begin{aligned}
+log(T) &= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\ 
+\\ 
+&= \nu \ \left ( \text{log}\left[-\text{log}(u)\right] - \text{log}\left[ \text{exp}(f) \right] \right ) \\
+\\
+&= \nu \ (\text{log}\left[-\text{log}(u)\right] - f)
+\end{aligned}
+
+If we have desired points $(T_1,u_1)$ and $(T_2,u_2)$, then we write can a simple system of two equations with two unknowns, $f^*$ and $\nu^*$, the target parameters:
+
+$$ \text{log}(T_1) = \nu \ (\text{log} \left[ -\text{log}(u_1)\right] - f)$$
+
+$$ \text{log}(T_2) = \nu \ (\text{log} \left[ -\text{log}(u_2)\right] - f)$$
+
+Using simple algebra, we can rearrange terms to provide solutions for $f$ and $\nu$ (I'll spare you the extra steps):
+
+$$\nu^* = \frac{\text{log}(T_2) - \text{log}(T_1)}{\text{log}(-\text{log}(u_2)) - \text{log}(-\text{log}(u_1))}$$
+
+$$f^* = \text{log}(-\text{log}(u_1)) - \nu^{*^{-1}} \text{log}(T_1)$$
+
+### Scenario three
+
+If we want a curve that represents a new scenario, where there is 95% survival at day 180 and 40% survival at the end of 2 years, the desired parameters are 
+
+$$\nu^* = \frac{\text{log}(365*2) - \text{log}(180)}{\text{log}(-\text{log}(0.40)) - \text{log}(-\text{log}(0.95))} = \frac{1.400}{2.883} = 0.486$$
+
+$$f^* = \text{log}(-\text{log}(0.95)) - \frac{1}{0.486} \text{log}(180) = -2.970 - 10.685 = -13.655$$
+
+<br>
+
+We can generate all the points along these curve and then plot them:
+
+```{r, warning=FALSE, error=FALSE, fig.height = 3.5, fig.width = 5.5}
+dsurv <- get_surv(-13.655, 0.486, n = 1000)
+dsurv
+```
+
+```{r, echo=FALSE, warning=FALSE,error=FALSE, fig.height = 3.5, fig.width = 5.5}
+ggplot(data = dsurv, aes(x = T, y = p)) +
+  geom_line(size = 0.8) +
+  geom_point(x = 180, y = 0.95, pch = 21, fill = "#DCC949", size = 2.5) +
+  geom_point(x = 365*2, y = 0.4, pch = 21, fill = "#DCC949", size = 2.5) + 
+  scale_y_continuous(limits = c(0,1), breaks = c(0,0.4, 0.95),
+                     name = "probability of survival") +
+  scale_x_continuous(limits = c(0, 1250), 
+                     breaks = c(0, 180, 500, 365*2, 1000, 1250), name = "time") +
+  theme(panel.grid = element_blank(),
+    axis.text = element_text(size = 7.5),
+    axis.title = element_text(size = 8, face = "bold")
+  )
+```
+
+Of course, we want to actually sample from a distribution defined by these parameters in order to conduct simulations, not just generate and look at deterministic functions. But that remains for another day.
 
 <p><small><font color="darkkhaki">
 Reference:
@@ -182,7 +228,11 @@ Bender, Ralf, Thomas Augustin, and Maria Blettner. "Generating survival times to
 
 ## Addendum
 
+Here is the code that is used to generate the animated plot, which done with the `gganimate` package: 
+
 ```{r, eval = FALSE, warning=FALSE}
+library(gganimate)
+
 sdd <- list()
 
 sdd[[1]] <- get_surv(-6,  1, n = 1000)
@@ -239,3 +289,8 @@ a <- ggplot() +
 animate(a, duration = 24, fps = 10, height = 350, width = 550)
 
 ```
+
+***A note on where the parameters for the animation came from***
+
+$$\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2$$
+
