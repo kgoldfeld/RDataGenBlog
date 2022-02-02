@@ -25,7 +25,7 @@ draft: TRUE
 <p>The times to survival <span class="math inline">\(T\)</span> are generated using three parameters, <span class="math inline">\(\lambda\)</span> (scale), <span class="math inline">\(\nu\)</span> (shape), and <span class="math inline">\(f\)</span>, which is really <span class="math inline">\(\mathbf{\beta^\prime x}\)</span> from a Cox proportional hazard model.</p>
 <p><span class="math display">\[T = \left[ \frac{- \lambda \ \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
 <p>A single instance <span class="math inline">\(T\)</span> is “drawn” from the Weibull distribution by generating <span class="math inline">\(u\)</span> from the uniform <span class="math inline">\(U(0,1)\)</span> distribution. It will be the case that <span class="math inline">\((1-u) \%\)</span> of the survival times <span class="math inline">\(T\)</span> will fall below the values of <span class="math inline">\(T\)</span> determined by <span class="math inline">\(u\)</span>; this will be helpful later when we need to generate data with specific distributions in mind.</p>
-<p>It turns out that we don’t really need the scale parameter <span class="math inline">\(\lambda\)</span>, because it can be absored into <span class="math inline">\(f\)</span>, so in all the examples that follow, we’ll set <span class="math inline">\(\lambda = 1\)</span>, which leaves us with</p>
+<p>It turns out that we don’t really need the scale parameter <span class="math inline">\(\lambda\)</span>, because it can be absorbed into <span class="math inline">\(f\)</span>, so in all the examples that follow, we’ll set <span class="math inline">\(\lambda = 1\)</span>, which leaves us with</p>
 <p><span class="math display">\[T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
 <p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:</p>
 <pre class="r"><code>library(simstudy)
@@ -127,7 +127,7 @@ dsurv</code></pre>
 ##  999: -13.655 0.486 1852.33947 0.001
 ## 1000: -13.655 0.486 1950.02084 0.000</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="528" /></p>
-<p>Of course, we want to actually sample from a distribution defined by these parameters in order to conduct simulations, not just generate and look at deterministic functions. But that remains for another day.</p>
+<p>Of course, what we really want to do is sample from a distribution defined by these parameters in order to conduct simulation experiments, not just generate and look at deterministic functions. This would include adding covariates and possibly censoring. But all of that remains for another day.</p>
 <p>
 <p><small><font color="darkkhaki">
 Reference:</p>
@@ -198,5 +198,41 @@ a &lt;- ggplot() +
 
 animate(a, duration = 24, fps = 10, height = 350, width = 550)</code></pre>
 <p><strong><em>A note on where the parameters for the animation came from</em></strong></p>
+<p>You may be wondering where the parameters used in the animation come from. I really wanted to generate a series of curves that started at a fair distance from the true value and converged to the right spot. My idea was to use a simple loss function that involved the unknown parameters <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span>, which would be optimized (in this case minimized) at the correct values (the same as those derived above). If I could recover the interim values of optimization algorithm, those would provide a sequence of parameters and curves the converge on the true values.</p>
+<p>The loss function is a simple squared loss, which is the sum of the squared loss for both points that define the curve:</p>
 <p><span class="math display">\[\left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_1)\right] - \hat{f}) - \text{log}(T_1) \right]^2 + \left[ \hat{\nu} \ (\text{log} \left[ -\text{log}(u_2)\right] - \hat{f}) - \text{log}(T_2) \right]^2\]</span></p>
+<p>This is implemented as function <code>fx</code>, which is to be optimized using function <code>optim</code>. I know this may not be the best optimization option in R, but given that this is quite a simple problem, it should suffice. In the function <span class="math inline">\(x[1]\)</span> represents <span class="math inline">\(f\)</span>, and <span class="math inline">\(x[2]\)</span> represents <span class="math inline">\(\nu\)</span>.</p>
+<pre class="r"><code>fx &lt;- function(x, p, times) {
+  (x[2]*(log(-log(p[1])) - x[1]) - log(times[1])) ^ 2 + 
+  (x[2]*(log(-log(p[2])) - x[1]) - log(times[2])) ^ 2 
+}</code></pre>
+<p>The optimization provides starting values for <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span>. I chose values of <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> that would locate the initial curve between the two target points. <span class="math inline">\(\nu\)</span> is constrained to be non-negative (and <span class="math inline">\(f\)</span> is unconstrained). The key here is that the <em>trace</em> option is set so that interim values of <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> are reported. I am not showing the full output here, because it is quite lengthy. I only used four interim values (plus the starting and ending values) to create the animation. The final output includes the values of <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> that optimize the quadratic loss:</p>
+<pre class="r"><code>optim(
+  par = c(-(log((180+365)/2) - log(-log(.5))), 1), 
+  fn = fx, 
+  p = c(.8, .2), 
+  times = c(180, 365),
+  method = &quot;L-BFGS-B&quot;, 
+  lower = c(-Inf, 0),
+  upper = c(Inf, Inf),
+  control= list(trace = 5)
+)</code></pre>
+<pre><code>## $par
+## [1] -16.0137061   0.3577952
+## 
+## $value
+## [1] 1.065948e-13
+## 
+## $counts
+## function gradient 
+##       33       33 
+## 
+## $convergence
+## [1] 0
+## 
+## $message
+## [1] &quot;CONVERGENCE: REL_REDUCTION_OF_F &lt;= FACTR*EPSMCH&quot;</code></pre>
+<p>Incidentally, our analytic formulas give us</p>
+<p><span class="math display">\[\nu^* = \frac{\text{log}(365) - \text{log}(180)}{\text{log}(-\text{log}(0.2)) - \text{log}(-\text{log}(0.8))} = 0.3577951\]</span></p>
+<p><span class="math display">\[f^* = \text{log}(-\text{log}(0.8)) - \frac{1}{0.3577951} \text{log}(180) =-16.01371\]</span></p>
 </div>
