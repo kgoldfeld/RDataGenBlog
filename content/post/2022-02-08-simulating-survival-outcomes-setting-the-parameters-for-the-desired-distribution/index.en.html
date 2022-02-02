@@ -17,17 +17,19 @@ draft: TRUE
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
-<p>The package <code>simstudy</code> has some functions that facilitate generating of survival data using an underlying Weibull distribution. Originally, I added this, because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I’ve started to try to simulate a simplified version of the data that we have.</p>
-<p>At some point, I’d like to describe the motivating simulations in more detail. But here, I want to focus more generally on the survival data generating process using <code>simstudy</code>, looking in particular at how to identify the parameters that allow the simulated data to match the desired characteristics.</p>
+<p>The package <code>simstudy</code> has some functions that facilitate generating survival data using an underlying Weibull distribution. Originally, I added this to the package because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I’ve started to try to simulate a simplified version of the data that we have.</p>
+<p>At some point, I’d like to describe the motivating simulations in more detail. But here, I want to focus more generally on the underlying survival data generating process used in <code>simstudy</code>, looking in particular at how to identify the parameters so that the simulated data will come close to matching a desired distribution.</p>
 <div id="weibull-cox-proprtional-hazard-data-generation-process" class="section level2">
 <h2>Weibull-Cox proprtional hazard data generation process</h2>
-<p><code>simstudy</code> uses an underlying data generating process for survival outcomes that draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this <a href="https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059" target="_blank"><em>Bender, Augustin, and Blettner</em></a> paper, so head over there if you really want the details.</p>
-<p>The times to survival <span class="math inline">\(T\)</span> are generated using three parameters, <span class="math inline">\(\lambda\)</span> (scale), <span class="math inline">\(\nu\)</span> (shape), and <span class="math inline">\(f\)</span>, which is really <span class="math inline">\(\mathbf{\beta^\prime x}\)</span> from a Cox proportional hazard model.</p>
+<p>This underlying data generating process draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this <a href="https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059" target="_blank"><em>Bender, Augustin, and Blettner</em></a> paper, so head over there if you really want the details.</p>
+<p>The times to survival <span class="math inline">\(T\)</span> are generated using three parameters, <span class="math inline">\(\lambda\)</span> (scale), <span class="math inline">\(\nu\)</span> (shape), and <span class="math inline">\(f\)</span>, which is really <span class="math inline">\(\mathbf{\beta^\prime x}\)</span> from a Cox proportional hazard model that may include a covariate vector <span class="math inline">\(\mathbf{x}\)</span>. In the examples here, there will only be an intercept.</p>
 <p><span class="math display">\[T = \left[ \frac{- \lambda \ \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
 <p>A single instance <span class="math inline">\(T\)</span> is “drawn” from the Weibull distribution by generating <span class="math inline">\(u\)</span> from the uniform <span class="math inline">\(U(0,1)\)</span> distribution. It will be the case that <span class="math inline">\((1-u) \%\)</span> of the survival times <span class="math inline">\(T\)</span> will fall below the values of <span class="math inline">\(T\)</span> determined by <span class="math inline">\(u\)</span>; this will be helpful later when we need to generate data with specific distributions in mind.</p>
 <p>It turns out that we don’t really need the scale parameter <span class="math inline">\(\lambda\)</span>, because it can be absorbed into <span class="math inline">\(f\)</span>, so in all the examples that follow, we’ll set <span class="math inline">\(\lambda = 1\)</span>, which leaves us with</p>
 <p><span class="math display">\[T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
-<p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:</p>
+<div id="visualizing-the-survival-curves" class="section level3">
+<h3>Visualizing the survival curves</h3>
+<p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(ggplot2)</code></pre>
@@ -82,10 +84,11 @@ ggplot(data = l, aes(x = T, y = p)) +
   )</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
 </div>
+</div>
 <div id="generating-a-particular-distribution" class="section level2">
 <h2>Generating a particular distribution</h2>
 <p>The interpretation of the parameters is a bit opaque. If we have covariates embedded in <span class="math inline">\(f\)</span> the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set <span class="math inline">\(\lambda = 1\)</span>) really defines the scale. So how do we go about selecting values for <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> to get the desired distribution?</p>
-<p>If we can reasonably characterize the desired distribution by two single points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, in the first scenario, we may want a distribution with 80% survival at day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> (see <a href="#addendum">addendum</a> for code to generate this):</p>
+<p>If we can reasonably characterize the desired distribution by two points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, we may want a distribution with 80% survival until day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> (see <a href="#addendum">addendum</a> for code to generate this):</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.gif" /><!-- --></p>
 <div id="determining-the-parameter-values" class="section level3">
 <h3>Determining the parameter values</h3>
@@ -107,11 +110,11 @@ log(T) &amp;= \nu \ \text{log} \left[ \frac{-\text{log}(u)}{exp(f)}  \right] \\
 </div>
 <div id="scenario-three" class="section level3">
 <h3>Scenario three</h3>
-<p>If we want a curve that represents a new scenario, where there is 95% survival at day 180 and 40% survival at the end of 2 years, the desired parameters are</p>
+<p>If we want a curve that where there is 95% survival at day 180 and 40% survival at the end of 2 years, the desired parameters are</p>
 <p><span class="math display">\[\nu^* = \frac{\text{log}(365*2) - \text{log}(180)}{\text{log}(-\text{log}(0.40)) - \text{log}(-\text{log}(0.95))} = \frac{1.400}{2.883} = 0.486\]</span></p>
 <p><span class="math display">\[f^* = \text{log}(-\text{log}(0.95)) - \frac{1}{0.486} \text{log}(180) = -2.970 - 10.685 = -13.655\]</span></p>
 <p><br></p>
-<p>We can generate all the points along these curve and then plot them:</p>
+<p>We can generate points along this curve and then plot them:</p>
 <pre class="r"><code>dsurv &lt;- get_surv(-13.655, 0.486, n = 1000)
 dsurv</code></pre>
 <pre><code>##             f shape          T     p
@@ -235,4 +238,5 @@ animate(a, duration = 24, fps = 10, height = 350, width = 550)</code></pre>
 <p>Incidentally, our analytic formulas give us</p>
 <p><span class="math display">\[\nu^* = \frac{\text{log}(365) - \text{log}(180)}{\text{log}(-\text{log}(0.2)) - \text{log}(-\text{log}(0.8))} = 0.3577951\]</span></p>
 <p><span class="math display">\[f^* = \text{log}(-\text{log}(0.8)) - \frac{1}{0.3577951} \text{log}(180) =-16.01371\]</span></p>
+<p><br></p>
 </div>

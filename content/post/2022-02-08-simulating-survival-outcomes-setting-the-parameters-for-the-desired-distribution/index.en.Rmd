@@ -14,15 +14,15 @@ image: ''
 draft: TRUE
 ---
 
-The package `simstudy` has some functions that facilitate generating of survival data using an underlying Weibull distribution. Originally, I added this, because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I've started to try to simulate a simplified version of the data that we have.
+The package `simstudy` has some functions that facilitate generating survival data using an underlying Weibull distribution. Originally, I added this to the package because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I've started to try to simulate a simplified version of the data that we have.
 
-At some point, I'd like to describe the motivating simulations in more detail. But here, I want to focus more generally on the survival data generating process using `simstudy`, looking in particular at how to identify the parameters that allow the simulated data to match the desired characteristics.
+At some point, I'd like to describe the motivating simulations in more detail. But here, I want to focus more generally on the underlying survival data generating process used in `simstudy`, looking in particular at how to identify the parameters so that the simulated data will come close to matching a desired distribution.
 
 ## Weibull-Cox proprtional hazard data generation process
 
-`simstudy` uses an underlying data generating process for survival outcomes that draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this [*Bender, Augustin, and Blettner*](https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059){target="_blank"} paper, so head over there if you really want the details.
+This underlying data generating process draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this [*Bender, Augustin, and Blettner*](https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059){target="_blank"} paper, so head over there if you really want the details.
 
-The times to survival $T$ are generated using three parameters, $\lambda$ (scale), $\nu$ (shape), and $f$, which is really $\mathbf{\beta^\prime x}$ from a Cox proportional hazard model. 
+The times to survival $T$ are generated using three parameters, $\lambda$ (scale), $\nu$ (shape), and $f$, which is really $\mathbf{\beta^\prime x}$ from a Cox proportional hazard model that may include a covariate vector $\mathbf{x}$. In the examples here, there will only be an intercept.
 
 $$T = \left[ \frac{- \lambda \ \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 
@@ -32,7 +32,9 @@ It turns out that we don't really need the scale parameter $\lambda$, because it
 
 $$T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 
-Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:
+### Visualizing the survival curves
+
+Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:
 
 ```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
 library(simstudy)
@@ -91,7 +93,7 @@ ggplot(data = l, aes(x = T, y = p)) +
 
 The interpretation of the parameters is a bit opaque. If we have covariates embedded in $f$ the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set $\lambda = 1$) really defines the scale. So how do we go about selecting values for $f$ and $\nu$ to get the desired distribution?
 
-If we can reasonably characterize the desired distribution by two single points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, in the first scenario, we may want a distribution with 80% survival at day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting $f$ and $\nu$ (see <a href="#addendum">addendum</a> for code to generate this):
+If we can reasonably characterize the desired distribution by two points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, we may want a distribution with 80% survival until day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting $f$ and $\nu$ (see <a href="#addendum">addendum</a> for code to generate this):
 
 ```{r, echo = FALSE, warning=FALSE}
 library(gganimate)
@@ -181,7 +183,7 @@ $$f^* = \text{log}(-\text{log}(u_1)) - \nu^{*^{-1}} \text{log}(T_1)$$
 
 ### Scenario three
 
-If we want a curve that represents a new scenario, where there is 95% survival at day 180 and 40% survival at the end of 2 years, the desired parameters are 
+If we want a curve that where there is 95% survival at day 180 and 40% survival at the end of 2 years, the desired parameters are 
 
 $$\nu^* = \frac{\text{log}(365*2) - \text{log}(180)}{\text{log}(-\text{log}(0.40)) - \text{log}(-\text{log}(0.95))} = \frac{1.400}{2.883} = 0.486$$
 
@@ -189,7 +191,7 @@ $$f^* = \text{log}(-\text{log}(0.95)) - \frac{1}{0.486} \text{log}(180) = -2.970
 
 <br>
 
-We can generate all the points along these curve and then plot them:
+We can generate points along this curve and then plot them:
 
 ```{r, warning=FALSE, error=FALSE, fig.height = 3.5, fig.width = 5.5}
 dsurv <- get_surv(-13.655, 0.486, n = 1000)
@@ -339,3 +341,5 @@ Incidentally, our analytic formulas give us
 $$\nu^* = \frac{\text{log}(365) - \text{log}(180)}{\text{log}(-\text{log}(0.2)) - \text{log}(-\text{log}(0.8))} = 0.3577951$$
 
 $$f^* = \text{log}(-\text{log}(0.8)) - \frac{1}{0.3577951} \text{log}(180) =-16.01371$$
+
+<br>
