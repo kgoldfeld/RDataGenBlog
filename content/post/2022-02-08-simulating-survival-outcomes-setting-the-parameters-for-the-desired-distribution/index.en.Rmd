@@ -18,6 +18,34 @@ The package `simstudy` has some functions that facilitate generating survival da
 
 At some point, I'd like to describe the motivating simulations in more detail. But here, I want to focus more generally on the underlying survival data generating process used in `simstudy`, looking in particular at how to identify the parameters so that the simulated data will come close to matching a desired distribution.
 
+## Generating survival data in simstudy
+
+To put all of this in context, this is a simple example of how we can generate survival data using `simstudy` and then take a look at it using the `survival` and `survminer` packages:
+
+```{r, warning = FALSE, message=FALSE}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(survminer)
+library(survival)
+
+def <- defSurv(varname = "time", formula = -13.7, scale = 1, shape = 0.49)
+
+set.seed(1134)
+dd <- genData(101)
+dd <- genSurv(dd, def, digits = 0)
+dd$status <- 1
+
+dd
+```
+
+```{r, fig.height = 4, fig.width = 7}
+fit <- survfit( Surv(time, status) ~ 1, data = dd )
+ggsurvplot(fit, data = dd, palette = "#7D9D33")
+```
+
+So, we have generated survival data, and it all looks great. However, where did those parameters (*formula*, *scale*, and *shape*) in `defSurv` come from? That's what we're focusing on here.
+
 ## Weibull-Cox proprtional hazard data generation process
 
 This underlying data generating process draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this [*Bender, Augustin, and Blettner*](https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059){target="_blank"} paper, so head over there if you really want the details.
@@ -34,10 +62,9 @@ $$T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 
 ### Visualizing the survival curves
 
-Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:
+Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are two more packages needed to run all the code here:
 
 ```{r, warning=FALSE,error=FALSE, fig.height = 2, fig.width = 8}
-library(simstudy)
 library(data.table)
 library(ggplot2)
 ```

@@ -1,0 +1,510 @@
+---
+title: 'Follow-up: simstudy function for generating parameters for survival distribution'
+author: Package Build
+date: '2022-02-22'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>In the <a href="http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution" target="_blank">previous post</a> I described how to determine the parameter values for generating a Weibull survival curve that reflects a desired distribution defined by two points along the curve. I went ahead and implemented these ideas in the development version of <code>simstudy 0.4.0.9000</code>, expanding the idea to allow for any number of points rather than just two. This post provides a brief overview of the approach, the code, and a simple example using the parameters to generate simulated data.</p>
+<div id="the-distribution" class="section level2">
+<h2>The distribution</h2>
+<p>Just to recap briefly (really, take a glance at the <a href="http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution" target="_blank">previous post</a> if you haven’t already - this post may make a bit more sense), the times to an event can be drawn from the Weibull distribution by generating a uniform random <span class="math inline">\(u\)</span> variable between 0 and 1 that represents the survival probability. There are two parameters that I am using here - the <em>formula</em> <span class="math inline">\(f\)</span> and <em>shape</em> <span class="math inline">\(\nu\)</span>. (There is a third possible <em>scale</em> parameter <span class="math inline">\(\lambda\)</span> that I have set to 1 as a default, so that <span class="math inline">\(f\)</span> alone determines the scale.)</p>
+<p><span class="math display">\[T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
+</div>
+<div id="determining-the-parameter-values" class="section level2">
+<h2>Determining the parameter values</h2>
+<p>If we have some idea about how the shape of the survival curve might look, we can use this information to find the parameters that will allow us to draw simulated data from that distribution. When I say “we might have some idea,” I mean that we need to have survival probabilities in mind for specific time points.</p>
+<p>Last time, I showed that if we have two time points and their associated probabilities, we can generate parameters that define a curve that passes through both points. In the main body of that post I proposed a simple analytic solution for the parameters, but in the
+<a href="http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/#addendum" target="_blank">addendum</a> of the previous post, I suggested we can minimize a simple loss function to find the same parameters. I’ve decided to implement the minimization algorithm in <code>simstudy</code>, because it can more flexibly incorporate any number of input points, not just two. Here is the more general loss function for <span class="math inline">\(k\)</span> input points:</p>
+<p><span class="math display">\[\sum_{i=1}^k\left[ \nu^* \ (\text{log} \left[ -\text{log}(u_i)\right] - f^*) - \text{log}(T_i) \right]^2\]</span></p>
+<p><br></p>
+</div>
+<div id="implementing-the-optimization-in-r" class="section level2">
+<h2>Implementing the optimization in R</h2>
+<p>Below is a version of the function <code>survGetParams</code> that is implemented in <code>simstudy</code>. The key components are the specification of the loss function to be optimized and then using the R base <code>optim</code> function to find the pair of parameters that minimize the this function. The <code>optim</code> function requires starting values for the parameters, as well as the data points that are to be used to define the curve. In addition, we set a lower boundary on the <em>shape</em> parameter, which cannot be negative.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(survival)
+library(survminer)</code></pre>
+<pre class="r"><code>survGetParams &lt;- function(points) {
+  
+  loss_surv &lt;- function(params, points) {
+    
+    loss &lt;- function(a, params) {
+      ( params[2]*(log(-log(a[2])) - params[1]) - log(a[1]) ) ^ 2
+    }
+    
+    sum(sapply(points, function(a) loss(a, params)))
+    
+  }
+  
+  r &lt;- optim(
+    par = c(1, 1), 
+    fn = loss_surv, 
+    points = points,
+    method = &quot;L-BFGS-B&quot;, 
+    lower = c(-Inf, 0),
+    upper = c(Inf, Inf)
+  )
+  
+  return(r$par)
+}</code></pre>
+<p>In the first example, we would like to find the parameters for a distribution where 20% of the population has an event (e.g. does not survive) before 100 days and 90% have an event before 200 days. Alternatively, we can say 80% survive until day 100, and 10% survive until day 200:</p>
+<pre class="r"><code>points &lt;- list(c(100, 0.80), c(200, 0.10))
+r &lt;- survGetParams(points)
+r</code></pre>
+<pre><code>## [1] -17.0065167   0.2969817</code></pre>
+<p>We can view the Weibull curve generated by the optimized parameters in the using the function <code>survParamPlot</code>, which is also implemented in <code>simstudy</code>. When we specify two points, we can find an exact curve:</p>
+<pre class="r"><code>survParamPlot &lt;- function(f, shape, points, n = 100) {
+  
+  u &lt;- seq(1, 0.001, length = n)
+  
+  dd &lt;- data.table::data.table(
+    f = f,
+    shape = shape,
+    T = (-(log(u)/exp(f)))^(shape),
+    p = round(1 - cumsum(rep(1/length(u), length(u))), 3)
+  )
+  
+  dpoints &lt;- as.data.frame(do.call(rbind, points))  
+
+  ggplot(data = dd, aes(x = T, y = p)) +
+    geom_line(size = 0.8) +
+    scale_y_continuous(limits = c(0,1), name = &quot;probability of survival&quot;) +
+    scale_x_continuous(name = &quot;time&quot;) +
+    geom_point(data = dpoints, aes(x = V1, y = V2), 
+                    pch = 21, fill = &quot;#DCC949&quot;, size = 2.5) +
+    theme(panel.grid = element_blank(),
+          axis.text = element_text(size = 7.5),
+          axis.title = element_text(size = 8, face = &quot;bold&quot;)
+    )
+  
+}</code></pre>
+<pre class="r"><code>survParamPlot(f = r[1], shape = r[2], points)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="672" /></p>
+<p>If for some reason, we have additional information about the target distribution that we want to simulate from, we can re-optimize the parameters. In this case, we’ve added an additional constraint that 5% will survive longer than 300 days. With this new set of points, the optimized curve will not necessarily pass through all the points.</p>
+<pre class="r"><code>points &lt;- list(c(100, 0.80), c(200, 0.10), c(300, 0.05))
+r &lt;- survGetParams(points)
+survParamPlot(f = r[1], shape = r[2], points)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<p>And finally - here is one last scenario, where we have four target probabilities:</p>
+<pre class="r"><code>points &lt;- list(c(100, 0.80), c(120, 0.50), c(200, 0.10), c(300, 0.05))
+r &lt;- survGetParams(points)
+survParamPlot(f = r[1], shape = r[2], points)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+</div>
+<div id="simulating-data-from-a-desired-distribution" class="section level2">
+<h2>Simulating data from a desired distribution</h2>
+<p>With a target distribution in hand, and a pair of parameters, we are now ready to simulate data. In the first example above, we learned that <span class="math inline">\(f = -17\)</span> and <span class="math inline">\(\nu = 0.3\)</span> gives define the distribution where 80% survive until day 100, and 10% survive until day 200. We can simulate data from that distribution to see how well we do. And while we are at, I’ll add in a treatment that improves survival time (note that negative coefficients imply improvements in survival).</p>
+<pre class="r"><code>defD &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+defS &lt;- defSurv(varname = &quot;time&quot;, formula = &quot;-17 - 0.8 * rx&quot;, scale = 1, shape = 0.3)
+
+set.seed(11785)
+dd &lt;- genData(200, defD)
+dd &lt;- genSurv(dd, defS, digits = 0)
+dd$status &lt;- 1
+
+dd</code></pre>
+<pre><code>##       id rx time status
+##   1:   1  1  180      1
+##   2:   2  1  189      1
+##   3:   3  1  183      1
+##   4:   4  1  280      1
+##   5:   5  1   84      1
+##  ---                   
+## 196: 196  0  219      1
+## 197: 197  1  273      1
+## 198: 198  0  131      1
+## 199: 199  1  261      1
+## 200: 200  1  203      1</code></pre>
+<p>Eyeballing the survival curve for the control arm (<span class="math inline">\(rx = 0\)</span>), we can see that this roughly matches the distribution of 80%/100 and 10%/200. Incidentally, the survival curve for the treatment arm has effectively been generated by a distribution with parameters <span class="math inline">\(f=-17.8\)</span> and <span class="math inline">\(\nu = 0.3\)</span>.</p>
+<pre class="r"><code>fit &lt;- survfit( Surv(time, status) ~ rx, data = dd )
+ggsurvplot(fit, data = dd, palette = c(&quot;#7D9D33&quot;,&quot;#CD8862&quot;))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<p>Fitting a Cox proportional hazard model brings provides an interesting interpretation of the hazard ratio. Under the assumption of constant shape (that is <span class="math inline">\(\nu\)</span> is equivalent for both arms), the log hazard ratio can be viewed as the shift of the scale parameter (here represented entirely by <span class="math inline">\(f\)</span>). While that probably won’t help anyone understand the real world implications of the hazard ratio, it does provide some insight into the underlying data generation process.</p>
+<pre class="r"><code>coxfit &lt;- coxph(Surv(time, status) ~ rx, data = dd)</code></pre>
+<div id="yxosfzofvx" style="overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
+<style>html {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', 'Fira Sans', 'Droid Sans', Arial, sans-serif;
+}
+
+#yxosfzofvx .gt_table {
+  display: table;
+  border-collapse: collapse;
+  margin-left: auto;
+  margin-right: auto;
+  color: #333333;
+  font-size: 16px;
+  font-weight: normal;
+  font-style: normal;
+  background-color: #FFFFFF;
+  width: auto;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #A8A8A8;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #A8A8A8;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_heading {
+  background-color: #FFFFFF;
+  text-align: center;
+  border-bottom-color: #FFFFFF;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_title {
+  color: #333333;
+  font-size: 125%;
+  font-weight: initial;
+  padding-top: 4px;
+  padding-bottom: 4px;
+  border-bottom-color: #FFFFFF;
+  border-bottom-width: 0;
+}
+
+#yxosfzofvx .gt_subtitle {
+  color: #333333;
+  font-size: 85%;
+  font-weight: initial;
+  padding-top: 0;
+  padding-bottom: 6px;
+  border-top-color: #FFFFFF;
+  border-top-width: 0;
+}
+
+#yxosfzofvx .gt_bottom_border {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_col_headings {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_col_heading {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 6px;
+  padding-left: 5px;
+  padding-right: 5px;
+  overflow-x: hidden;
+}
+
+#yxosfzofvx .gt_column_spanner_outer {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: normal;
+  text-transform: inherit;
+  padding-top: 0;
+  padding-bottom: 0;
+  padding-left: 4px;
+  padding-right: 4px;
+}
+
+#yxosfzofvx .gt_column_spanner_outer:first-child {
+  padding-left: 0;
+}
+
+#yxosfzofvx .gt_column_spanner_outer:last-child {
+  padding-right: 0;
+}
+
+#yxosfzofvx .gt_column_spanner {
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: bottom;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  overflow-x: hidden;
+  display: inline-block;
+  width: 100%;
+}
+
+#yxosfzofvx .gt_group_heading {
+  padding: 8px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#yxosfzofvx .gt_empty_group_heading {
+  padding: 0.5px;
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  vertical-align: middle;
+}
+
+#yxosfzofvx .gt_from_md > :first-child {
+  margin-top: 0;
+}
+
+#yxosfzofvx .gt_from_md > :last-child {
+  margin-bottom: 0;
+}
+
+#yxosfzofvx .gt_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  margin: 10px;
+  border-top-style: solid;
+  border-top-width: 1px;
+  border-top-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 1px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 1px;
+  border-right-color: #D3D3D3;
+  vertical-align: middle;
+  overflow-x: hidden;
+}
+
+#yxosfzofvx .gt_stub {
+  color: #333333;
+  background-color: #FFFFFF;
+  font-size: 100%;
+  font-weight: initial;
+  text-transform: inherit;
+  border-right-style: solid;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+  padding-left: 12px;
+}
+
+#yxosfzofvx .gt_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#yxosfzofvx .gt_first_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_grand_summary_row {
+  color: #333333;
+  background-color: #FFFFFF;
+  text-transform: inherit;
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+}
+
+#yxosfzofvx .gt_first_grand_summary_row {
+  padding-top: 8px;
+  padding-bottom: 8px;
+  padding-left: 5px;
+  padding-right: 5px;
+  border-top-style: double;
+  border-top-width: 6px;
+  border-top-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_striped {
+  background-color: rgba(128, 128, 128, 0.05);
+}
+
+#yxosfzofvx .gt_table_body {
+  border-top-style: solid;
+  border-top-width: 2px;
+  border-top-color: #D3D3D3;
+  border-bottom-style: solid;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_footnotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_footnote {
+  margin: 0px;
+  font-size: 90%;
+  padding: 4px;
+}
+
+#yxosfzofvx .gt_sourcenotes {
+  color: #333333;
+  background-color: #FFFFFF;
+  border-bottom-style: none;
+  border-bottom-width: 2px;
+  border-bottom-color: #D3D3D3;
+  border-left-style: none;
+  border-left-width: 2px;
+  border-left-color: #D3D3D3;
+  border-right-style: none;
+  border-right-width: 2px;
+  border-right-color: #D3D3D3;
+}
+
+#yxosfzofvx .gt_sourcenote {
+  font-size: 90%;
+  padding: 4px;
+}
+
+#yxosfzofvx .gt_left {
+  text-align: left;
+}
+
+#yxosfzofvx .gt_center {
+  text-align: center;
+}
+
+#yxosfzofvx .gt_right {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+#yxosfzofvx .gt_font_normal {
+  font-weight: normal;
+}
+
+#yxosfzofvx .gt_font_bold {
+  font-weight: bold;
+}
+
+#yxosfzofvx .gt_font_italic {
+  font-style: italic;
+}
+
+#yxosfzofvx .gt_super {
+  font-size: 65%;
+}
+
+#yxosfzofvx .gt_footnote_marks {
+  font-style: italic;
+  font-weight: normal;
+  font-size: 65%;
+}
+</style>
+<table class="gt_table">
+  
+  <thead class="gt_col_headings">
+    <tr>
+      <th class="gt_col_heading gt_columns_bottom_border gt_left" rowspan="1" colspan="1"><strong>Characteristic</strong></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>log(HR)</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>95% CI</strong><sup class="gt_footnote_marks">1</sup></th>
+      <th class="gt_col_heading gt_columns_bottom_border gt_center" rowspan="1" colspan="1"><strong>p-value</strong></th>
+    </tr>
+  </thead>
+  <tbody class="gt_table_body">
+    <tr><td class="gt_row gt_left">rx</td>
+<td class="gt_row gt_center">-0.78</td>
+<td class="gt_row gt_center">-1.1, -0.49</td>
+<td class="gt_row gt_center"><0.001</td></tr>
+  </tbody>
+  
+  <tfoot>
+    <tr class="gt_footnotes">
+      <td colspan="4">
+        <p class="gt_footnote">
+          <sup class="gt_footnote_marks">
+            <em>1</em>
+          </sup>
+           
+          HR = Hazard Ratio, CI = Confidence Interval
+          <br />
+        </p>
+      </td>
+    </tr>
+  </tfoot>
+</table>
+</div>
+<p><br></p>
+</div>

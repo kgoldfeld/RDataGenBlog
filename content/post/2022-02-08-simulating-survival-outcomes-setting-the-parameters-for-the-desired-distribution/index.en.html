@@ -19,6 +19,40 @@ draft: TRUE
 
 <p>The package <code>simstudy</code> has some functions that facilitate generating survival data using an underlying Weibull distribution. Originally, I added this to the package because I thought it would be interesting to try to do, and I figured it would be useful for me someday (and hopefully some others, as well). Well, now I am working on a project that involves evaluating at least two survival-type processes that are occurring simultaneously. To get a handle on the analytic models we might use, I’ve started to try to simulate a simplified version of the data that we have.</p>
 <p>At some point, I’d like to describe the motivating simulations in more detail. But here, I want to focus more generally on the underlying survival data generating process used in <code>simstudy</code>, looking in particular at how to identify the parameters so that the simulated data will come close to matching a desired distribution.</p>
+<div id="generating-survival-data-in-simstudy" class="section level2">
+<h2>Generating survival data in simstudy</h2>
+<p>To put all of this in context, this is a simple example of how we can generate survival data using <code>simstudy</code> and then take a look at it using the <code>survival</code> and <code>survminer</code> packages:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(survminer)
+library(survival)
+
+def &lt;- defSurv(varname = &quot;time&quot;, formula = -13.7, scale = 1, shape = 0.49)
+
+set.seed(1134)
+dd &lt;- genData(101)
+dd &lt;- genSurv(dd, def, digits = 0)
+dd$status &lt;- 1
+
+dd</code></pre>
+<pre><code>##       id time status
+##   1:   1  604      1
+##   2:   2 1012      1
+##   3:   3 1338      1
+##   4:   4 1009      1
+##   5:   5  335      1
+##  ---                
+##  97:  97  756      1
+##  98:  98  971      1
+##  99:  99  381      1
+## 100: 100  952      1
+## 101: 101  697      1</code></pre>
+<pre class="r"><code>fit &lt;- survfit( Surv(time, status) ~ 1, data = dd )
+ggsurvplot(fit, data = dd, palette = &quot;#7D9D33&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="672" /></p>
+<p>So, we have generated survival data, and it all looks great. However, where did those parameters (<em>formula</em>, <em>scale</em>, and <em>shape</em>) in <code>defSurv</code> come from? That’s what we’re focusing on here.</p>
+</div>
 <div id="weibull-cox-proprtional-hazard-data-generation-process" class="section level2">
 <h2>Weibull-Cox proprtional hazard data generation process</h2>
 <p>This underlying data generating process draws from a Weibull distribution and satisfies the requirements of a Cox proportional hazards model. The approach was drawn directly from this <a href="https://onlinelibrary.wiley.com/doi/pdf/10.1002/sim.2059" target="_blank"><em>Bender, Augustin, and Blettner</em></a> paper, so head over there if you really want the details.</p>
@@ -29,9 +63,8 @@ draft: TRUE
 <p><span class="math display">\[T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu\]</span></p>
 <div id="visualizing-the-survival-curves" class="section level3">
 <h3>Visualizing the survival curves</h3>
-<p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are the packages needed to run all the code here:</p>
-<pre class="r"><code>library(simstudy)
-library(data.table)
+<p>Weibull distribution data generation is extremely flexible, and can provide an infinite number of distributions of a wide range of shapes. Here are some examples, but first, to get things started, here are two more packages needed to run all the code here:</p>
+<pre class="r"><code>library(data.table)
 library(ggplot2)</code></pre>
 <p>The function <code>get_surv</code> generates data for the survival curve. It is deterministic in that it does not generate draws of <span class="math inline">\(u\)</span>, but calculates a specific <span class="math inline">\(T\)</span> for each value of <span class="math inline">\(u\)</span> distribution evenly between 0 and 1.</p>
 <pre class="r"><code>get_surv &lt;- function(f, shape, n = 100) {
@@ -82,14 +115,14 @@ ggplot(data = l, aes(x = T, y = p)) +
     values = c(&quot;#7D9D33&quot;, &quot;#CED38C&quot;, &quot;#DCC949&quot;, &quot;#BCA888&quot;, &quot;#CD8862&quot;, &quot;#775B24&quot;),
     name = &quot;  f&quot;
   )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
 </div>
 </div>
 <div id="generating-a-particular-distribution" class="section level2">
 <h2>Generating a particular distribution</h2>
 <p>The interpretation of the parameters is a bit opaque. If we have covariates embedded in <span class="math inline">\(f\)</span> the coefficients do have pretty clear interpretations as hazard ratios. But the intercept term (remember, I have set <span class="math inline">\(\lambda = 1\)</span>) really defines the scale. So how do we go about selecting values for <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> to get the desired distribution?</p>
 <p>If we can reasonably characterize the desired distribution by two points on the survival curve, the task actually becomes remarkably easy. By this, I mean we pick two time points and a probability of survival for each time point. For example, we may want a distribution with 80% survival until day 180 and 20% survival at day 365. Or, in a second scenario, we may want to have 90% survival at day 180 and 40% survival at day 365. Here is an animation of how we might find the curves by adjusting <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> (see <a href="#addendum">addendum</a> for code to generate this):</p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.gif" /><!-- --></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.gif" /><!-- --></p>
 <div id="determining-the-parameter-values" class="section level3">
 <h3>Determining the parameter values</h3>
 <p>If we have two points in mind, there is an extremely simple analytic solution that can derive <span class="math inline">\(f\)</span> and <span class="math inline">\(\nu\)</span> so that we can identify a Weibull-Cox based survival curve that is guaranteed to pass through both points.</p>
@@ -129,7 +162,7 @@ dsurv</code></pre>
 ##  998: -13.655 0.486 1792.58585 0.002
 ##  999: -13.655 0.486 1852.33947 0.001
 ## 1000: -13.655 0.486 1950.02084 0.000</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="528" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="528" /></p>
 <p>Of course, what we really want to do is sample from a distribution defined by these parameters in order to conduct simulation experiments, not just generate and look at deterministic functions. This would include adding covariates and possibly censoring. But all of that remains for another day.</p>
 <p>
 <p><small><font color="darkkhaki">
