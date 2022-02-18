@@ -13,11 +13,11 @@ image: ''
 draft: TRUE
 ---
 
-In the [previous post](http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution){target="_blank"} I described how to determine the parameter values for generating a Weibull survival curve that reflects a desired distribution defined by two points along the curve. I went ahead and implemented these ideas in the development version of `simstudy 0.4.0.9000`, expanding the idea to allow for any number of points rather than just two. This post provides a brief overview of the approach, the code, and a simple example using the parameters to generate simulated data.
+In the [previous post](https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/){target="_blank"} I described how to determine the parameter values for generating a Weibull survival curve that reflects a desired distribution defined by two points along the curve. I went ahead and implemented these ideas in the development version of `simstudy 0.4.0.9000`, expanding the idea to allow for any number of points rather than just two. This post provides a brief overview of the approach, the code, and a simple example using the parameters to generate simulated data.
 
 ## The distribution
 
-Just to recap briefly (really, take a glance at the [previous post](http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution){target="_blank"} if you haven't already - this post may make a bit more sense), the times to an event can be drawn from the Weibull distribution by generating a uniform random $u$ variable between 0 and 1 that represents the survival probability. There are two parameters that I am using here - the *formula* $f$ and *shape* $\nu$. (There is a third possible *scale* parameter $\lambda$ that I have set to 1 as a default, so that $f$ alone determines the scale.)
+Just to recap briefly (really, take a glance at the [previous post](https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution){target="_blank"} if you haven't already - this post may make a bit more sense), the times to an event can be drawn from the Weibull distribution by generating a uniform random $u$ variable between 0 and 1 that represents the survival probability. There are two parameters that I am using here - the *formula* $f$ and *shape* $\nu$. (There is a third possible *scale* parameter $\lambda$ that I have set to 1 as a default, so that $f$ alone determines the scale.)
 
 $$T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 
@@ -26,7 +26,7 @@ $$T = \left[ \frac{- \text{log}(u) }{\text{exp}(f)}  \right] ^ \nu$$
 If we have some idea about how the shape of the survival curve might look, we can use this information to find the parameters that will allow us to draw simulated data from that distribution. When I say "we might have some idea," I mean that we need to have survival probabilities in mind for specific time points. 
 
 Last time, I showed that if we have two time points and their associated probabilities, we can generate parameters that define a curve that passes through both points. In the main body of that post I proposed a simple analytic solution for the parameters, but in the
-[addendum](http://localhost:4321/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/#addendum){target="_blank"} of the previous post, I suggested we can minimize a simple loss function to find the same parameters. I've decided to implement the minimization algorithm in `simstudy`, because it can more flexibly incorporate any number of input points, not just two. Here is the more general loss function for $k$ input points:
+[addendum](https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/#addendum){target="_blank"} of the previous post, I suggested we can minimize a simple loss function to find the same parameters. I've decided to implement the minimization algorithm in `simstudy`, because it can more flexibly incorporate any number of input points, not just two. Here is the more general loss function for $k$ input points:
 
 $$\sum_{i=1}^k\left[ \nu^* \ (\text{log} \left[ -\text{log}(u_i)\right] - f^*) - \text{log}(T_i) \right]^2$$
 
@@ -152,7 +152,7 @@ fit <- survfit( Surv(time, status) ~ rx, data = dd )
 ggsurvplot(fit, data = dd, palette = c("#7D9D33","#CD8862"))
 ```
 
-Fitting a Cox proportional hazard model brings provides an interesting interpretation of the hazard ratio. Under the assumption of constant shape (that is $\nu$ is equivalent for both arms), the log hazard ratio can be viewed as the shift of the scale parameter (here represented entirely by $f$). While that probably won't help anyone understand the real world implications of the hazard ratio, it does provide some insight into the underlying data generation process.
+Under the assumption of a constant shape (that is $\nu$ is equivalent for both arms), the log hazard ratio can be viewed as the shift of the scale parameter (here represented entirely by $f$). While that probably won't help anyone understand the real world implications of the hazard ratio, it does provide some insight into the underlying data generation process.
 
 ```{r}
 coxfit <- coxph(Surv(time, status) ~ rx, data = dd)
