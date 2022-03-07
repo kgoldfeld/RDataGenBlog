@@ -1,0 +1,103 @@
+---
+title: Adding competing risks in survival data generation
+author: Package Build
+date: '2022-03-15'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+<script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
+
+
+<p>I am working on an update of <code>simstudy</code> that will make generating survival/time-to-event data a bit more flexible. There are two biggish enhancements. The first facilitates generation of competing events, and the second allows for the possibility of generating survival data that has time-dependent hazard ratios. This post focuses on the first enhancement, and a follow up will provide examples of the second. (If you want to try this at home, you will need the development version of <code>simstudy</code> that you can install using <strong>devtools::install_github(“kgoldfeld/simstudy”)</strong>.)</p>
+<div id="competing-risks" class="section level3">
+<h3>Competing risks</h3>
+<p>Concept of competing risk …</p>
+<p>In the previous example, we actually used the competing risk mechanism in <code>genSurv</code> to generate an observed time variable (which was the earliest of the censoring and event time). This is done by specifying a <em>timeName</em> argument that will represent the observed time value. The event status is indicated in the field set by the <em>eventName</em> argument (which defaults to “event”). If a variable name is indicated in the <em>censorName</em> argument, the censored events automatically have a value of 0. As we saw above, competing risk information can be generated as part of <code>genSurv</code>. However, there is an additional function <code>addCompRisk</code> that will generate the competing risk information using an existing data set. The example here will take that approach.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(survival)</code></pre>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;x1&quot;, formula = .5, dist = &quot;binary&quot;)
+d1 &lt;- defData(d1, &quot;x2&quot;, .5, dist = &quot;binary&quot;)
+
+dS &lt;- defSurv(varname = &quot;event_1&quot;, formula = &quot;-10 - 0.6*x1 + 0.4*x2&quot;, shape = 0.3)
+dS &lt;- defSurv(dS, &quot;event_2&quot;, &quot;-6.5 + 0.3*x1 - 0.5*x2&quot;, shape = 0.5)
+dS &lt;- defSurv(dS, &quot;censor&quot;, &quot;-7&quot;, shape = 0.55)
+
+dtSurv &lt;- genData(1001, d1)
+dtSurv &lt;- genSurv(dtSurv, dS)
+
+dtSurv</code></pre>
+<pre><code>##         id x1 x2 censor event_1 event_2
+##    1:    1  0  0 35.993  21.199  10.472
+##    2:    2  1  1 46.647  20.018  21.070
+##    3:    3  1  1 12.740   9.320  16.787
+##    4:    4  0  0 16.480  26.811  23.481
+##    5:    5  0  0 41.238  19.556  31.368
+##   ---                                  
+##  997:  997  1  1 22.940  13.355  39.096
+##  998:  998  1  0 49.502  16.537   8.642
+##  999:  999  0  1 44.738  12.311  58.131
+## 1000: 1000  1  0 24.854   2.418  11.702
+## 1001: 1001  0  1 51.121  13.760  14.788</code></pre>
+<pre class="r"><code>cdef &lt;- defDataAdd(varname = &quot;time&quot;, 
+  formula = &quot;pmin(censor, event_1, event_2)&quot;, dist = &quot;nonrandom&quot;)
+cdef &lt;- defDataAdd(cdef, varname = &quot;event&quot;, 
+  formula = &quot;(time==censor)*0 + (time==event_1)*1 + (time==event_2)*2&quot;, 
+  dist = &quot;nonrandom&quot;)
+
+dtSurv_old &lt;- addColumns(cdef, dtSurv)
+dtSurv_old</code></pre>
+<pre><code>##         id x1 x2 censor event_1 event_2   time event
+##    1:    1  0  0 35.993  21.199  10.472 10.472     2
+##    2:    2  1  1 46.647  20.018  21.070 20.018     1
+##    3:    3  1  1 12.740   9.320  16.787  9.320     1
+##    4:    4  0  0 16.480  26.811  23.481 16.480     0
+##    5:    5  0  0 41.238  19.556  31.368 19.556     1
+##   ---                                               
+##  997:  997  1  1 22.940  13.355  39.096 13.355     1
+##  998:  998  1  0 49.502  16.537   8.642  8.642     2
+##  999:  999  0  1 44.738  12.311  58.131 12.311     1
+## 1000: 1000  1  0 24.854   2.418  11.702  2.418     1
+## 1001: 1001  0  1 51.121  13.760  14.788 13.760     1</code></pre>
+<pre class="r"><code>dtSurv &lt;- addCompRisk(dtSurv, events = c(&quot;event_1&quot;, &quot;event_2&quot;, &quot;censor&quot;), 
+            timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
+dtSurv</code></pre>
+<pre><code>##         id x1 x2   time event    type
+##    1:    1  0  0 10.472     2 event_2
+##    2:    2  1  1 20.018     1 event_1
+##    3:    3  1  1  9.320     1 event_1
+##    4:    4  0  0 16.480     0  censor
+##    5:    5  0  0 19.556     1 event_1
+##   ---                                
+##  997:  997  1  1 13.355     1 event_1
+##  998:  998  1  0  8.642     2 event_2
+##  999:  999  0  1 12.311     1 event_1
+## 1000: 1000  1  0  2.418     1 event_1
+## 1001: 1001  0  1 13.760     1 event_1</code></pre>
+<p>The competing risk data can be plotted using the cumulative incidence functions (rather than the survival curves):</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="624" /></p>
+<p>The data generation can all be done in two (instead of three) steps:</p>
+<pre class="r"><code>dtSurv &lt;- genData(101, d1)
+dtSurv &lt;- genSurv(dtSurv, dS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
+dtSurv</code></pre>
+<pre><code>##       id x1 x2   time event    type
+##   1:   1  0  0 11.024     1 event_1
+##   2:   2  0  0 15.982     1 event_1
+##   3:   3  0  1 11.823     1 event_1
+##   4:   4  0  1 11.840     1 event_1
+##   5:   5  1  1 12.056     2 event_2
+##  ---                               
+##  97:  97  1  0  3.369     2 event_2
+##  98:  98  1  0 20.504     1 event_1
+##  99:  99  0  0 11.498     1 event_1
+## 100: 100  1  0 19.378     1 event_1
+## 101: 101  0  1  8.397     0  censor</code></pre>
+</div>

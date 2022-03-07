@@ -1,0 +1,98 @@
+---
+title: Adding competing risks in survival data generation
+author: Package Build
+date: '2022-03-15'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+library(survminer)
+library(ggplot2)
+
+cbbPalette <- c("#B84226","#B88F26", "#A5B435", "#1B8446",
+                "#B87326","#B8A526", "#6CA723", "#1C5974") 
+
+ggtheme <- function(panelback = "white") {
+  
+  ggplot2::theme(
+    panel.background = ggplot2::element_rect(fill = panelback),
+    panel.grid = ggplot2::element_blank(),
+    axis.ticks =  ggplot2::element_line(colour = "black"),
+    panel.spacing = ggplot2::unit(0.25, "lines"),  # requires package grid
+    panel.border = ggplot2::element_rect(fill = NA, colour="gray90"), 
+    plot.title = ggplot2::element_text(size = 8,vjust=.5,hjust=0),
+    axis.text = ggplot2::element_text(size=8),
+    axis.title = ggplot2::element_text(size = 8)
+  )  
+  
+}
+```
+
+I am working on an update of `simstudy` that will make generating survival/time-to-event data a bit more flexible. There are two biggish enhancements. The first facilitates generation of competing events, and the second allows for the possibility of generating survival data that has time-dependent hazard ratios. This post focuses on the first enhancement, and a follow up will provide examples of the second. (If you want to try this at home, you will need the development version of `simstudy` that you can install using **devtools::install_github("kgoldfeld/simstudy")**.)
+
+### Competing risks
+
+Concept of competing risk ...
+
+In the previous example, we actually used the competing risk mechanism in `genSurv` to generate an observed time variable (which was the earliest of the censoring and event time). This is done by specifying a *timeName* argument that will represent the observed time value. The event status is indicated in the field set by the *eventName* argument (which defaults to "event"). If a variable name is indicated in the *censorName* argument, the censored events automatically have a value of 0. As we saw above, competing risk information can be generated as part of `genSurv`. However, there is an additional function `addCompRisk` that will generate the competing risk information using an existing data set. The example here will take that approach.
+
+```{r, message = FALSE}
+library(simstudy)
+library(data.table)
+library(survival)
+```
+
+```{r}
+d1 <- defData(varname = "x1", formula = .5, dist = "binary")
+d1 <- defData(d1, "x2", .5, dist = "binary")
+
+dS <- defSurv(varname = "event_1", formula = "-10 - 0.6*x1 + 0.4*x2", shape = 0.3)
+dS <- defSurv(dS, "event_2", "-6.5 + 0.3*x1 - 0.5*x2", shape = 0.5)
+dS <- defSurv(dS, "censor", "-7", shape = 0.55)
+
+dtSurv <- genData(1001, d1)
+dtSurv <- genSurv(dtSurv, dS)
+
+dtSurv
+```
+
+```{r}
+cdef <- defDataAdd(varname = "time", 
+  formula = "pmin(censor, event_1, event_2)", dist = "nonrandom")
+cdef <- defDataAdd(cdef, varname = "event", 
+  formula = "(time==censor)*0 + (time==event_1)*1 + (time==event_2)*2", 
+  dist = "nonrandom")
+
+dtSurv_old <- addColumns(cdef, dtSurv)
+dtSurv_old
+```
+
+```{r}
+dtSurv <- addCompRisk(dtSurv, events = c("event_1", "event_2", "censor"), 
+            timeName = "time", censorName = "censor")
+dtSurv
+```
+
+The competing risk data can be plotted using the cumulative incidence functions (rather than the survival curves):
+
+```{r, tidy = TRUE, echo = FALSE, fig.width = 6.5, fig.height = 3.5, warning=FALSE}
+fit <- survfit(Surv(time, event, type="mstate") ~ 1, data=dtSurv)
+survminer::ggcompetingrisks(fit, ggtheme = ggtheme("grey94"))  + 
+  ggplot2::scale_fill_manual(values = cbbPalette)
+```
+
+The data generation can all be done in two (instead of three) steps:
+
+```{r}
+dtSurv <- genData(101, d1)
+dtSurv <- genSurv(dtSurv, dS, timeName = "time", censorName = "censor")
+dtSurv
+```
