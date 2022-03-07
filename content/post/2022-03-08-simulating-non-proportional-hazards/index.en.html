@@ -1,5 +1,5 @@
 ---
-title: Simulating non-proportional hazards
+title: Simulating time-to-event outcomes with non-proportional hazards
 author: Package Build
 date: '2022-03-08'
 slug: []
@@ -16,47 +16,39 @@ draft: TRUE
 <script src="{{< blogdown/postref >}}index.en_files/header-attrs/header-attrs.js"></script>
 
 
+<p>I am working on an update of <code>simstudy</code> that will make generating survival/time-to-event data a bit more flexible. There are two biggish enhancements. The first allows for the possibility of generating survival data that has time-dependent hazard ratios, and the second facilitates generation of competing events. This post focuses on the first enhancement, and a follow up will provide examples of the second. (If you want to try this at home, you will need the development version of <code>simstudy</code> that you can install using <strong>devtools::install_github(“kgoldfeld/simstudy”)</strong>.)</p>
+<div id="constantproportional-hazard-ratio" class="section level3">
+<h3>Constant/proportional hazard ratio</h3>
+<p>In the current version of <code>simstudy 0.4.0</code> on <code>CRAN</code>, the data generation process for survival/time-to-event outcomes can include covariates that effect the hazard rate (which is the risk/probability of having an event conditional on not having had experienced that event earlier). The ratio of hazards comparing different levels of a covariate are constant across all time points. For example, if we have a single binary covariate <span class="math inline">\(x\)</span>, the hazard <span class="math inline">\(\lambda(t)\)</span> at time <span class="math inline">\(t\)</span> is
+<span class="math display">\[\lambda(t|x) = \lambda_0(t) e ^ {\beta x}\]</span>
+where <span class="math inline">\(\lambda_0(t)\)</span> is a baseline hazard when <span class="math inline">\(x=0\)</span>. The ratio of the hazards for <span class="math inline">\(x=1\)</span> compared to <span class="math inline">\(x=0\)</span> is
+<span class="math display">\[\frac{\lambda_0(t) e ^ {\beta}}{\lambda_0(t)} = e ^ \beta,\]</span>
+so the log of the hazard ratio is a constant <span class="math inline">\(\beta\)</span>, and the hazard ratio is always <span class="math inline">\(e^\beta\)</span>. To start, here is an example assuming a constant log hazard ratio of <span class="math inline">\(-0.7\)</span>:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
-library(survival)
-library(survminer)
-library(ggplot2)</code></pre>
-<pre class="r"><code>cbbPalette &lt;- c(&quot;#B84226&quot;,&quot;#B88F26&quot;, &quot;#A5B435&quot;, &quot;#1B8446&quot;,
-                &quot;#B87326&quot;,&quot;#B8A526&quot;, &quot;#6CA723&quot;, &quot;#1C5974&quot;) 
-
-ggtheme &lt;- function(panelback = &quot;white&quot;) {
-  
-  ggplot2::theme(
-    panel.background = ggplot2::element_rect(fill = panelback),
-    panel.grid = ggplot2::element_blank(),
-    axis.ticks =  ggplot2::element_line(colour = &quot;black&quot;),
-    panel.spacing = ggplot2::unit(0.25, &quot;lines&quot;),  # requires package grid
-    panel.border = ggplot2::element_rect(fill = NA, colour=&quot;gray90&quot;), 
-    plot.title = ggplot2::element_text(size = 8,vjust=.5,hjust=0),
-    axis.text = ggplot2::element_text(size=8),
-    axis.title = ggplot2::element_text(size = 8)
-  )  
-  
-}</code></pre>
-<p>In the standard <code>simstudy</code> data generation process for survival/time-to-event outcomes that includes covariates that effect the hazard rate at various time points, the ratio of hazards comparing different levels of a covariate are constant across all time points. For example, if we have a single binary covariate <span class="math inline">\(x\)</span>, the hazard <span class="math inline">\(\lambda(t)\)</span> at time <span class="math inline">\(t\)</span> is</p>
-<p><span class="math display">\[\lambda(t|x) = \lambda_0(t) e ^ {\beta x}\]</span>
-where <span class="math inline">\(\lambda_0(t)\)</span> is a baseline hazard when <span class="math inline">\(x=0\)</span>. The ratio of the hazards for <span class="math inline">\(x=1\)</span> compared to <span class="math inline">\(x=0\)</span> is</p>
-<p><span class="math display">\[\frac{\lambda_0(t) e ^ {\beta}}{\lambda_0(t)} = e ^ \beta,\]</span></p>
-<p>so the log of the hazard ratio is a constant <span class="math inline">\(\beta\)</span>, and the hazard ratio is always <span class="math inline">\(e^\beta\)</span>.</p>
-<p>However, we may not always want to make the assumption that the hazard ratio is constant over all time periods. To facilitate this, it is possible to specify two different data definitions for the same outcome, using the <em>transition</em> field to specify when the second definition replaces the first. (While it would theoretically be possible to generate data for more than two periods, the process is more involved, and has not been implemented at this time.)</p>
-<p><br></p>
-<p><strong>Constant/proportional hazard ratio</strong></p>
-<p>To start, here is an example assuming a constant log hazard ratio of -0.7:</p>
+library(survival)</code></pre>
 <pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = 0.4, dist = &quot;binary&quot;)
 
-defS &lt;- defSurv(varname = &quot;death&quot;, formula = &quot;-14.6 - 0.7*x&quot;, shape = 0.35)
+defS &lt;- defSurv(varname = &quot;death&quot;, formula = &quot;-14.6 - 0.7 * x&quot;, shape = 0.35)
 defS &lt;- defSurv(defS, varname = &quot;censor&quot;, scale = exp(13), shape = 0.5)
 
 set.seed(7361)
 dd &lt;- genData(500, def)
 dd &lt;- genSurv(dd, defS, digits = 2, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
-
-fit &lt;- survfit(Surv(time, event) ~ x, data = dd)</code></pre>
+dd</code></pre>
+<pre><code>##       id x   time event   type
+##   1:   1 0 164.98     1  death
+##   2:   2 1 247.84     1  death
+##   3:   3 0  28.54     1  death
+##   4:   4 0 138.05     1  death
+##   5:   5 0 228.53     1  death
+##  ---                          
+## 496: 496 0  79.47     1  death
+## 497: 497 1   5.41     0 censor
+## 498: 498 1 211.54     1  death
+## 499: 499 0 240.73     1  death
+## 500: 500 1 256.66     1  death</code></pre>
+<p>Here is a Kaplan-Meier plot comparing survival curves for cases where <span class="math inline">\(x=0\)</span> with cases where <span class="math inline">\(x=1\)</span>. This is what a proportional hazard rate looks like:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="624" /></p>
 <p>The Cox proportional hazards model recovers the correct log hazards rate:</p>
 <pre class="r"><code>coxfit &lt;- coxph(formula = Surv(time, event) ~ x, data = dd)</code></pre>
@@ -431,25 +423,26 @@ fit &lt;- survfit(Surv(time, event) ~ x, data = dd)</code></pre>
   </tfoot>
 </table>
 </div>
-<p>We can test the assumption of proportional hazards using weighted residuals. If the <span class="math inline">\(\text{p-value} &lt; 0.05\)</span>, then we would conclude that the assumption of proportional hazards is not warranted. In this case <span class="math inline">\(p = 0.22\)</span>, so the model is apparently reasonable:</p>
+<p>Since we know that we used proportional hazards to generate the data, we can expect that a test evaluating the proportional hazards assumption using weighted residuals will confirm that the assumption is met. If the <span class="math inline">\(\text{p-value} &lt; 0.05\)</span>, then we would conclude that the assumption of proportional hazards is not warranted. In this case <span class="math inline">\(p = 0.68\)</span>, so the model is apparently reasonable (which we already knew):</p>
 <pre class="r"><code>cox.zph(coxfit)</code></pre>
 <pre><code>##        chisq df    p
 ## x       0.17  1 0.68
 ## GLOBAL  0.17  1 0.68</code></pre>
-<p><br></p>
-<p><strong>Non-constant/non-proportional hazard ratio</strong></p>
+</div>
+<div id="non-constantnon-proportional-hazard-ratio" class="section level3">
+<h3>Non-constant/non-proportional hazard ratio</h3>
+<p>When generating data, we may not always want to be limited to a situation where the hazard ratio is constant over all time periods. To facilitate this, it is possible to specify two different data definitions for the same outcome, using the <em>transition</em> field to specify when the second definition replaces the first. (While it would theoretically be possible to generate data for more than two periods, the process is more involved, and has not been implemented.)</p>
 <p>In this next case, the risk of death when <span class="math inline">\(x=1\)</span> is lower at all time points compared to when <span class="math inline">\(x=0\)</span>, but the relative risk (or hazard ratio) changes at 150 days:</p>
-<pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = 0.4, dist = &quot;binary&quot;)
+<pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = 0.4, dist=&quot;binary&quot;)
 
-defS &lt;- defSurv(varname = &quot;death&quot;, formula = &quot;-14.6 - 1.3*x&quot;, shape = 0.35, transition = 0)
-defS &lt;- defSurv(defS, varname = &quot;death&quot;, formula = &quot;-14.6 - 0.4*x&quot;, shape = 0.35,
-    transition = 150)
-defS &lt;- defSurv(defS, varname = &quot;censor&quot;, scale = exp(13), shape = 0.5)
+defS &lt;- defSurv(varname = &quot;death&quot;, formula = &quot;-14.6 - 1.3 * x&quot;, 
+  shape = 0.35, transition = 0)
+defS &lt;- defSurv(defS, varname = &quot;death&quot;, formula = &quot;-14.6 - 0.4 * x&quot;, 
+  shape = 0.35, transition = 150)
+defS &lt;- defSurv(defS, varname = &quot;censor&quot;, scale = exp(13), shape = 0.50)
 
 dd &lt;- genData(500, def)
-dd &lt;- genSurv(dd, defS, digits = 2, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
-
-fit &lt;- survfit(Surv(time, event) ~ x, data = dd)</code></pre>
+dd &lt;- genSurv(dd, defS, digits = 2, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)</code></pre>
 <p>The survival curve for the sample with <span class="math inline">\(x=1\)</span> has a slightly different shape under this data generation process compared to the previous example under a constant hazard ratio assumption; there is more separation early on (prior to day 150), and then the gap is closed at a quicker rate.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="624" /></p>
 <p>If we ignore the possibility that there might be a different relationship over time, the Cox proportional hazards model gives an estimate of the log hazard ratio quite close to -0.70:</p>
@@ -1219,3 +1212,11 @@ coxfit2 &lt;- survival::coxph(Surv(tstart, time, event) ~ x:strata(tgroup), data
 <pre><code>##                  chisq df   p
 ## x:strata(tgroup)  1.38  2 0.5
 ## GLOBAL            1.38  2 0.5</code></pre>
+<p>If you are interested, the actual data generation process is based on an algorithm that was described in this <a href="https://onlinelibrary.wiley.com/doi/10.1002/sim.5452" target="_blank">paper</a> by Peter Austin.</p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+Austin, Peter C. “Generating survival times to simulate Cox proportional hazards models with time‐varying covariates.” Statistics in medicine 31, no. 29 (2012): 3946-3958.
+</font></small>
+</p>
+</div>

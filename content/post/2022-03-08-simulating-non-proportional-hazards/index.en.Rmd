@@ -1,5 +1,5 @@
 ---
-title: Simulating non-proportional hazards
+title: Simulating time-to-event outcomes with non-proportional hazards
 author: Package Build
 date: '2022-03-08'
 slug: []
@@ -13,15 +13,10 @@ image: ''
 draft: TRUE
 ---
 
-```{r, message=FALSE, warning=FALSE}
-library(simstudy)
-library(data.table)
-library(survival)
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
 library(survminer)
 library(ggplot2)
-```
 
-```{r}
 cbbPalette <- c("#B84226","#B88F26", "#A5B435", "#1B8446",
                 "#B87326","#B8A526", "#6CA723", "#1C5974") 
 
@@ -41,40 +36,43 @@ ggtheme <- function(panelback = "white") {
 }
 ```
 
-In the standard `simstudy` data generation process for survival/time-to-event outcomes that includes covariates that effect the hazard rate at various time points, the ratio of hazards comparing different levels of a covariate are constant across all time points. For example, if we have a single binary covariate $x$, the hazard $\lambda(t)$ at time $t$ is
+I am working on an update of `simstudy` that will make generating survival/time-to-event data a bit more flexible. There are two biggish enhancements. The first allows for the possibility of generating survival data that has time-dependent hazard ratios, and the second facilitates generation of competing events. This post focuses on the first enhancement, and a follow up will provide examples of the second. (If you want to try this at home, you will need the development version of `simstudy` that you can install using **devtools::install_github("kgoldfeld/simstudy")**.)
 
+### Constant/proportional hazard ratio
+
+In the current version of `simstudy 0.4.0` on `CRAN`, the data generation process for survival/time-to-event outcomes can include covariates that effect the hazard rate (which is the risk/probability of having an event conditional on not having had experienced that event earlier). The ratio of hazards comparing different levels of a covariate are constant across all time points. For example, if we have a single binary covariate $x$, the hazard $\lambda(t)$ at time $t$ is
 $$\lambda(t|x) = \lambda_0(t) e ^ {\beta x}$$ 
 where $\lambda_0(t)$ is a baseline hazard when $x=0$. The ratio of the hazards for $x=1$ compared to $x=0$ is
-
 $$\frac{\lambda_0(t) e ^ {\beta}}{\lambda_0(t)} = e ^ \beta,$$
+so the log of the hazard ratio is a constant $\beta$, and the hazard ratio is always $e^\beta$. To start, here is an example assuming a constant log hazard ratio of $-0.7$:
 
-so the log of the hazard ratio is a constant $\beta$, and the hazard ratio is always $e^\beta$.
-
-However, we may not always want to make the assumption that the hazard ratio is constant over all time periods. To facilitate this, it is possible to specify two different data definitions for the same outcome, using the *transition* field to specify when the second definition replaces the first. (While it would theoretically be possible to generate data for more than two periods, the process is more involved, and has not been implemented at this time.)
-
-<br>
-
-**Constant/proportional hazard ratio**
-
-To start, here is an example assuming a constant log hazard ratio of -0.7:
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+library(survival)
+```
 
 ```{r, tidy = TRUE}
-def <- defData(varname = "x", formula = .4, dist="binary")
+def <- defData(varname = "x", formula = 0.4, dist="binary")
 
-defS <- defSurv(varname = "death", formula = "-14.6 - 0.7*x", shape = .35)
+defS <- defSurv(varname = "death", formula = "-14.6 - 0.7 * x", shape = .35)
 defS <- defSurv(defS, varname = "censor", scale = exp(13), shape = .5)
 
 set.seed(7361)
 dd <- genData(500, def)
 dd <- genSurv(dd, defS, digits = 2, timeName = "time", censorName = "censor")
-
-fit <- survfit( Surv(time, event) ~ x, data = dd )
+dd
 ```
 
+Here is a Kaplan-Meier plot comparing survival curves for cases where $x=0$ with cases where $x=1$. This is what a proportional hazard rate looks like:
+
 ```{r, tidy = TRUE, echo = FALSE, fig.width = 6.5, fig.height = 3.5, warning=FALSE}
+fit <- survfit( Surv(time, event) ~ x, data = dd )
+
 survminer::ggsurvplot(fit, data = dd, 
                       ggtheme = ggtheme("grey94"),
-                      palette = cbbPalette
+                      palette = cbbPalette,
+                      xlim = c(0, 400)
 )
 ```
 
@@ -88,37 +86,40 @@ coxfit <- coxph(formula = Surv(time, event) ~ x, data = dd)
 gtsummary::tbl_regression(coxfit)
 ```
 
-We can test the assumption of proportional hazards using weighted residuals. If the $\text{p-value} < 0.05$, then we would conclude that the assumption of proportional hazards is not warranted. In this case $p = 0.22$, so the model is apparently reasonable:
+Since we know that we used proportional hazards to generate the data, we can expect that a test evaluating the proportional hazards assumption using weighted residuals will confirm that the assumption is met. If the $\text{p-value} < 0.05$, then we would conclude that the assumption of proportional hazards is not warranted. In this case $p = 0.68$, so the model is apparently reasonable (which we already knew):
 
 ```{r}
 cox.zph(coxfit)
 ```
 
-<br>
+### Non-constant/non-proportional hazard ratio
 
-**Non-constant/non-proportional hazard ratio**
+When generating data, we may not always want to be limited to a situation where the hazard ratio is constant over all time periods. To facilitate this, it is possible to specify two different data definitions for the same outcome, using the *transition* field to specify when the second definition replaces the first. (While it would theoretically be possible to generate data for more than two periods, the process is more involved, and has not been implemented.)
 
 In this next case, the risk of death when $x=1$ is lower at all time points compared to when $x=0$, but the relative risk (or hazard ratio) changes at 150 days:
 
-```{r, tidy = TRUE}
-def <- defData(varname = "x", formula = .4, dist="binary")
+```{r}
+def <- defData(varname = "x", formula = 0.4, dist="binary")
 
-defS <- defSurv(varname = "death", formula = "-14.6 - 1.3*x", shape = .35, transition = 0)
-defS <- defSurv(defS, varname = "death", formula = "-14.6 - 0.4*x", shape = .35, transition = 150)
-defS <- defSurv(defS, varname = "censor", scale = exp(13), shape = .5)
+defS <- defSurv(varname = "death", formula = "-14.6 - 1.3 * x", 
+  shape = 0.35, transition = 0)
+defS <- defSurv(defS, varname = "death", formula = "-14.6 - 0.4 * x", 
+  shape = 0.35, transition = 150)
+defS <- defSurv(defS, varname = "censor", scale = exp(13), shape = 0.50)
 
 dd <- genData(500, def)
 dd <- genSurv(dd, defS, digits = 2, timeName = "time", censorName = "censor")
-
-fit <- survfit( Surv(time, event) ~ x, data = dd )
 ```
 
 The survival curve for the sample with $x=1$ has a slightly different shape under this data generation process compared to the previous example under a constant hazard ratio assumption; there is more separation early on (prior to day 150), and then the gap is closed at a quicker rate.
 
 ```{r, tidy = TRUE, echo = FALSE, fig.width = 6.5, fig.height = 3.5, warning=FALSE}
+fit <- survfit( Surv(time, event) ~ x, data = dd )
+
 survminer::ggsurvplot(fit, data = dd, 
                       ggtheme = ggtheme("grey94"),
-                      palette = cbbPalette
+                      palette = cbbPalette,
+                      xlim = c(0, 400)
 )
 ```
 
@@ -157,4 +158,12 @@ And the diagnostic test of proportionality confirms the appropriateness of the m
 ```{r}
 cox.zph(coxfit2)
 ```
+
+If you are interested, the actual data generation process is based on an algorithm that was described in this [paper](https://onlinelibrary.wiley.com/doi/10.1002/sim.5452){target="_blank"} by Peter Austin.
+
+<p><small><font color="darkkhaki">
+Reference:
+
+Austin, Peter C. "Generating survival times to simulate Cox proportional hazards models with time‐varying covariates." Statistics in medicine 31, no. 29 (2012): 3946-3958.
+</font></small></p>
 
