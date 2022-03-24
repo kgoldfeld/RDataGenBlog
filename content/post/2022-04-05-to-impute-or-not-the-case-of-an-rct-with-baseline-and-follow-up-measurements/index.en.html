@@ -1,0 +1,66 @@
+---
+title: 'To impute or not: the case of an RCT with baseline and follow-up measurements'
+author: Package Build
+date: '2022-04-05'
+slug: []
+categories: []
+tags:
+  - R
+  - Missing data
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>For many reasons these days, it can be challenging to conduct a randomized clinical trial. First, there is the matter of patient recruitment, which can be difficult under any circumstances, but throw in a pandemic and things get even harder. And once the patients are enrolled in the study, they need to be retained long enough so that we can measure their outcomes. This, too, can be vexing during a time when people are facing so many disruptions. <em>Loss to follow-up</em> recently came up during a conversation among a group of reserachers who regularly get together to describe and jointly troubleshoot challenges they are experiencing their ongoing clinical trials. While everyone agreed that it is a significant issue, there was less agreement on how to handle this missing data analytically.</p>
+<p>For me, this discussion quickly brought to mind two posts I did on missing data, where I <a href="https://www.rdatagen.net/post/musings-on-missing-data/" target="_blank">reflected</a> on the different missing data mechanisms (MCAR, MAR, and NMAR) and <a href="https://www.rdatagen.net/post/2021-03-30-some-cases-where-imputing-missing-data-matters/" target="_blank">explored</a> when it might be imperative to use multiple imputation as part of the analysis.</p>
+<p>In light of the recent conversation, I wanted to revisit this issue of loss to follow-up in the context of a clinical trial where the outcome measure is collected at baseline (about which I’ve written about before, <a href="https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/" target="_blank">here</a> and <a href="https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/" target="_blank">here</a>) and we can be fairly certain that this baseline measurement will be quite well balanced at baseline.</p>
+<div id="the-underlying-process" class="section level3">
+<h3>The underlying process</h3>
+<p>In the earlier missing data posts, I described the observed and missing data processes using a directly acyclic graph (DAG) that allows us to visualize the assumed causal relationships in our model. Here is a DAG for our clinical trial that collects baseline measure <span class="math inline">\(Y\)</span> at baseline (<span class="math inline">\(Y_0\)</span>) and again one year later (<span class="math inline">\(Y_1\)</span>):</p>
+<p><img src="img/MAR_3_DAG.png" style="width:40.0%" /></p>
+<p><span class="math inline">\(A\)</span> is the treatment indicator set to 1 if the patient has been randomized to the treatment arm, and 0 under the control arm. <span class="math inline">\(R_Y\)</span> is a missing data indicator set to 1 if there is loss to follow up (i.e., <span class="math inline">\(Y_1\)</span> is not collected), and 0 otherwise. <span class="math inline">\(Y_1^*\)</span> is the observed value of <span class="math inline">\(Y_1\)</span>. If <span class="math inline">\(R_Y = 1\)</span>, the <span class="math inline">\(Y_1^*\)</span> is missing, otherwise has the value of <span class="math inline">\(Y_1\)</span>.</p>
+<p>In this scenario, both <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(A\)</span> can influence the outcome <span class="math inline">\(Y_1\)</span> and whether or not there is loss to follow-up <span class="math inline">\(R_Y\)</span>. (I have explicitly left out the possibility that <span class="math inline">\(Y_1\)</span> itself can impact missingness, because this is a much more challenging problem to deal with, and is really impossible to assess.) The strengths of those relationships are determined by the parameters <span class="math inline">\(\lambda\)</span>, <span class="math inline">\(\delta\)</span>, <span class="math inline">\(\alpha\)</span>, and <span class="math inline">\(\beta\)</span>. (I have fixed the direct relationship between <span class="math inline">\(Y_0\)</span> and <span class="math inline">\(Y_1\)</span> to a value of 1, but there is no reason that needs to be so.)</p>
+<p>For the</p>
+<p><span class="math display">\[Y_{1i} = Y_{0i} + \delta A_i - \lambda A_i Y_{0i} + e_i\]</span></p>
+<p><span class="math display">\[ Y_{0i} \sim N(\mu =0, \sigma^2 = 1)\]</span>
+<span class="math display">\[e_i \sim N(\mu =0, \sigma^2 = 1)\]</span></p>
+<p><span class="math display">\[\text{logit}(P(R_{Yi} = 1)) =-1.5 - \alpha Y_{0i} - \beta A_i\]</span></p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(gganimate)
+library(mice)</code></pre>
+<pre class="r"><code>def &lt;- defData(varname = &quot;y0&quot;, formula = 0, variance = 1)
+def &lt;- defData(def, &quot;a&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+def &lt;- defData(def, &quot;y1&quot;, 
+           formula = &quot;y0 + ..delta * a - ..lambda * y0 * a&quot;, variance = 0.5)
+def &lt;- defData(def, &quot;y1_obs&quot;, formula = &quot;y1&quot;, dist = &quot;nonrandom&quot;)
+  
+defM &lt;- defMiss(
+    varname = &quot;y1_obs&quot;, formula = &quot;-1.5  - ..alpha * y0 - ..beta * a&quot;, 
+    logit.link = TRUE
+)</code></pre>
+<pre class="r"><code>lambda &lt;- 0.8
+delta &lt;- 1
+
+alpha &lt;- 1
+beta &lt;- 0</code></pre>
+<pre class="r"><code>RNGkind(kind = &quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(1234)
+
+dd &lt;- genData(1200, def)
+dmiss &lt;- genMiss(dd, defM, idvars = &quot;id&quot;)
+dobs &lt;- genObs(dd, dmiss, idvars = &quot;id&quot;)</code></pre>
+<pre class="r"><code>fit_all &lt;- lm(y1 ~ y0 + a, data = dobs)
+fit_comp &lt;- lm(y1_obs ~ y0 + a, data = dobs)
+
+imp_dd &lt;- dobs[, -c(&quot;id&quot;, &quot;y1&quot;)]
+imp &lt;- mice(imp_dd, m=20, maxit=5, print=FALSE)
+fit_imp &lt;- with(imp, lm(y1_obs ~ y0 + a))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.gif" /><!-- --></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="864" /></p>
+</div>

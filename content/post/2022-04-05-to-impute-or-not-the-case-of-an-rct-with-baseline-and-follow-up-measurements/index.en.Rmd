@@ -1,0 +1,290 @@
+---
+title: 'To impute or not: the case of an RCT with baseline and follow-up measurements'
+author: Package Build
+date: '2022-04-05'
+slug: []
+categories: []
+tags:
+  - R
+  - Missing data
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+For many reasons these days, it can be challenging to conduct a randomized clinical trial. First, there is the matter of patient recruitment, which can be difficult under any circumstances, but throw in a pandemic and things get even harder. And once the patients are enrolled in the study, they need to be retained long enough so that we can measure their outcomes. This, too, can be vexing during a time when people are facing so many disruptions. *Loss to follow-up* recently came up during a conversation among a group of reserachers who regularly get together to describe and jointly troubleshoot challenges they are experiencing their ongoing clinical trials. While everyone agreed that it is a significant issue, there was less agreement on how to handle this missing data analytically.
+
+For me, this discussion quickly brought to mind two posts I did on missing data, where I [reflected](https://www.rdatagen.net/post/musings-on-missing-data/){target="_blank"} on the different missing data mechanisms (MCAR, MAR, and NMAR) and  [explored](https://www.rdatagen.net/post/2021-03-30-some-cases-where-imputing-missing-data-matters/){target="_blank"} when it might be imperative to use multiple imputation as part of the analysis.
+
+In light of the recent conversation, I wanted to revisit this issue of loss to follow-up in the context of a clinical trial where the outcome measure is collected at baseline (about which I've written about before, [here](https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/){target="_blank"} and [here](https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/){target="_blank"}) and we can be fairly certain that this baseline measurement will be quite well balanced at baseline.
+
+### The underlying process
+
+In the earlier missing data posts, I described the observed and missing data processes using a directly acyclic graph (DAG) that allows us to visualize the assumed causal relationships in our model. Here is a DAG for our clinical trial that collects baseline measure $Y$ at baseline ($Y_0$) and again one year later ($Y_1$):
+
+![](img/MAR_3_DAG.png){width=40%}
+
+$A$ is the treatment indicator set to 1 if the patient has been randomized to the treatment arm, and 0 under the control arm. $R_Y$ is a missing data indicator set to 1 if there is loss to follow up (i.e., $Y_1$ is not collected), and 0 otherwise. $Y_1^*$ is the observed value of $Y_1$. If $R_Y = 1$, the $Y_1^*$ is missing, otherwise has the value of $Y_1$.
+
+In this scenario, both $Y_0$ and $A$ can influence the outcome $Y_1$ and whether or not there is loss to follow-up $R_Y$. (I have explicitly left out the possibility that $Y_1$ itself can impact missingness, because this is a much more challenging problem to deal with, and is really impossible to assess.) The strengths of those relationships are determined by the parameters $\lambda$, $\delta$, $\alpha$, and $\beta$. (I have fixed the direct relationship between $Y_0$ and $Y_1$ to a value of 1, but there is no reason that needs to be so.)
+
+For the 
+
+$$Y_{1i} = Y_{0i} + \delta A_i - \lambda A_i Y_{0i} + e_i$$
+
+$$ Y_{0i} \sim N(\mu =0, \sigma^2 = 1)$$
+$$e_i \sim N(\mu =0, \sigma^2 = 1)$$
+
+$$\text{logit}(P(R_{Yi} = 1)) =-1.5 - \alpha Y_{0i} - \beta A_i$$
+
+```{r, echo=FALSE}
+options(digits = 3)
+load("data/summary_stats_adj.rdata")
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+library(gganimate)
+library(mice)
+```
+
+```{r}
+def <- defData(varname = "y0", formula = 0, variance = 1)
+def <- defData(def, "a", formula = "1;1", dist = "trtAssign")
+def <- defData(def, "y1", 
+           formula = "y0 + ..delta * a - ..lambda * y0 * a", variance = 0.5)
+def <- defData(def, "y1_obs", formula = "y1", dist = "nonrandom")
+  
+defM <- defMiss(
+    varname = "y1_obs", formula = "-1.5  - ..alpha * y0 - ..beta * a", 
+    logit.link = TRUE
+)
+
+```
+
+
+```{r}
+lambda <- 0.8
+delta <- 1
+
+alpha <- 1
+beta <- 0
+```
+
+
+```{r, warning=FALSE}
+RNGkind(kind = "L'Ecuyer-CMRG")
+set.seed(1234)
+
+dd <- genData(1200, def)
+dmiss <- genMiss(dd, defM, idvars = "id")
+dobs <- genObs(dd, dmiss, idvars = "id")
+```
+
+
+```{r, warning=FALSE}
+fit_all <- lm(y1 ~ y0 + a, data = dobs)
+fit_comp <- lm(y1_obs ~ y0 + a, data = dobs)
+
+imp_dd <- dobs[, -c("id", "y1")]
+imp <- mice(imp_dd, m=20, maxit=5, print=FALSE)
+fit_imp <- with(imp, lm(y1_obs ~ y0 + a))
+```
+
+```{r, echo=FALSE, fig.width = 7, fig.height = 3, warning=FALSE}
+dobs[, miss := is.na(y1_obs)]
+
+dall <- copy(dobs)
+dall[, `:=`(miss = FALSE, model = "all")]
+dcomp <- dobs[miss == FALSE]
+dcomp[, model := "comp"]
+dimp <- copy(dobs)
+dimp[, model := "imp"]
+
+dp <- rbind(dall, dcomp, dimp)
+
+a_all <- coef(fit_all)
+a_comp <- coef(fit_comp)
+a_imp <- summary(pool(fit_imp))[,"estimate"]
+
+getline <- function(params, model) {
+  a <- c(0, 1)
+  int <- params[1] + a*params[3]
+  data.table(model, a, int = int, slope = params[2])
+}
+
+x1 <- getline(a_all, "all")
+x2 <- getline(a_comp, "comp")
+x3 <- getline(a_imp, "imp")
+
+abline <- rbind(x1, x2, x3)
+
+titles <- data.table(
+  model = c("all", "comp", "imp"), 
+  labs = c(paste("(A)~No~missing~data:~hat(delta) == ",round(a_all[3], 2)),
+           paste("(B)~Complete~cases~only:~hat(delta) == ",round(a_comp[3], 2)),
+           paste("(C)~Imputed~data:~hat(delta) == ",round(a_imp[3], 2))
+  )
+)
+
+p <- ggplot(data = dp) +
+  geom_point(aes(x = y0, y = y1, color = factor(a), shape = miss, group = id), alpha = .4) +
+  geom_abline(data= abline, aes(intercept = int, slope = slope, color = factor(a)), 
+              size = 1.2) +
+  geom_text(aes(label = labs), data = titles, x =-3.6, y = 4.3, 
+            size = 4, hjust  = 0, parse = TRUE) +
+  transition_states(model, transition_length = 2, state_length = 4) +
+  enter_fade() +
+  exit_fade() +
+  scale_color_brewer(palette = "Dark2") +
+  scale_shape_manual(values = c(20, 1)) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  xlim(-3.5, 3.5) +
+  ylim(-4.5, 4.5)
+
+animate(p, 100, 10)
+```
+
+
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE, eval=FALSE}
+s_define <- function() {
+  
+  def <- defData(varname = "y0", formula = 0, variance = 1)
+  def <- defData(def, "a", formula = "1;1", dist = "trtAssign")
+  def <- defData(def, "y1", 
+           formula = "y0 + ..delta * a - ..lambda * y0 * a", variance = 0.5)
+  def <- defData(def, "y1_obs", formula = "y1", dist = "nonrandom")
+  
+  defM <- defMiss(
+    varname = "y1_obs", formula = "-1.5  - ..alpha * y0 - ..beta * a", 
+    logit.link = TRUE
+  )
+  
+  return(list(def = def, defM = defM))
+}
+
+s_generate <- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  dd <- genData(200, def)
+  dmiss <- genMiss(dd, defM, idvars = "id")
+  dobs <- genObs(dd, dmiss, idvars = "id")
+
+  return(dobs) #  generated_data is a data.table
+}
+
+s_model <- function(generated_data) {
+  
+  imp_dd <- generated_data[, -c("id", "y1")]
+  imp <- mice(imp_dd, m=20, maxit=5, print=FALSE)
+  
+  ###
+  
+  a_all <- coef(lm(y1 ~ y0 + a, data = generated_data))["a"]
+  a_missing <- coef(lm(y1_obs ~ y0 + a, data = generated_data))["a"]
+
+  fit_imp <- with(imp, lm(y1_obs ~ y0 + a))
+  a_imp <- summary(pool(fit_imp))[3, "estimate"]
+
+  return(data.table(a_all, a_missing, a_imp)) # model_results is a data.table
+}
+
+s_single_rep <- function(list_of_defs, argsvec) {
+  
+  generated_data <- s_generate(list_of_defs, argsvec)
+  model_results <- s_model(generated_data)
+  
+  return(model_results)
+}
+
+s_replicate <- function(argsvec, nsim) {
+  
+  list_of_defs <- s_define()
+  
+  model_results <- rbindlist(
+    parallel::mclapply(
+      X = 1 : nsim, 
+      FUN = function(x) s_single_rep(list_of_defs, argsvec), 
+      mc.cores = 4)
+  )
+  
+  #--- add summary statistics code ---#
+  
+  summary_stats <- model_results[, .(
+      mean_all = mean(a_all, na.rm = TRUE), 
+      bias_all = mean(a_all - delta, na.rm = TRUE), 
+      var_all = var(a_all, na.rm = TRUE), 
+      
+      mean_missing = mean(a_missing, na.rm = TRUE), 
+      bias_missing = mean(a_missing - delta, na.rm = TRUE), 
+      var_missing = var(a_missing, na.rm = TRUE),
+      
+      mean_imp = mean(a_imp, na.rm = TRUE), 
+      bias_imp = mean(a_imp - delta, na.rm = TRUE), 
+      var_imp = var(a_imp, na.rm = TRUE)
+    )]
+  
+  summary_stats <- data.table(t(argsvec), summary_stats)
+  
+  return(summary_stats) # summary_stats is a data.table
+}
+
+#---- specify varying power-related parameters ---#
+
+scenario_list <- function(...) {
+  argmat <- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+delta <- 1
+lambda <- c(0, 0.2, .4, .6, .8, 1)
+alpha <- c(0, 0.5, 1)
+beta <- c(0, 1, 2)
+
+scenarios <- scenario_list(delta = delta, lambda = lambda, alpha = alpha, beta = beta)
+```
+
+
+```{r, eval=FALSE, echo=FALSE}
+summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 2500)))
+```
+
+```{r, echo=FALSE, fig.width = 9, figh.height = 4}
+summary_stats[, mse_all := bias_all^2 + var_all]
+summary_stats[, mse_missing := bias_missing^2 + var_missing]
+summary_stats[, mse_imp := bias_imp^2 + var_imp]
+
+dp <- melt(summary_stats, 
+  measure.vars = c("bias_all", "bias_imp", "bias_missing"))
+dp$variable <- factor(dp$variable, 
+  labels = c("No missing data", "Imputed data", "Complete cases only"))
+
+ggplot(data = dp, aes(x = lambda, y = value  )) +
+  geom_line(aes(group = variable, color=factor(variable))) +
+  facet_grid(beta ~ alpha) +
+  scale_y_continuous(limits = c(-.25, .1), 
+    name = "bias", breaks = c(-.2, -.1, 0),
+    sec.axis = sec_axis(~ . , 
+      name = expression(paste("missingness based on treatment ", (beta))), 
+      breaks = NULL, labels = NULL)) +
+  scale_x_continuous(
+    name = expression(paste("interaction of treatment and ", Y[0], " ", (lambda))), 
+    breaks = c(0, .2, .4, .6, .8, 1 ),
+    sec.axis = sec_axis(~ . , 
+      name = expression(paste("missingness based on ", Y[0], " ", (alpha))), 
+      breaks = NULL, labels = NULL)) +
+  scale_color_brewer(palette = "Dark2", ) +
+  ggtitle(expression(paste("Bias of treatment effect estimate ", (hat(delta)) ))) +
+  theme(legend.title = element_blank(),
+        panel.grid = element_blank(),
+        plot.title = element_text(face = "bold", size = 11),
+        panel.spacing = unit(1, "lines")) 
+
+```
