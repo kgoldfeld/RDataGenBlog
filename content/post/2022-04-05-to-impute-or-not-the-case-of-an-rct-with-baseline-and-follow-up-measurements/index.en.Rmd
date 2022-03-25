@@ -13,67 +13,82 @@ image: ''
 draft: TRUE
 ---
 
-For many reasons these days, it can be challenging to conduct a randomized clinical trial. First, there is the matter of patient recruitment, which can be difficult under any circumstances, but throw in a pandemic and things get even harder. And once the patients are enrolled in the study, they need to be retained long enough so that we can measure their outcomes. This, too, can be vexing during a time when people are facing so many disruptions. *Loss to follow-up* recently came up during a conversation among a group of reserachers who regularly get together to describe and jointly troubleshoot challenges they are experiencing their ongoing clinical trials. While everyone agreed that it is a significant issue, there was less agreement on how to handle this missing data analytically.
+For many reasons these days, it can be challenging to conduct a randomized clinical trial. First, there is the matter of patient recruitment, which can be difficult under any circumstances, but throw in a pandemic and things get even harder. And once the patients are enrolled in the study, they need to be retained long enough so that we can measure their outcomes. This, too, can be vexing during a time when people are facing so many disruptions. *Loss to follow-up* recently came up during a conversation among a group of researchers who regularly get together to describe and jointly troubleshoot challenges they are experiencing their ongoing clinical trials. While everyone agreed that it is a significant issue, there was less agreement on how to handle this missing data analytically.
 
 For me, this discussion quickly brought to mind two posts I did on missing data, where I [reflected](https://www.rdatagen.net/post/musings-on-missing-data/){target="_blank"} on the different missing data mechanisms (MCAR, MAR, and NMAR) and  [explored](https://www.rdatagen.net/post/2021-03-30-some-cases-where-imputing-missing-data-matters/){target="_blank"} when it might be imperative to use multiple imputation as part of the analysis.
 
 In light of the recent conversation, I wanted to revisit this issue of loss to follow-up in the context of a clinical trial where the outcome measure is collected at baseline (about which I've written about before, [here](https://www.rdatagen.net/post/thinking-about-the-run-of-the-mill-pre-post-analysis/){target="_blank"} and [here](https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/){target="_blank"}) and we can be fairly certain that this baseline measurement will be quite well balanced at baseline.
 
-### The underlying process
+### The data generating process
 
-In the earlier missing data posts, I described the observed and missing data processes using a directly acyclic graph (DAG) that allows us to visualize the assumed causal relationships in our model. Here is a DAG for our clinical trial that collects baseline measure $Y$ at baseline ($Y_0$) and again one year later ($Y_1$):
+In my earlier posts on missing data, I described the observed and missing data processes using a directly acyclic graph (DAG) that allows us to visualize the assumed causal relationships in our model. Here is a DAG for a clinical trial that collects baseline measure $Y$ at baseline ($Y_0$) and again one year later ($Y_1$):
 
 ![](img/MAR_3_DAG.png){width=40%}
 
-$A$ is the treatment indicator set to 1 if the patient has been randomized to the treatment arm, and 0 under the control arm. $R_Y$ is a missing data indicator set to 1 if there is loss to follow up (i.e., $Y_1$ is not collected), and 0 otherwise. $Y_1^*$ is the observed value of $Y_1$. If $R_Y = 1$, the $Y_1^*$ is missing, otherwise has the value of $Y_1$.
+$A$ is the treatment indicator, $A \in \{0,1\}$, $A=1$ if the patient has been randomized to the treatment arm, and $A=0$ under the control arm. $R_Y$ is a missing data indicator set to 1 if there is loss to follow up (i.e., $Y_1$ is not collected), and 0 otherwise. $Y_1^*$ is the observed value of $Y_1$. If $R_Y = 1$, the value of $Y_1^*$ is $NA$ (i.e. missing), otherwise $Y_1 ^*= Y_1$.
 
-In this scenario, both $Y_0$ and $A$ can influence the outcome $Y_1$ and whether or not there is loss to follow-up $R_Y$. (I have explicitly left out the possibility that $Y_1$ itself can impact missingness, because this is a much more challenging problem to deal with, and is really impossible to assess.) The strengths of those relationships are determined by the parameters $\lambda$, $\delta$, $\alpha$, and $\beta$. (I have fixed the direct relationship between $Y_0$ and $Y_1$ to a value of 1, but there is no reason that needs to be so.)
+In the scenario depicted in this DAG, both $Y_0$ and $A$ potentially influence the outcome $Y_1$ and whether there is loss to follow-up $R_Y$. (I have explicitly left out the possibility that $Y_1$ itself can impact missingness, because this is a much more challenging problem to deal with, and is really impossible to assess. This is NMAR.) The strengths of those relationships are determined by the parameters $\lambda$, $\delta$, $\alpha$, and $\beta$. (I have fixed the direct relationship between $Y_0$ and $Y_1$ to a value of 1, but there is no reason that needs to be so.)
 
-For the 
+For the purposes of this simulation, I am assuming this linear relationship:
 
-$$Y_{1i} = Y_{0i} + \delta A_i - \lambda A_i Y_{0i} + e_i$$
+$$Y_{1i} = Y_{0i} + \delta A_i - \lambda A_i Y_{0i} + e_i, \ \ A_i \in \{0, 1\}$$
+
+I am using $-\lambda$ in order to simulate a situation where patients with lower values of $Y_0$ actually have larger overall treatment effects than those with higher values. The $Y_0$ and $e$ are normally distributed:
 
 $$ Y_{0i} \sim N(\mu =0, \sigma^2 = 1)$$
-$$e_i \sim N(\mu =0, \sigma^2 = 1)$$
+$$e_i \sim N(\mu =0, \sigma^2 = 0.5)$$
+
+The missing data mechanism is also linear, but on the *logistic* scale. In this scenario, patients with lower baseline values $Y_0$ are more likely to be lost to follow-up than patients with higher values (assuming, of course, $\alpha > 0$):
 
 $$\text{logit}(P(R_{Yi} = 1)) =-1.5 - \alpha Y_{0i} - \beta A_i$$
 
+Under these assumptions, the probability that a patient with baseline measure of $0$ in the control arm is lost to follow-up is $\frac{1}{1 + exp(1.5)} \approx 18\%$.
+
+### Data simulation
+
+I am using the `simstudy` package to simulate data from these models, which allows me to define the data generating process described above. First, let's load the necessary libraries:
+
 ```{r, echo=FALSE}
-options(digits = 3)
+options(digits = 2)
 load("data/summary_stats_adj.rdata")
 ```
 
 ```{r, message=FALSE, warning=FALSE}
 library(simstudy)
 library(data.table)
-library(ggplot2)
-library(gganimate)
 library(mice)
 ```
+
+The table `def` implements the definitions for the data generating process. I've created two versions of $Y_1$. The first is the true underlying value of $Y_1$, and the second $Y_{1_{obs}}$ is really $Y_1^*$ from the DAG. At the outset, there are no missing data, so $Y_{1_{obs}}$ is just a replicate of $Y_1$:
 
 ```{r}
 def <- defData(varname = "y0", formula = 0, variance = 1)
 def <- defData(def, "a", formula = "1;1", dist = "trtAssign")
-def <- defData(def, "y1", 
-           formula = "y0 + ..delta * a - ..lambda * y0 * a", variance = 0.5)
+def <- defData(def, "y1", "y0 + ..delta * a - ..lambda * y0 * a", 0.5)
 def <- defData(def, "y1_obs", formula = "y1", dist = "nonrandom")
+```
   
+The missing data generating process is defined in table `defM`:
+  
+```{r}
 defM <- defMiss(
-    varname = "y1_obs", formula = "-1.5  - ..alpha * y0 - ..beta * a", 
+    varname = "y1_obs", 
+    formula = "-1.5  - ..alpha * y0 - ..beta * a", 
     logit.link = TRUE
 )
-
 ```
 
+For this particular simulation, I am assuming $\delta = 1$, $\lambda = 0.8$, $\alpha = 1$, and $\beta = 0$:
 
 ```{r}
-lambda <- 0.8
 delta <- 1
+lambda <- 0.8
 
 alpha <- 1
 beta <- 0
 ```
 
+With all the definitions and parameters set, we are ready to generate the data:
 
 ```{r, warning=FALSE}
 RNGkind(kind = "L'Ecuyer-CMRG")
@@ -82,8 +97,13 @@ set.seed(1234)
 dd <- genData(1200, def)
 dmiss <- genMiss(dd, defM, idvars = "id")
 dobs <- genObs(dd, dmiss, idvars = "id")
+
+dobs
 ```
 
+### Estimating the treatment effect
+
+Now, with the data in hand, we can estimate a treatment effect. In this case, I will fit three different models. The first assumes that there was no missing data at all, that we had full access to $Y_1$ for all study participants. The second is an analysis using only cases with complete data, which ignores missing data entirely and assumes that the missing data process is MCAR (missing completely at random). The third analysis uses multiple imputation to generate values for the missing cases based on distributions of the observed data - and does this repeatedly to come up with a series of data sets (in this case 20). A model is fit for each, and the results are pooled:
 
 ```{r, warning=FALSE}
 fit_all <- lm(y1 ~ y0 + a, data = dobs)
@@ -91,10 +111,17 @@ fit_comp <- lm(y1_obs ~ y0 + a, data = dobs)
 
 imp_dd <- dobs[, -c("id", "y1")]
 imp <- mice(imp_dd, m=20, maxit=5, print=FALSE)
-fit_imp <- with(imp, lm(y1_obs ~ y0 + a))
+fit_imp <- pool(with(imp, lm(y1_obs ~ y0 + a)))
 ```
 
+Here is a figure that shows the estimated regression lines for each of the models (showed sequentially in animated form). In all three cases, we are adjusting for baseline measurement $Y_0$, which is a good thing to do even when there is good balance across treatment arms; this tends to reduce standard errors. Also note that I am ignoring the possibility of heterogeneous treatment effects with respect to different levels of $Y_0$ (determined by $\lambda$ in the data generation process); I am effectively estimating the *average* treatment effect across all levels of $Y_0$.
+
+The analysis based on the full data set (A) recovers the treatment effect parameter quite well, but the complete data analysis (B) underestimates the treatment effect; the imputed analysis (C) does much better.
+
 ```{r, echo=FALSE, fig.width = 7, fig.height = 3, warning=FALSE}
+library(ggplot2)
+library(gganimate)
+
 dobs[, miss := is.na(y1_obs)]
 
 dall <- copy(dobs)
@@ -108,7 +135,7 @@ dp <- rbind(dall, dcomp, dimp)
 
 a_all <- coef(fit_all)
 a_comp <- coef(fit_comp)
-a_imp <- summary(pool(fit_imp))[,"estimate"]
+a_imp <- summary(fit_imp)[,"estimate"]
 
 getline <- function(params, model) {
   a <- c(0, 1)
@@ -149,9 +176,57 @@ p <- ggplot(data = dp) +
 animate(p, 100, 10)
 ```
 
+### Estimating the bias of each modeling approach
 
+The goal now is to do a more systematic assessment of the bias associated with each model under a range of assumptions about $\lambda$, $\alpha$ and $\beta$ (I am keeping $\delta$ fixed since it has no impact on the bias). For each set of assumptions, I generated 5000 data sets with 200 patients and fit all three models to each one, recovered the point estimate of the average treatment effect $\hat\delta_k$ for each iteration $k, \ k\in \{1,\dots,5000\}$, and calculated the bias for each set of assumptions and model as:
 
-```{r, message=FALSE, warning=FALSE, echo=FALSE, eval=FALSE}
+$$Bias =\frac{1}{5000} \sum_{k=1}^{5000} (\hat\delta_k - \delta)$$
+
+In total, I assessed 54 scenarios by setting $\lambda = \{0, 0.2, \dots, 1\}$, $\alpha = \{0, 0.5, 1\}$, and $\beta = \{0, 1, 2\}$. The figure below, shows the estimated bias for each of the three modeling approaches. It is clear that if we have no missing data, all the estimates are unbiased. And in this case, it does not appear that missingness related specifically to treatment arm (determined by parameter $\beta$) does not have much of an impact. However bias is impacted considerably by both heterogeneous treatment effect (parameter $\lambda$) and missing related to $Y_0$ (parameter $\alpha$), and especially the combination of both. 
+
+```{r, echo=FALSE, fig.width = 7, figh.height = 4}
+summary_stats[, mse_all := bias_all^2 + var_all]
+summary_stats[, mse_missing := bias_missing^2 + var_missing]
+summary_stats[, mse_imp := bias_imp^2 + var_imp]
+  
+dp <- melt(summary_stats, 
+    measure.vars = c("bias_all", "bias_imp", "bias_missing"))
+dp$variable <- factor(dp$variable, 
+    labels = c("No missing data", "Imputed data", "Complete cases only"))
+  
+ggplot(data = dp, aes(x = lambda, y = value  )) +
+    geom_line(aes(group = variable, color=factor(variable))) +
+    facet_grid(beta ~ alpha) +
+    scale_y_continuous(limits = c(-.25, .1), 
+      name = "bias", breaks = c(-.2, -.1, 0),
+      sec.axis = sec_axis(~ . , 
+        name = expression(paste("missingness based on treatment ", (beta))), 
+        breaks = NULL, labels = NULL)) +
+    scale_x_continuous(
+      name = expression(paste("interaction of treatment and ", Y[0], " ", (lambda))), 
+      breaks = c(0, .2, .4, .6, .8, 1 ),
+      sec.axis = sec_axis(~ . , 
+        name = expression(paste("missingness based on ", Y[0], " ", (alpha))), 
+        breaks = NULL, labels = NULL)) +
+    scale_color_brewer(palette = "Dark2", ) +
+    ggtitle(expression(paste("Bias of treatment effect estimate ", (hat(delta)) ))) +
+    theme(legend.title = element_blank(),
+          legend.position = "bottom",
+          panel.grid = element_blank(),
+          plot.title = element_text(face = "bold", size = 11),
+          panel.spacing = unit(1, "lines")) 
+
+```
+
+If missingness is independent of $Y_0$ ($\alpha = 0$), there is no induced biased just using complete data, even with substantial heterogeneity of treatment effect ($\lambda = 1$). With moderate missingness due to $Y_0$ ($\alpha = 0.5$), there is still no bias for the complete data analysis with low heterogeneity. However, bias is introduced here as heterogeneity becomes more pronounced. Using imputation reduces a good amount of the bias. Finally, when missing is strongly related to $Y_0$, both the complete data and imputed data analysis fare poorly, on average. Although multiple imputation worked well in our single data set above with $\alpha = 1$, the figure below suggest that it did not perform so well on average at that level. This is probably due to the fact that if there is *a lot* of missing data, imputation has much less information at its disposal and the imputed values are not so helpful.
+
+<br>
+
+### Addendum
+
+Here is the code used to generate the iterative simulations:
+
+```{r, message=FALSE, warning=FALSE, echo=TRUE, eval=FALSE}
 s_define <- function() {
   
   def <- defData(varname = "y0", formula = 0, variance = 1)
@@ -185,13 +260,11 @@ s_model <- function(generated_data) {
   imp_dd <- generated_data[, -c("id", "y1")]
   imp <- mice(imp_dd, m=20, maxit=5, print=FALSE)
   
-  ###
-  
   a_all <- coef(lm(y1 ~ y0 + a, data = generated_data))["a"]
   a_missing <- coef(lm(y1_obs ~ y0 + a, data = generated_data))["a"]
 
-  fit_imp <- with(imp, lm(y1_obs ~ y0 + a))
-  a_imp <- summary(pool(fit_imp))[3, "estimate"]
+  fit_imp <- pool(with(imp, lm(y1_obs ~ y0 + a)))
+  a_imp <- summary(fit_imp)[3, "estimate"]
 
   return(data.table(a_all, a_missing, a_imp)) # model_results is a data.table
 }
@@ -249,42 +322,6 @@ alpha <- c(0, 0.5, 1)
 beta <- c(0, 1, 2)
 
 scenarios <- scenario_list(delta = delta, lambda = lambda, alpha = alpha, beta = beta)
-```
 
-
-```{r, eval=FALSE, echo=FALSE}
-summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 2500)))
-```
-
-```{r, echo=FALSE, fig.width = 9, figh.height = 4}
-summary_stats[, mse_all := bias_all^2 + var_all]
-summary_stats[, mse_missing := bias_missing^2 + var_missing]
-summary_stats[, mse_imp := bias_imp^2 + var_imp]
-
-dp <- melt(summary_stats, 
-  measure.vars = c("bias_all", "bias_imp", "bias_missing"))
-dp$variable <- factor(dp$variable, 
-  labels = c("No missing data", "Imputed data", "Complete cases only"))
-
-ggplot(data = dp, aes(x = lambda, y = value  )) +
-  geom_line(aes(group = variable, color=factor(variable))) +
-  facet_grid(beta ~ alpha) +
-  scale_y_continuous(limits = c(-.25, .1), 
-    name = "bias", breaks = c(-.2, -.1, 0),
-    sec.axis = sec_axis(~ . , 
-      name = expression(paste("missingness based on treatment ", (beta))), 
-      breaks = NULL, labels = NULL)) +
-  scale_x_continuous(
-    name = expression(paste("interaction of treatment and ", Y[0], " ", (lambda))), 
-    breaks = c(0, .2, .4, .6, .8, 1 ),
-    sec.axis = sec_axis(~ . , 
-      name = expression(paste("missingness based on ", Y[0], " ", (alpha))), 
-      breaks = NULL, labels = NULL)) +
-  scale_color_brewer(palette = "Dark2", ) +
-  ggtitle(expression(paste("Bias of treatment effect estimate ", (hat(delta)) ))) +
-  theme(legend.title = element_blank(),
-        panel.grid = element_blank(),
-        plot.title = element_text(face = "bold", size = 11),
-        panel.spacing = unit(1, "lines")) 
-
+summary_stats <- rbindlist(lapply(scenarios, function(a) s_replicate(a, nsim = 5000)))
 ```
