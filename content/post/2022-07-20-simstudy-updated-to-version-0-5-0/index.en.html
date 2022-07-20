@@ -11,17 +11,16 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 
 
-<p>A new <a href="https://kgoldfeld.github.io/simstudy/index.html" target="_blank">version</a> of <code>simstudy</code> is available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a>. There are two major enhancements and several new features. In the “major” category, I would include (1) changes to survival data generation that accommodate hazard ratios that can change over time and competing risks, and (2) the addition of functions to allow users to sample from existing data sets with replacement to generate “synthetic” data will real life distribution properties. Other less monumental, but important, changes were made: updates to functions <code>genFormula</code> and <code>genMarkov</code>, and two added utility functions, <code>survGetParams</code> and <code>survParamPlot</code> (described <a href="https://kgoldfeld.github.io/simstudy/articles/survival.html" target="_blank">here</a>).</p>
+<p>A new <a href="https://kgoldfeld.github.io/simstudy/index.html" target="_blank">version</a> of <code>simstudy</code> is available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a>. There are two major enhancements and several new features. In the “major” category, I would include (1) changes to survival data generation that accommodate hazard ratios that can change over time, as well as competing risks, and (2) the addition of functions to allow users to sample from existing data sets with replacement to generate “synthetic” data will real life distribution properties. Other less monumental, but important, changes were made: updates to functions <code>genFormula</code> and <code>genMarkov</code>, and two added utility functions, <code>survGetParams</code> and <code>survParamPlot</code>. (I did describe the survival data generation functions in two recent posts, <a href="https://www.rdatagen.net/post/2022-03-15-adding-competing-risks-in-survival-data-generation/" target="_blank">here</a> and <a href="https://www.rdatagen.net/post/2022-03-29-simulating-non-proportional-hazards/" target="_blank">here</a>.)</p>
 <p>Here are the highlights of the major enhancements:</p>
 <div id="non-proportional-hazards" class="section level3">
 <h3>Non-proportional hazards</h3>
-<p>If we want to simulate a scenario where survival time is a function of sex, but the relative risk of death (comparing males to females) changes after 150 days, we could not use a proportional hazards assumption that <code>simstudy</code> has typically assumed. Rather, we need to be able to specify different hazards at different time points. This is implemented in <code>simstudy</code> by using the <code>defSurv</code> function and the <code>transition</code> argument.</p>
-<p>In this case, the same outcome variable (in this case “death”) is specified multiple times (currently the limit is actually two times) in <code>defSurv</code>, and the transition argument indicates the point at which the hazard ratio (HR) changes. In the example below, the log(HR) comparing males and females between day 0 and 150 is -1.4 (HR = 0.25), and after 150 days the hazards are more closely aligned, log(HR) = -0.3 (HR = 0.74). THe data definitions determine the proportion of males in the sample and specify the time to death outcomes:</p>
+<p>If we want to simulate a scenario where survival time is a function of sex and the relative risk of death (comparing males to females) changes after 150 days, we cannot use the proportional hazards assumption that <code>simstudy</code> has typically assumed. Rather, we need to be able to specify different hazards at different time points. This is now implemented in <code>simstudy</code> by using the <code>defSurv</code> function and the <code>transition</code> argument.</p>
+<p>In this case, the same outcome variable “death” is specified multiple times (currently the limit is actually two times) in <code>defSurv</code>, and the transition argument indicates the point at which the hazard ratio (HR) changes. In the example below, the log(HR) comparing males and females between day 0 and 150 is -1.4 (HR = 0.25), and after 150 days the hazards are more closely aligned, log(HR) = -0.3 (HR = 0.74). The data definitions determine the proportion of males in the sample and specify the time to death outcomes:</p>
 <pre class="r"><code>library(simstudy)
 library(survival)
 library(gtsummary)
@@ -32,19 +31,19 @@ defS &lt;- defSurv(varname = &quot;death&quot;, formula = &quot;-14.6 - 1.4 * ma
   shape = 0.35, transition = 0)
 defS &lt;- defSurv(defS, varname = &quot;death&quot;, formula = &quot;-14.6 - 0.3 * male&quot;, 
   shape = 0.35, transition = 150)</code></pre>
-<p>If we generate the data and take a look at the survival curves, it is possible to see the slight inflection point at 150 days where the HR shifts:</p>
+<p>If we generate the data and take a look at the survival curves, it is possible to see a slight inflection point at 150 days where the HR shifts:</p>
 <pre class="r"><code>set.seed(10)
 
 dd &lt;- genData(600, def)
 dd &lt;- genSurv(dd, defS, digits = 2)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="624" /></p>
-<p>If we fit a standard Cox proportional hazard model and test the proportionality assumption, it is quite clear that the assumption is violated (as the p-value &lt; 0.05).</p>
+<p>If we fit a standard Cox proportional hazard model and test the proportionality assumption, it is quite clear that the assumption is violated (as the p-value &lt; 0.05):</p>
 <pre class="r"><code>coxfit &lt;- coxph(formula = Surv(death) ~ male, data = dd)
 cox.zph(coxfit)</code></pre>
 <pre><code>##        chisq df       p
 ## male    12.5  1 0.00042
 ## GLOBAL  12.5  1 0.00042</code></pre>
-<p>If we split the data at the proper inflection point of 150 days, and refit the model, we can recoer the parameters (or at least get pretty close):</p>
+<p>If we split the data at the proper inflection point of 150 days, and refit the model, we can recover the parameters (or at least get pretty close):</p>
 <pre class="r"><code>dd2 &lt;- survSplit(Surv(death) ~ ., data= dd, cut=c(150),
                  episode= &quot;tgroup&quot;, id=&quot;newid&quot;)
 
@@ -495,11 +494,10 @@ tbl_regression(coxfit2)</code></pre>
   </tfoot>
 </table>
 </div>
-<p>The <a href="https://kgoldfeld.github.io/simstudy/articles/survival.html" target="_blank">survival vignette</a> has a more detailed description.</p>
 </div>
 <div id="competing-risks" class="section level3">
 <h3>Competing risks</h3>
-<p>There is a new function called <code>addCompRisk</code> that generates a single time to event outcome from a <em>collection</em> of time to event outcomes, where the observed outcome is the earliest event. This is done by specifying a <em>timeName</em> argument that will represent the observed time value. The event status is indicated in the field set by the <em>eventName</em> argument (which defaults to “event”). If a variable name is indicated in the <em>censorName</em> argument, the censored events automatically have a value of 0.</p>
+<p>A new function <code>addCompRisk</code> generates a single time to event outcome from a <em>collection</em> of time to event outcomes, where the observed outcome is the earliest event time. This can be accomplished by specifying a <em>timeName</em> argument that will represent the observed time value. The event status is indicated in the field set by the <em>eventName</em> argument (which defaults to “event”). And if a variable name is indicated using the <em>censorName</em> argument, the censored events automatically have a value of 0.</p>
 <p>To use <code>addCompRisk</code>, we first define and generate unique events - in this case <em>event_1</em>, <em>event_2</em>, and <em>censor</em>:</p>
 <pre class="r"><code>set.seed(1)
 
@@ -542,7 +540,7 @@ dtSurv</code></pre>
 ## 1001: 1001      7.2     1 event_1</code></pre>
 <p>Here’s a plot competing risk data using the cumulative incidence functions (rather than the survival curves):</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="624" /></p>
-<p>The data generation can be done in two (instead of three) steps by including the <code>timeName</code> and <code>eventName</code> arguments in the call to <code>genSurv</code>. In this case, by default the competing events will be all the events defined in <code>defSurv</code>:</p>
+<p>The data generation can be done in two (instead of three) steps by including the <code>timeName</code> and <code>eventName</code> arguments in the call to <code>genSurv</code>. By default, the competing events will be all the events defined in <code>defSurv</code>:</p>
 <pre class="r"><code>set.seed(1)
 
 dtSurv &lt;- genData(1001)
@@ -562,12 +560,11 @@ dtSurv</code></pre>
 ##  999:  999     12.1     2 event_2
 ## 1000: 1000     11.1     1 event_1
 ## 1001: 1001      7.2     1 event_1</code></pre>
-<p>Again, the <a href="https://kgoldfeld.github.io/simstudy/articles/survival.html" target="_blank">survival vignette</a> has a more detailed description.</p>
 </div>
 <div id="synthetic-data" class="section level3">
 <h3>Synthetic data</h3>
-<p>Sometimes it is useful to generate data that will represent the distributions of an existing data. Two new functions, <code>genSynthetic</code> and <code>addSynthetic</code> make it fairly easy to do that.</p>
-<p>Let’s say we have a data set called <span class="math inline">\(A\)</span> that has fields <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span>, and <span class="math inline">\(d\)</span>:</p>
+<p>Sometimes, it may be useful to generate data that will represent the distributions of an existing data set. Two new functions, <code>genSynthetic</code> and <code>addSynthetic</code> make it fairly easy to do this.</p>
+<p>Let’s say we start with an existing data set <span class="math inline">\(A\)</span> that has fields <span class="math inline">\(a\)</span>, <span class="math inline">\(b\)</span>, <span class="math inline">\(c\)</span>, and <span class="math inline">\(d\)</span>:</p>
 <pre class="r"><code>A</code></pre>
 <pre><code>##       index    a b c    d
 ##    1:     1 2.74 8 0 11.1
@@ -581,6 +578,7 @@ dtSurv</code></pre>
 ##  998:   998 2.80 7 0 10.9
 ##  999:   999 2.47 6 0  8.1
 ## 1000:  1000 2.63 6 0 12.5</code></pre>
+<p>Here are the univariate distributions of each of the fields followed by the covariance matrix:</p>
 <pre class="r"><code>summary(A[, 2:5])</code></pre>
 <pre><code>##        a             b              c              d       
 ##  Min.   :0.0   Min.   : 0.0   Min.   :0.00   Min.   : 0.1  
@@ -589,7 +587,13 @@ dtSurv</code></pre>
 ##  Mean   :3.0   Mean   : 5.1   Mean   :0.32   Mean   : 9.1  
 ##  3rd Qu.:3.8   3rd Qu.: 6.0   3rd Qu.:1.00   3rd Qu.:11.2  
 ##  Max.   :6.0   Max.   :13.0   Max.   :1.00   Max.   :18.1</code></pre>
-<p>We can create a synthetic data set by sampling records with replacement from the existing data set <span class="math inline">\(A\)</span>:</p>
+<pre class="r"><code>cor(A[, cbind(a, b, c, d)])</code></pre>
+<pre><code>##         a       b       c    d
+## a  1.0000 -0.0283 -0.0019 0.30
+## b -0.0283  1.0000  0.0022 0.72
+## c -0.0019  0.0022  1.0000 0.42
+## d  0.3034  0.7212  0.4205 1.00</code></pre>
+<p>We can create a synthetic data set by sampling records with replacement from data set <span class="math inline">\(A\)</span>:</p>
 <pre class="r"><code>S &lt;- genSynthetic(dtFrom = A, n = 120, id = &quot;index&quot;)
 S</code></pre>
 <pre><code>##      index   a b c    d
@@ -604,7 +608,7 @@ S</code></pre>
 ## 118:   118 4.5 3 0  7.4
 ## 119:   119 3.0 6 0  9.8
 ## 120:   120 3.8 4 1 10.3</code></pre>
-<p>And the distribution of variables in <span class="math inline">\(S\)</span> matches their distribution in <span class="math inline">\(A\)</span>:</p>
+<p>The distribution of variables in <span class="math inline">\(S\)</span> matches their distribution in <span class="math inline">\(A\)</span>, and the covariance matrix is reasonably well recovered:</p>
 <pre class="r"><code>summary(S[, 2:5])</code></pre>
 <pre><code>##        a             b              c              d       
 ##  Min.   :0.6   Min.   : 0.0   Min.   :0.00   Min.   : 0.6  
@@ -613,4 +617,10 @@ S</code></pre>
 ##  Mean   :2.9   Mean   : 4.8   Mean   :0.34   Mean   : 8.7  
 ##  3rd Qu.:3.6   3rd Qu.: 6.0   3rd Qu.:1.00   3rd Qu.:10.5  
 ##  Max.   :5.2   Max.   :12.0   Max.   :1.00   Max.   :18.1</code></pre>
+<pre class="r"><code>cor(S[, cbind(a, b, c, d)])</code></pre>
+<pre><code>##        a      b      c    d
+## a  1.000  0.153 -0.011 0.39
+## b  0.153  1.000 -0.016 0.76
+## c -0.011 -0.016  1.000 0.35
+## d  0.387  0.761  0.353 1.00</code></pre>
 </div>

@@ -11,7 +11,6 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: true
 ---
 
 ```{r, echo = FALSE}
@@ -37,15 +36,15 @@ ggtheme <- function(panelback = "white") {
 }
 ```
 
-A new [version](https://kgoldfeld.github.io/simstudy/index.html){target="_blank"} of `simstudy` is available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"}. There are two major enhancements and several new features. In the "major" category, I would include (1) changes to survival data generation that accommodate hazard ratios that can change over time and competing risks, and (2) the addition of functions to allow users to sample from existing data sets with replacement to generate "synthetic" data will real life distribution properties. Other less monumental, but important, changes were made: updates to functions `genFormula` and `genMarkov`, and two added utility functions, `survGetParams` and `survParamPlot` (described [here](https://kgoldfeld.github.io/simstudy/articles/survival.html){target="_blank"}).
+A new [version](https://kgoldfeld.github.io/simstudy/index.html){target="_blank"} of `simstudy` is available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"}. There are two major enhancements and several new features. In the "major" category, I would include (1) changes to survival data generation that accommodate hazard ratios that can change over time, as well as competing risks, and (2) the addition of functions to allow users to sample from existing data sets with replacement to generate "synthetic" data will real life distribution properties. Other less monumental, but important, changes were made: updates to functions `genFormula` and `genMarkov`, and two added utility functions, `survGetParams` and `survParamPlot`. (I did describe the survival data generation functions in two recent posts, [here](https://www.rdatagen.net/post/2022-03-15-adding-competing-risks-in-survival-data-generation/){target="_blank"} and [here](https://www.rdatagen.net/post/2022-03-29-simulating-non-proportional-hazards/){target="_blank"}.)
 
 Here are the highlights of the major enhancements:
 
 ### Non-proportional hazards
 
-If we want to simulate a scenario where survival time is a function of sex, but the relative risk of death (comparing males to females) changes after 150 days, we could not use a proportional hazards assumption that `simstudy` has typically assumed. Rather, we need to be able to specify different hazards at different time points. This is implemented in `simstudy` by using the `defSurv` function and the `transition` argument. 
+If we want to simulate a scenario where survival time is a function of sex and the relative risk of death (comparing males to females) changes after 150 days, we cannot use the proportional hazards assumption that `simstudy` has typically assumed. Rather, we need to be able to specify different hazards at different time points. This is now implemented in `simstudy` by using the `defSurv` function and the `transition` argument. 
 
-In this case, the same outcome variable (in this case "death") is specified multiple times (currently the limit is actually two times) in `defSurv`, and the transition argument indicates the point at which the hazard ratio (HR) changes. In the example below, the log(HR) comparing males and females between day 0 and 150 is -1.4 (HR = 0.25), and after 150 days the hazards are more closely aligned, log(HR) = -0.3 (HR = 0.74). THe data definitions determine the proportion of males in the sample and specify the time to death outcomes:
+In this case, the same outcome variable "death" is specified multiple times (currently the limit is actually two times) in `defSurv`, and the transition argument indicates the point at which the hazard ratio (HR) changes. In the example below, the log(HR) comparing males and females between day 0 and 150 is -1.4 (HR = 0.25), and after 150 days the hazards are more closely aligned, log(HR) = -0.3 (HR = 0.74). The data definitions determine the proportion of males in the sample and specify the time to death outcomes:
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -60,7 +59,7 @@ defS <- defSurv(defS, varname = "death", formula = "-14.6 - 0.3 * male",
   shape = 0.35, transition = 150)
 ```
 
-If we generate the data and take a look at the survival curves, it is possible to see the slight inflection point at 150 days where the HR shifts:
+If we generate the data and take a look at the survival curves, it is possible to see a slight inflection point at 150 days where the HR shifts:
 
 ```{r}
 set.seed(10)
@@ -78,14 +77,14 @@ survminer::ggsurvplot(fit, data = dd,
 )
 ```
 
-If we fit a standard Cox proportional hazard model and test the proportionality assumption, it is quite clear that the assumption is violated (as the p-value < 0.05).
+If we fit a standard Cox proportional hazard model and test the proportionality assumption, it is quite clear that the assumption is violated (as the p-value < 0.05):
 
 ```{r}
 coxfit <- coxph(formula = Surv(death) ~ male, data = dd)
 cox.zph(coxfit)
 ```
 
-If we split the data at the proper inflection point of 150 days, and refit the model, we can recoer the parameters (or at least get pretty close):
+If we split the data at the proper inflection point of 150 days, and refit the model, we can recover the parameters (or at least get pretty close):
 
 ```{r}
 dd2 <- survSplit(Surv(death) ~ ., data= dd, cut=c(150),
@@ -96,11 +95,9 @@ coxfit2 <- coxph(Surv(tstart, death, event) ~ male:strata(tgroup), data=dd2)
 tbl_regression(coxfit2)
 ```
 
-The [survival vignette](https://kgoldfeld.github.io/simstudy/articles/survival.html){target="_blank"} has a more detailed description.
-
 ### Competing risks
 
-There is a new function called `addCompRisk` that generates a single time to event outcome from a *collection* of time to event outcomes, where the observed outcome is the earliest event. This is done by specifying a *timeName* argument that will represent the observed time value. The event status is indicated in the field set by the *eventName* argument (which defaults to "event"). If a variable name is indicated in the *censorName* argument, the censored events automatically have a value of 0.
+A new function `addCompRisk` generates a single time to event outcome from a *collection* of time to event outcomes, where the observed outcome is the earliest event time. This can be accomplished by specifying a *timeName* argument that will represent the observed time value. The event status is indicated in the field set by the *eventName* argument (which defaults to "event"). And if a variable name is indicated using the *censorName* argument, the censored events automatically have a value of 0.
 
 To use `addCompRisk`, we first define and generate unique events - in this case *event_1*, *event_2*, and *censor*:
 
@@ -134,7 +131,7 @@ survminer::ggcompetingrisks(fit, ggtheme = ggtheme("grey94"))  +
   ggplot2::scale_fill_manual(values = cbbPalette)
 ```
 
-The data generation can be done in two (instead of three) steps by including the `timeName` and `eventName` arguments in the call to `genSurv`. In this case, by default the competing events will be all the events defined in `defSurv`:
+The data generation can be done in two (instead of three) steps by including the `timeName` and `eventName` arguments in the call to `genSurv`. By default, the competing events will be all the events defined in `defSurv`:
 
 ```{r}
 set.seed(1)
@@ -146,13 +143,11 @@ dtSurv <- genSurv(dtSurv, dS, timeName = "obs_time",
 dtSurv
 ```
 
-Again, the [survival vignette](https://kgoldfeld.github.io/simstudy/articles/survival.html){target="_blank"} has a more detailed description.
-
 ### Synthetic data
 
-Sometimes it is useful to generate data that will represent the distributions of an existing data. Two new functions, `genSynthetic` and `addSynthetic` make it fairly easy to do that.
+Sometimes, it may be useful to generate data that will represent the distributions of an existing data set. Two new functions, `genSynthetic` and `addSynthetic` make it fairly easy to do this.
 
-Let's say we have a data set called $A$ that has fields $a$, $b$, $c$, and $d$:
+Let's say we start with an existing data set $A$ that has fields $a$, $b$, $c$, and $d$:
 
 ```{r, echo = FALSE}
 d <- defData(varname = "a", formula = 3, variance = 1, dist = "normal")
@@ -167,19 +162,26 @@ A <- genData(1000, d, id = "index")
 A
 ```
 
+Here are the univariate distributions of each of the fields followed by the covariance matrix:
+
 ```{r}
 summary(A[, 2:5])
+
+cor(A[, cbind(a, b, c, d)])
 ```
 
-We can create a synthetic data set by sampling records with replacement from the existing data set $A$:
+We can create a synthetic data set by sampling records with replacement from data set $A$:
 
 ```{r}
 S <- genSynthetic(dtFrom = A, n = 120, id = "index")
 S
 ```
 
-And the distribution of variables in $S$ matches their distribution in $A$:
+The distribution of variables in $S$ matches their distribution in $A$, and the covariance matrix is reasonably well recovered:
 
 ```{r}
 summary(S[, 2:5])
+
+cor(S[, cbind(a, b, c, d)])
+
 ```
