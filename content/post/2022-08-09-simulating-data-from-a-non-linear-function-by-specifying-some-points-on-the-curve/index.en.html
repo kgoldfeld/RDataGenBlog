@@ -1,0 +1,135 @@
+---
+title: Simulating data from a non-linear function by specifying a handful of points
+author: Package Build
+date: '2022-08-09'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+  - GAM
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>If you are simulating data where the relationship between two variables is non-linear, it can be frustrating to find a mathematical expression that will allow you do that. Clearly, if the relationship is straightforward, such as a quadratic association, there is no need to go through all this trouble. But for more complicated scenarios, I’ve come up with a relatively simple solution that only requires the specification of a few points that lie on or near the desired curve. The translation from this set of points to the desired function and finally to the simulated data is done by leveraging generalized additive modelling (GAM) methods. (There are many, many sources that describe GAMs: <a href="https://m-clark.github.io/generalized-additive-models" target="_blank">this</a> and <a href="https://noamross.github.io/gams-in-r-course/" target="_blank">this</a> provide excellent overviews, and of course, there is this <a href="https://www.routledge.com/Generalized-Additive-Models-An-Introduction-with-R-Second-Edition/Wood/p/book/9781498728331" target="_blank">book</a>.) My goal here is to take you through this simple solution, and at some point in the future, I will try to implement some version of this in <code>simstudy</code>.</p>
+<p>Before we begin, here are the <code>R</code> packages used in the post:</p>
+<pre class="r"><code>library(data.table)
+library(ggplot2)
+library(mgcv)</code></pre>
+<div id="starting-with-the-idea-of-non-linear-function" class="section level4">
+<h4>Starting with the idea of non-linear function</h4>
+<p>Say we have a function in mind that looks something like this:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="480" /></p>
+</div>
+<div id="conceptualize-the-function-with-a-handful-of-points" class="section level4">
+<h4>Conceptualize the function with a handful of points</h4>
+<p>Since it is not obvious (to me at least) how to express this mathematically, let’s start by selecting a few points that describe the general shape. In this case, I think seven points do the trick pretty well:</p>
+<pre class="r"><code>x &lt;- c(20, 30, 40, 50, 60, 70, 80)
+y &lt;- c(15, 40, 25, 22, 35, 24, 15)
+
+dd &lt;- data.table(x = x, y = y)
+
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_line(lty = 2, color = &quot;grey70&quot;) +    
+  geom_point() +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="480" /></p>
+</div>
+<div id="fill-in-the-gaps" class="section level4">
+<h4>Fill in the gaps</h4>
+<p>If we want to extrapolate from this small set of points to a curve, we will need more data. We can easily generate this data by taking points along the lines that connect our original points. All this requires is a some rudimentary algebra. First, just create a data set that includes the start and end points of each line segment:</p>
+<pre class="r"><code>dc &lt;- copy(dd)
+  
+dc[, xend := (shift(x, type = &quot;lead&quot;))]
+dc[, yend := (shift(y, type = &quot;lead&quot;))]
+dc &lt;- dc[ -.N]
+dc[, id := .I]
+
+dc</code></pre>
+<pre><code>##     x  y xend yend id
+## 1: 20 15   30   40  1
+## 2: 30 40   40   25  2
+## 3: 40 25   50   22  3
+## 4: 50 22   60   35  4
+## 5: 60 35   70   24  5
+## 6: 70 24   80   15  6</code></pre>
+<p>And then after calculating the slope and intercept, you’ve got points along those line segments:</p>
+<pre class="r"><code>interp_line &lt;- function(x, y, xend, yend) {
+  slope &lt;- (yend - y)/(xend - x)
+  b &lt;- y - slope*x
+  newx &lt;- seq(x, xend, length = 100)
+  newy &lt;- newx*slope + b
+  
+  data.table::data.table(x = newx, y = newy)
+}
+  
+dx &lt;- dc[, interp_line(x, y, xend, yend), keyby = id]
+dx</code></pre>
+<pre><code>##      id        x        y
+##   1:  1 20.00000 15.00000
+##   2:  1 20.10101 15.25253
+##   3:  1 20.20202 15.50505
+##   4:  1 20.30303 15.75758
+##   5:  1 20.40404 16.01010
+##  ---                     
+## 596:  6 79.59596 15.36364
+## 597:  6 79.69697 15.27273
+## 598:  6 79.79798 15.18182
+## 599:  6 79.89899 15.09091
+## 600:  6 80.00000 15.00000</code></pre>
+<p>Here is a visualization of the points, which comprise our augmented data set:</p>
+<pre class="r"><code>ggplot(data = dx, aes(x = x, y = y)) +
+  geom_point(size = .05) +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="480" /></p>
+</div>
+<div id="smoothing-out-points-to-get-our-curve" class="section level4">
+<h4>Smoothing out points to get our curve</h4>
+<p>A call to the function <code>gam</code> in the <code>mgcv</code> package with a smoothing term specified for our input <span class="math inline">\(x\)</span> (and a relatively low degrees of freedom <span class="math inline">\(k\)</span> to ensure a very smooth result), gives us an object that can serve as our function:</p>
+<pre class="r"><code>gam.fit &lt;- gam(y ~ s(x, k = 7), data = dx)</code></pre>
+<p>Using the <code>predict.gam</code> function, we can see how the GAM has abstracted from the line segments to give us our desired curve. (Of course, we might need to tweak our input set of points to the curve we are looking for.)</p>
+<pre class="r"><code>dx[, ypred := predict(gam.fit)]
+  
+ggplot(data = dx, aes(x=x, y = ypred)) +
+      geom_line()  +
+      geom_point(data = dd, aes(x = x, y = y)) +
+      theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="480" /></p>
+</div>
+<div id="generating-the-random-data-from-this-non-linear-function" class="section level4">
+<h4>Generating the random data from this non-linear ‘function’</h4>
+<p>It is now easy to generate outcome data <span class="math inline">\(y\)</span> that is centered around our function by generating random inputs (<span class="math inline">\(x\)</span>’s), calling <code>predict.gam</code>, and adding some Gaussian noise:</p>
+<pre class="r"><code>set.seed(123)
+
+rand_data &lt;- data.table(x = runif(120, 20, 80))
+rand_data$y &lt;- predict(gam.fit, newdata = rand_data) + rnorm(nrow(rand_data),0, 2)
+
+ggplot(data = rand_data, aes(x = x, y = y)) +
+  geom_point(size = 1)  +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="480" /></p>
+</div>
+<div id="wrapping-all-of-this-up-in-a-function" class="section level4">
+<h4>Wrapping all of this up in a function</h4>
+<p>This can all be simplified by putting this code inside a function, so we can generate the desired data in a few simple steps.</p>
+<p>I’ve written a function <code>getNLfunction</code> based on the code above that returns the fitted GAM object. Here, we describe another curve with six points:</p>
+<pre class="r"><code>x &lt;- c(20, 30, 40, 60, 70, 80)
+y &lt;- c(15, 42, 42, 42, 70, 30)
+
+nlf &lt;- getNLfunction(data.table(x = x, y = y), k = 1)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="480" /></p>
+<p>The new function <code>genNL</code> is really just a wrapper for <code>predict.gam</code>. With just a few lines of code, it is possible to generate observations from an infinite range of flexible functions:</p>
+<pre class="r"><code>rand_data &lt;- data.table(x = runif(120, 20, 80))
+rand_data$y &lt;- genNL(nlf, rand_data$x, sd = 2)
+
+ggplot(data = rand_data, aes(x=x, y = y)) +
+  geom_point(size = .4)  +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="480" /></p>
+<p>Next time, or sometime soon, I will demonstrate how this flexible data generation process can be incorporated into simstudy` data generation.</p>
+</div>

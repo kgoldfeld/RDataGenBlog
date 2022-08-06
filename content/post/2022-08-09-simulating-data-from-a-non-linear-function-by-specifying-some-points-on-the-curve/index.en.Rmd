@@ -1,0 +1,221 @@
+---
+title: Simulating data from a non-linear function by specifying a handful of points
+author: Package Build
+date: '2022-08-09'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+  - GAM
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+If you are simulating data where the relationship between two variables is non-linear, it can be frustrating to find a mathematical expression that will allow you do that. Clearly, if the relationship is straightforward, such as a quadratic association, there is no need to go through all this trouble. But for more complicated scenarios, I've come up with a relatively simple solution that only requires the specification of a few points that lie on or near the desired curve. The translation from this set of points to the desired function and finally to the simulated data is done by leveraging generalized additive modelling (GAM) methods. (There are many, many sources that describe GAMs:  [this](https://m-clark.github.io/generalized-additive-models){target="_blank"} and [this](https://noamross.github.io/gams-in-r-course/){target="_blank"} provide excellent overviews, and of course, there is this [book](https://www.routledge.com/Generalized-Additive-Models-An-Introduction-with-R-Second-Edition/Wood/p/book/9781498728331){target="_blank"}.) My goal here is to take you through this simple solution, and at some point in the future, I will try to implement some version of this in `simstudy`.
+
+Before we begin, here are the `R` packages used in the post:
+
+```{r,  message=FALSE, warning=FALSE, fig.height = 3, fig.width = 5}
+library(data.table)
+library(ggplot2)
+library(mgcv)
+```
+
+#### Starting with the idea of non-linear function
+
+Say we have a function in mind that looks something like this:
+
+```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.height = 3, fig.width = 5}
+x <- c(20, 30, 40, 50, 60, 70, 80)
+y <- c(15, 40, 25, 22, 35, 24, 15)
+
+dd <- data.table(x = x, y = y)
+
+dc <- copy(dd)
+  
+dc[, xend := (shift(x, type = "lead"))]
+dc[, yend := (shift(y, type = "lead"))]
+dc <- dc[ -.N]
+dc[, id := .I]
+
+interp_line <- function(x, y, xend, yend) {
+  slope <- (yend - y)/(xend - x)
+  b <- y - slope*x
+  newx <- seq(x, xend, length = 100)
+  newy <- newx*slope + b
+  
+  data.table::data.table(x = newx, y = newy)
+}
+  
+dx <- dc[, interp_line(x, y, xend, yend), keyby = id]
+
+gam.fit <- gam(y ~ s(x, k = 7), data = dx)
+dx[, ypred := predict(gam.fit)]
+  
+ggplot(data = dx, aes(x=x, y = ypred)) +
+  geom_line()  +
+  theme(panel.grid = element_blank())+
+  ylab("y")
+
+```
+
+#### Conceptualize the function with a handful of points
+
+Since it is not obvious (to me at least) how to express this mathematically, let's start by selecting a few points that describe the general shape. In this case, I think seven points do the trick pretty well:
+
+```{r, message = FALSE, warning = FALSE, fig.height = 3, fig.width = 5}
+x <- c(20, 30, 40, 50, 60, 70, 80)
+y <- c(15, 40, 25, 22, 35, 24, 15)
+
+dd <- data.table(x = x, y = y)
+
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_line(lty = 2, color = "grey70") +    
+  geom_point() +
+  theme(panel.grid = element_blank())
+```
+
+#### Fill in the gaps
+
+If we want to extrapolate from this small set of points to a curve, we will need more data. We can easily generate this data by taking points along the lines that connect our original points. All this requires is a some rudimentary algebra. First, just create a data set that includes the start and end points of each line segment:
+
+```{r, fig.height = 3, fig.width = 5}
+dc <- copy(dd)
+  
+dc[, xend := (shift(x, type = "lead"))]
+dc[, yend := (shift(y, type = "lead"))]
+dc <- dc[ -.N]
+dc[, id := .I]
+
+dc
+```
+
+And then after calculating the slope and intercept, you've got points along those line segments:
+
+```{r, fig.height = 3, fig.width = 5}
+interp_line <- function(x, y, xend, yend) {
+  slope <- (yend - y)/(xend - x)
+  b <- y - slope*x
+  newx <- seq(x, xend, length = 100)
+  newy <- newx*slope + b
+  
+  data.table::data.table(x = newx, y = newy)
+}
+  
+dx <- dc[, interp_line(x, y, xend, yend), keyby = id]
+dx
+```
+
+Here is a visualization of the points, which comprise our augmented data set:
+
+```{r, fig.height = 3, fig.width = 5}
+ggplot(data = dx, aes(x = x, y = y)) +
+  geom_point(size = .05) +
+  theme(panel.grid = element_blank())
+```
+
+#### Smoothing out points to get our curve
+
+A call to the function `gam` in the `mgcv` package with a smoothing term specified for our input $x$ (and a relatively low degrees of freedom $k$ to ensure a very smooth result), gives us an object that can serve as our function:
+
+```{r, fig.height = 3, fig.width = 5}
+gam.fit <- gam(y ~ s(x, k = 7), data = dx)
+```
+
+Using the `predict.gam` function, we can see how the GAM has abstracted from the line segments to give us our desired curve. (Of course, we might need to tweak our input set of points to the curve we are looking for.)
+
+```{r, fig.height = 3, fig.width = 5}
+dx[, ypred := predict(gam.fit)]
+  
+ggplot(data = dx, aes(x=x, y = ypred)) +
+      geom_line()  +
+      geom_point(data = dd, aes(x = x, y = y)) +
+      theme(panel.grid = element_blank())
+```
+
+#### Generating the random data from this non-linear 'function'
+
+It is now easy to generate outcome data $y$ that is centered around our function by generating random inputs ($x$'s), calling `predict.gam`, and adding some Gaussian noise:
+
+```{r, fig.height = 3, fig.width = 5}
+set.seed(123)
+
+rand_data <- data.table(x = runif(120, 20, 80))
+rand_data$y <- predict(gam.fit, newdata = rand_data) + rnorm(nrow(rand_data),0, 2)
+
+ggplot(data = rand_data, aes(x = x, y = y)) +
+  geom_point(size = 1)  +
+  theme(panel.grid = element_blank())
+```
+
+#### Wrapping all of this up in a function
+
+This can all be simplified by putting this code inside a function, so we can generate the desired data in a few simple steps.
+
+```{r, echo = FALSE}
+interp_line <- function(x, y, xend, yend, npoints = 100) {
+  slope <- (yend - y)/(xend - x)
+  b <- y - slope*x
+  newx <- seq(x, xend, length = npoints)
+  newy <- newx*slope + b
+  
+  data.table::data.table(x = newx, y = newy)
+}
+
+getNLfunction <- function(dd, k = 0, show.plot = TRUE) {
+  dc <- copy(dd)
+  
+  dc[, xend := (shift(x, type = "lead"))]
+  dc[, yend := (shift(y, type = "lead"))]
+  
+  dc <- dc[ -.N]
+  dc[, id := .I]
+  
+  dx <- dc[, interp_line(x, y, xend, yend, 100), keyby = id]
+  
+  gam.fit <- gam(y ~ s(x, k = nrow(dd) + k), data = dx)
+  dx[, ypred := predict(gam.fit)]
+  
+  if (show.plot) {
+    
+    p <- ggplot(data = dx, aes(x=x, y = ypred)) +
+      geom_line()  +
+      geom_point(data = dd, aes(x = x, y = y)) +
+      theme(panel.grid = element_blank())
+    
+    print(p)
+  }
+  
+  return(gam.fit)
+
+}
+
+genNL <- function(nf, x, sd) {
+  predict(nf, newdata= data.frame(x = x))  + rnorm(length(x), 0, sd)
+}
+```
+
+I've written a function `getNLfunction` based on the code above that returns the fitted GAM object. Here, we describe another curve with six points:
+
+```{r, fig.height = 3, fig.width = 5}
+x <- c(20, 30, 40, 60, 70, 80)
+y <- c(15, 42, 42, 42, 70, 30)
+
+nlf <- getNLfunction(data.table(x = x, y = y), k = 1)
+```
+
+The new function `genNL` is really just a wrapper for `predict.gam`. With just a few lines of code, it is possible to generate observations from an infinite range of flexible functions:
+
+```{r, fig.height = 3, fig.width = 5}
+rand_data <- data.table(x = runif(120, 20, 80))
+rand_data$y <- genNL(nlf, rand_data$x, sd = 2)
+
+ggplot(data = rand_data, aes(x=x, y = y)) +
+  geom_point(size = .4)  +
+  theme(panel.grid = element_blank())
+```
+
+Next time, or sometime soon, I will demonstrate how this flexible data generation process can be incorporated into simstudy` data generation.
