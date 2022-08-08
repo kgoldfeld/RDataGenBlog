@@ -14,7 +14,7 @@ image: ''
 draft: TRUE
 ---
 
-If you are simulating data where the relationship between two variables is non-linear, it can be frustrating to find a mathematical expression that will allow you do that. Clearly, if the relationship is straightforward, such as a quadratic association, there is no need to go through all this trouble. But for more complicated scenarios, I've come up with a relatively simple solution that only requires the specification of a few points that lie on or near the desired curve. The translation from this set of points to the desired function and finally to the simulated data is done by leveraging generalized additive modelling (GAM) methods. (There are many, many sources that describe GAMs:  [this](https://m-clark.github.io/generalized-additive-models){target="_blank"} and [this](https://noamross.github.io/gams-in-r-course/){target="_blank"} provide excellent overviews, and of course, there is this [book](https://www.routledge.com/Generalized-Additive-Models-An-Introduction-with-R-Second-Edition/Wood/p/book/9781498728331){target="_blank"}.) My goal here is to take you through this simple solution, and at some point in the future, I will try to implement some version of this in `simstudy`.
+Trying to simulate data with non-linear relationships can be frustrating, since there is not always an obvious mathematical expression that will give you the shape you are looking for. I've come up with a relatively simple solution for somewhat complex scenarios that only requires the specification of a few points that lie on or near the desired curve. (Clearly, if the relationships are straightforward, such as relationships that can easily be represented by quadratic or cubic polynomials, there is no need to go through all this trouble.) The translation from the set of points to the desired function and finally to the simulated data is done by leveraging generalized additive modelling (GAM) methods, and is described here.
 
 Before we begin, here are the `R` packages used in the post:
 
@@ -26,7 +26,7 @@ library(mgcv)
 
 #### Starting with the idea of non-linear function
 
-Say we have a function in mind that looks something like this:
+Say we desire a functional relationship $y = f(x)$ that looks something like this:
 
 ```{r, echo = FALSE, message=FALSE, warning=FALSE, fig.height = 3, fig.width = 5}
 x <- c(20, 30, 40, 50, 60, 70, 80)
@@ -57,14 +57,14 @@ dx[, ypred := predict(gam.fit)]
   
 ggplot(data = dx, aes(x=x, y = ypred)) +
   geom_line()  +
-  theme(panel.grid = element_blank())+
-  ylab("y")
+  theme(panel.grid = element_blank()) +
+  ylab("y = f(x)")
 
 ```
 
 #### Conceptualize the function with a handful of points
 
-Since it is not obvious (to me at least) how to express this mathematically, let's start by selecting a few points that describe the general shape. In this case, I think seven points do the trick pretty well:
+Since it is not obvious (to me at least) how to express this curve mathematically, let's start by selecting a few points that describe the general shape. In this case, I think using seven points does the trick pretty well:
 
 ```{r, message = FALSE, warning = FALSE, fig.height = 3, fig.width = 5}
 x <- c(20, 30, 40, 50, 60, 70, 80)
@@ -80,7 +80,7 @@ ggplot(data = dd, aes(x = x, y = y)) +
 
 #### Fill in the gaps
 
-If we want to extrapolate from this small set of points to a curve, we will need more data. We can easily generate this data by taking points along the lines that connect our original points. All this requires is a some rudimentary algebra. First, just create a data set that includes the start and end points of each line segment:
+If we want to extrapolate from this small set of points to a curve, we will need more data. We can easily generate this data by taking points along the lines that connect our original points. This requires only some rudimentary algebra. First, just create a data set that includes the start and end points of each line segment:
 
 ```{r, fig.height = 3, fig.width = 5}
 dc <- copy(dd)
@@ -109,7 +109,7 @@ dx <- dc[, interp_line(x, y, xend, yend), keyby = id]
 dx
 ```
 
-Here is a visualization of the points, which comprise our augmented data set:
+The augmented set of points looks like a sequence of line segments when plotted:
 
 ```{r, fig.height = 3, fig.width = 5}
 ggplot(data = dx, aes(x = x, y = y)) +
@@ -119,13 +119,15 @@ ggplot(data = dx, aes(x = x, y = y)) +
 
 #### Smoothing out points to get our curve
 
-A call to the function `gam` in the `mgcv` package with a smoothing term specified for our input $x$ (and a relatively low degrees of freedom $k$ to ensure a very smooth result), gives us an object that can serve as our function:
+The idea here is to convert this set of line segments into a curve that can be represented by a functional object we can use to generate new outcomes. Any model fit in R can serve as a functional object in the sense that if you provide an input (or number of inputs) to the `predict` function for that model fit, you will get an output from that model. 
+
+GAMs are a family of flexible models that use spline functions to generate highly curved functions, so are a perfect solution here. (There are many, many sources that describe GAMs:  [this](https://m-clark.github.io/generalized-additive-models){target="_blank"} and [this](https://noamross.github.io/gams-in-r-course/){target="_blank"} provide excellent overviews, and of course, there is this [book](https://www.routledge.com/Generalized-Additive-Models-An-Introduction-with-R-Second-Edition/Wood/p/book/9781498728331){target="_blank"}.) In this case, we will fit a GAM model to our augmented data set to get a smoothed version the desired function. A call to the function `gam` in the `mgcv` package with a smoothing term specified for our input $x$ (and a relatively low degrees of freedom $k$ to ensure a very smooth result), gives the object that will serve as our function:
 
 ```{r, fig.height = 3, fig.width = 5}
 gam.fit <- gam(y ~ s(x, k = 7), data = dx)
 ```
 
-Using the `predict.gam` function, we can see how the GAM has abstracted from the line segments to give us our desired curve. (Of course, we might need to tweak our input set of points to the curve we are looking for.)
+Using `predict.gam`, we can see how the GAM has abstracted from the line segments to give us our desired curve. (Of course, we might need to tweak our input set of points to get closer to the curve we are looking for.)
 
 ```{r, fig.height = 3, fig.width = 5}
 dx[, ypred := predict(gam.fit)]
@@ -153,7 +155,7 @@ ggplot(data = rand_data, aes(x = x, y = y)) +
 
 #### Wrapping all of this up in a function
 
-This can all be simplified by putting this code inside a function, so we can generate the desired data in a few simple steps.
+This can all be simplified by putting the code inside a function; with this, we can generate the desired data in a few simple steps.
 
 ```{r, echo = FALSE}
 interp_line <- function(x, y, xend, yend, npoints = 100) {
@@ -184,7 +186,8 @@ getNLfunction <- function(dd, k = 0, show.plot = TRUE) {
     p <- ggplot(data = dx, aes(x=x, y = ypred)) +
       geom_line()  +
       geom_point(data = dd, aes(x = x, y = y)) +
-      theme(panel.grid = element_blank())
+      theme(panel.grid = element_blank()) +
+      ylab("y")
     
     print(p)
   }
@@ -198,24 +201,26 @@ genNL <- function(nf, x, sd) {
 }
 ```
 
-I've written a function `getNLfunction` based on the code above that returns the fitted GAM object. Here, we describe another curve with six points:
+Here, we are trying to generated a second curve - this time using six points. The function `getNLfunction` takes those points, plots the curve, and returns the fitted GAM object. 
 
 ```{r, fig.height = 3, fig.width = 5}
-x <- c(20, 30, 40, 60, 70, 80)
-y <- c(15, 42, 42, 42, 70, 30)
+x <- c(20, 30, 60, 67, 73, 80)
+y <- c(15, 42, 42, 67, 67, 30)
 
 nlf <- getNLfunction(data.table(x = x, y = y), k = 1)
 ```
 
-The new function `genNL` is really just a wrapper for `predict.gam`. With just a few lines of code, it is possible to generate observations from an infinite range of flexible functions:
+The new function `genNL` is really just a wrapper for `predict.gam`. Here, we generate new $x$'s and the corresponding $y$'s with noise:
 
 ```{r, fig.height = 3, fig.width = 5}
-rand_data <- data.table(x = runif(120, 20, 80))
+rand_data <- data.table(x = runif(180, 20, 80))
 rand_data$y <- genNL(nlf, rand_data$x, sd = 2)
+```
 
+```{r, fig.height = 3, fig.width = 5, echo=FALSE}
 ggplot(data = rand_data, aes(x=x, y = y)) +
   geom_point(size = .4)  +
   theme(panel.grid = element_blank())
 ```
 
-Next time, or sometime soon, I will demonstrate how this flexible data generation process can be incorporated into simstudy` data generation.
+So, with just a few lines of code, it is possible to generate observations from an infinite range of flexible functions. Sometime soon, I will demonstrate how this flexible data generation process can be incorporated directly into a `simstudy` data generation process.
