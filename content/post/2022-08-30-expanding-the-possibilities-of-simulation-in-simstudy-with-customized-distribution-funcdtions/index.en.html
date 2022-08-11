@@ -1,0 +1,65 @@
+---
+title: Flexible simulation in simstudy with customized distribution
+  functions
+author: Package Build
+date: '2022-08-30'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>Really, the only problem with the <code>simstudy</code> package (😄) is that there is a limit to the possible probability distributions that are available (the current count is 15 - see <a href="https://kgoldfeld.github.io/simstudy/articles/simstudy.html" target="_blank">here</a> for a complete description). Actually, it turns out that there is more flexibility than first meets the eye, and we can easily accommodate a limitless number as long as you are willing to provide some extra code.</p>
+<p>I am going to illustrate this with two examples, the first to implement a truncated normal distribution, and the second the implement the flexible non-linear data generating algorithm that I <a href="https://www.rdatagen.net/post/2022-08-09-simulating-data-from-a-non-linear-function-by-specifying-some-points-on-the-curve/" target="_blank">described last time</a>.</p>
+<p>Before we get going, here are the necessary libraries:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(msm)
+library(ggplot2)
+library(mgcv)</code></pre>
+<div id="general-concept" class="section level4">
+<h4>General concept</h4>
+<p>In the data definition step, it is possible to specify any valid <code>R</code> function in the <em>formula</em> argument. If <em>dist</em> is specified as “nonrandom”, then <code>simstudy</code> will generate data based on that function. (Yes, the specification as “nonrandom” is a bit awkward since we are defining a stochastic data generating process in this case; in future versions I plan to allow <em>dist</em> to be specified as “custom” to make this less dissonant.)</p>
+<p>In this example, I want to be able to generate data from a truncated normal distribution. There is an existing function <code>rtnorm</code> in the <code>msm</code> package that I can take advantage here. What I have done is essentially create a wrapper function that makes a single draw from the truncated distribution with a specified mean, standard deviation, and pair of truncation bounds:</p>
+<pre class="r"><code>trunc_norm &lt;- function(mean, sd, lower, upper) {
+  rtnorm(n = 1, mean = mean, sd = sd, lower = lower, upper = upper)
+}</code></pre>
+<p>Now that <code>trunc_norm</code> has been created, I am free to use this is in a data definition statement. And even more important, the call to <code>trunc_norm</code> can depend on other variables; in this case, I have created binary variable <em>x</em> that will determine the upper and lower bounds of the distribution. When <span class="math inline">\(x=0\)</span>, the <span class="math inline">\(N(0, 3.5^2)\)</span> distribution is truncated at -5 and 5, and when <span class="math inline">\(x=1\)</span>, the distribution is truncated at -8 and 8.</p>
+<pre class="r"><code>defI &lt;- defData(varname = &quot;x&quot;, formula = 0.5, dist = &quot;binary&quot;)
+defI &lt;- defData(defI, varname = &quot;y&quot;, 
+  formula = &quot;trunc_norm(mean = 0, sd = 3.5, 
+               lower = -5 + -3*x, upper = 5 + 3*x)&quot;,
+  dist = &quot;nonrandom&quot;)</code></pre>
+<p>The generated data appear to have the properties that we would expect:</p>
+<pre class="r"><code>dd &lt;- genData(1000, defI)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="480" /></p>
+</div>
+<div id="application-to-non-linear-data-generation" class="section level4">
+<h4>Application to non-linear data generation</h4>
+<p><a href="https://www.rdatagen.net/post/2022-08-09-simulating-data-from-a-non-linear-function-by-specifying-some-points-on-the-curve/" target="_blank">Last time</a>, I described an approach to generate a variable that has a non-linear response with another variable. At the end of that post, I created a couple of functions, one of which can be referred to in the <code>defData</code> statement to generate the data. (I plan on implementing these functions in <code>simstudy</code>, but I was eager to get the concept out there in case any one has some suggestions.)</p>
+<p>In the first step, I need to generate a smooth function by specifying a few points. I do this by calling <code>getNLfunction</code>. (If you want the code for this, let me know, but I actually provided most of it last week.) The variable <code>nlf</code> is an object that contains the function:</p>
+<pre class="r"><code>dpoints &lt;- data.table(x = c(20, 30, 53, 65, 80), y = c(15, 44, 60, 55, 35))
+nlf &lt;- getNLfunction(dpoints)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="480" /></p>
+<p>The function <code>genNL</code> makes predictions based on the <code>nlf</code> object and adds a little Gaussian noise. We use the same approach as we did above for the truncated normal to generate different responses <span class="math inline">\(y\)</span> based on the level of <span class="math inline">\(x\)</span>:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = &quot;20;80&quot;, dist = &quot;uniform&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, 
+  formula = &quot;genNL(nf = ..nlf, x, sd = 10)&quot;, dist = &quot;nonrandom&quot;)
+
+dd &lt;- genData(300, def)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="480" /></p>
+<p>And if we introduce much less noise, we get much closer to the original underlying function specified by our points:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;x&quot;, formula = &quot;20;80&quot;, dist = &quot;uniform&quot;)
+def &lt;- defData(def, varname = &quot;y&quot;, 
+  formula = &quot;genNL(nf = ..nlf, x, sd = 0.5)&quot;, dist = &quot;nonrandom&quot;)
+
+dd &lt;- genData(300, def)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="480" /></p>
+</div>
