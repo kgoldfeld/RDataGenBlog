@@ -1,0 +1,172 @@
+---
+title: 'Presenting results for multinomial logistic regression: a marginal approach
+  using propensity scores'
+author: Package Build
+date: '2022-09-20'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+<style>
+table, tr, td {
+    font-size: .85em;
+    height: 25%;
+}
+</style>
+
+
+
+```{r, echo=FALSE}
+options(digits = 3)
+```
+
+```{r}
+library(simstudy)
+library(nnet)
+library(data.table)
+library(ggplot2)
+library(MatchIt)
+```
+
+### Definitions
+
+```{r}
+defY <- defData(varname = "b_j", formula = 0, variance = 0.2)
+defY <- defData(defY, varname = "a_j", formula = 0, variance = 0.2)
+
+def <- defDataAdd(varname = "x1", formula = 0, variance = 1)
+def <- defDataAdd(def, varname = "x2", formula = 0.5, dist = "binary")
+def <- defDataAdd(def, varname = "rx", formula = "-1 - abs(a_j) - .5*x1 + .6*x2", 
+  dist = "binary", link = "logit")
+def <- defDataAdd(def, varname = "y", 
+  formula = "-abs(b_j) - 1.3 + 0.1*rx - 0.3*x1 - 0.5*x2 + .4*rx*year;
+             -abs(b_j) - 0.6 + 0.7*rx + 0.2*x1 - 0.5*x2;
+             -0.3 - 0.3*rx - 0.3*x1 - 0.5*x2 ", 
+  dist = "categorical", link = "logit")
+```
+
+### Data generation
+
+```{r}
+
+set.seed(1234)
+
+dd <- genData(6, defY, id = "year")
+dd <- genCluster(dd, "year", 200, level1ID = "id")
+
+dd <- addColumns(def, dd)
+dd <- genFactor(dd, "y")
+
+dd[, fy := relevel(fy, ref = "4")]
+dd[, year := factor(year)]
+```
+
+### Traditional analysis
+
+```{r}
+fit <- multinom(fy ~ x1 + x2 + rx*year, data = dd, trace = FALSE)
+```
+
+```{r, echo=FALSE, results='asis', warning=FALSE, message=FALSE}
+
+library(magrittr)
+
+multinom_pivot_wider <- function(x) {
+  
+  # create tibble of results
+  df <- tibble::tibble(outcome_level = unique(x$table_body$groupname_col))
+  df$tbl <- 
+    purrr::map(
+      df$outcome_level,
+      function(lvl) {
+        gtsummary::modify_table_body(
+          x, 
+          ~dplyr::filter(.x, .data$groupname_col %in% lvl) %>%
+            dplyr::ungroup() %>%
+            dplyr::select(-.data$groupname_col)
+        )
+      }
+    )
+  
+  gtsummary::tbl_merge(df$tbl, tab_spanner = paste0("**", df$outcome_level, "**"))
+}
+
+gtsummary::tbl_regression(fit, exponentiate = TRUE) %>% multinom_pivot_wider()
+
+```
+
+### Propensity score matching - MatchIt by year
+
+```{r}
+matchby <- function(dx) {
+  
+  m <- matchit(rx ~ x1 + x2, data = dx,
+               method = "nearest", distance = "glm", caliper = .25)
+  match.data(m)
+  
+}
+
+m.out <- rbindlist(lapply(1:6, function(x) matchby(dd[year==x])))
+```
+
+### Analysis of bootstrap data
+
+```{r}
+mfit <- multinom(fy ~ rx + year, data = m.out, trace = FALSE)
+
+dnew <- data.table(expand.grid(rx = c(0,1), year = factor(c(1:6))))
+dpred <- data.table(predict(mfit, newdata = dnew, "probs"))
+
+dpred <- cbind(dnew, dpred)
+dplot <- melt(data = dpred, id.vars = c("rx", "year"), value.name = "proportion")
+dplot[, response := factor(variable, levels = c(1, 2, 3, 4))]
+dplot[, rx := factor(rx, labels = c("not treated", "treated"))]
+
+### Bootstrap estimates of confidence bands
+
+bs <- function(x) {
+  
+  ids <- dd[, .(id = sample(id, .N, replace = T)), keyby = year][, id]
+  db <- dd[ids]
+  db[, id := .I]
+  
+  mb.out <- rbindlist(lapply(1:6, function(x) matchby(db[year==x])))
+  
+  mfit <- multinom(fy ~ rx + year, data = mb.out, trace = FALSE)
+  
+  dbnew <- data.table(expand.grid(rx = c(0,1), year = factor(c(1:6))))
+  dbpred <- data.table(predict(mfit, newdata = dbnew, "probs"))
+  
+  cbind(iter = x, dnew, dbpred)
+}
+
+bspred <- rbindlist(lapply(1:500, function(x) bs(x)))
+bsplot <- melt(data = bspred, id.vars = c("iter","rx", "year"), value.name = "proportion")
+bsplot[, response := factor(variable, levels = c(1, 2, 3, 4))]
+
+ci <- bsplot[, .(l95 = quantile(proportion, 0.025), u95 = quantile(proportion, 0.975)), 
+             keyby = .(variable, rx, year)]
+ci[, response := factor(variable, levels = c(1, 2, 3, 4))]
+ci[, rx := factor(rx, labels = c("not treated", "treated"))]
+```
+
+### Plot
+
+```{r, fig.height=2.5, fig.width = 9}
+ggplot(data = dplot, aes(x = year,  group = rx)) +
+  geom_ribbon(data = ci, 
+              aes(ymin = l95, ymax = u95, fill = factor(rx)),
+              alpha = .2)  +
+  geom_line(aes(y = proportion, color = factor(rx)), size = .8) +
+  facet_grid(. ~ response) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank())
+```
+
+
