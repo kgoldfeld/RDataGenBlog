@@ -1,6 +1,5 @@
 ---
-title: 'Presenting results for multinomial logistic regression: a marginal approach
-  using propensity scores'
+title: 'Presenting results for multinomial logistic regression: a marginal approach using propensity scores'
 author: Package Build
 date: '2022-09-20'
 slug: []
@@ -32,19 +31,22 @@ tr {
 options(digits = 3)
 ```
 
-Multinational logistic regression modeling can provide an understanding of the factors influencing a response that is an unordered, categorical outcome measure. For example, if we are interested in identifying individual-level characteristics associated with political parties in the United States (*Democratic*, *Republican*, *Libertarian*, *Green*), a multinomial model would be a reasonable approach to take. In the case of a randomized trial or epidemiological study, we might be particularly interested in the effect of a specific intervention or exposure.
+Multinomial logistic regression modeling can provide an understanding of the factors influencing an unordered, categorical outcome. For example, if we are interested in identifying individual-level characteristics associated with political parties in the United States (*Democratic*, *Republican*, *Libertarian*, *Green*), a multinomial model would be a reasonable approach to for estimating the strength of the associations. In the case of a randomized trial or epidemiological study, we might be primarily interested in the effect of a specific intervention or exposure while controlling for other covariates. Unfortunately, interpreting results from a multinomial logistic model can be a bit of a challenge, particularly when there is a large number of possible responses and covariates. 
 
-Interpreting results from a multinomial logistic model can be a bit of a challenge, particularly when there is a large number of possible responses and covariates. This is the formal specification of the model:
+My goal here is to generate a data set to illustrate how difficult it might be to interpret the parameter estimates from a multinomial model. And then I lay out a relatively simple solution that allows us to easily convert from the odds scale to the probability scale so we can more easily see the effect of the exposure on the outcome.
+
+### The multinomial logistic model
+
+This is the formal specification of the model:
 
 $$log\left[\frac{P(P_i = y)}{P(P_i = ref)}\right] = \alpha_y + \gamma_y A_i+ \boldsymbol{X_i \beta_y}$$
 
-where $P_i$ is the political party of individual $i$, $P_i \in \{R, L, G\}$ and $ref$ is the reference party - we'll assume that to be $D$ here. $A_i$ is a treatment/exposure indicator, and is 1 if exposed, 0 otherwise. $\boldsymbol{X_i}$ is a matrix of covariates. (For example, say we have some ad campaign that we hope will influence party affiliation - good luck with that.)
+where $P_i$ is the political party of individual $i$, $P_i \in \{R, L, G\}$ and *ref* is the reference party - we'll set that to be $D$ in this case. $A_i$ is a treatment/exposure indicator, and is 1 if exposed, 0 otherwise. (Say there is a particular ad campaign that we are assessing.)
+$\boldsymbol{X_i}$ is a matrix of covariates. 
 
-We can see the complexity of the model immediately by noticing that the parameters are specific to the level of $y$. $\alpha_y$ is intercept for the log odds of $y$ vs. reference (so $\alpha_y$ represents the log odds for the unexposed with covariates at the average, assuming all covariates have been centered). $\gamma_y$ is the log odds ratio comparing the odds of $y$ vs. $D$ for the exposed and unexposed. $\boldsymbol{\beta_y}$ is a vector of parameters that reflect the association of the covariates with the party choice.
+The complexity of the model starts to emerge as we consider the parameters, which are all specific to the level of $y$. $\alpha_y$ is the intercept for the log odds of $y$ vs. the reference category (so $\alpha_y$ represents the log odds for the unexposed with average covariate values, assuming all covariates have been centered at zero). $\gamma_y$ is the log odds ratio comparing the odds of $y$ vs. $D$ for the exposed and unexposed. $\boldsymbol{\beta_y}$ is a vector of parameters that reflect the association of the covariates with the party choice.
 
-If we have $K$ possible categories (in this example $K = 4$), there are $K-1$ sets of parameters. That is challenging enough. But each of those parameters is in relation to the reference category, so if you want to compare the odds across two non-reference categories, things get a little more difficult.
-
-My goal here is to generate a data set to illustrate how difficult it might be to interpret the parameter estimates from a multinomial model. And then I have a relatively simple solution that allows us to easily convert from the odds scale to the probability scale so we can literally see the effect of the exposure on the outcome.
+If we have $K$ possible categories (in this example $K = 4$), there are $K-1$ sets of parameters. That is challenging enough. But each of those parameters is in relation to the reference category, so if you want to compare the odds across two non-reference categories, it can be a little challenging.
 
 ### Simulating the data
 
@@ -60,9 +62,9 @@ library(MatchIt)
 
 #### Definitions
 
-In this simulation, I am generating a categorical outcome that has four levels. There is a single exposure ($A$) and two covariates ($x_1$ and $x_2$). Six years worth of data are being generated, The probability of *exposure* ($A$) depends on both covariates and time. The outcome is associated with the covariates, and the effect of the intervention *changes* over time, complicating matters.
+In this simulation, I am generating a categorical outcome that has four levels. There is a single exposure ($A$) and two covariates ($x_1$ and $x_2$). Six time periods worth of data are being generated, The probability of *exposure* ($A$) depends on both covariates and time. The outcome is associated with the covariates, and the effect of the intervention *changes* over time, complicating matters.
 
-First, I define the effects of time on both exposure and the outcome. Then I generate covariates $x_1$ and $x_2$, exposure $A$, and outcome $Y$.
+First, I define the effects of time on both exposure and the outcome (*defT*). Then I define covariates $x_1$ and $x_2$, exposure $A$, and outcome $Y$ (*defY*).
 
 ```{r}
 trunc_norm <- function(mean, sd, lower, upper) {
@@ -81,7 +83,7 @@ defY <- defDataAdd(defY, varname = "x2", formula = 0.5, dist = "binary")
 defY <- defDataAdd(defY, varname = "A", formula = "-1 + a_j - .5*x1 + .6*x2", 
   dist = "binary", link = "logit")
 defY <- defDataAdd(defY, varname = "y", 
-  formula = "b_j - 1.3 + 0.1*A - 0.3*x1 - 0.5*x2 + .55*A*year;
+  formula = "b_j - 1.3 + 0.1*A - 0.3*x1 - 0.5*x2 + .55*A*period;
              b_j - 0.6 + 1.4*A + 0.2*x1 - 0.5*x2;
              -0.3 - 0.3*A - 0.3*x1 - 0.5*x2 ", 
   dist = "categorical", link = "logit")
@@ -89,34 +91,34 @@ defY <- defDataAdd(defY, varname = "y",
 
 #### Data generation
 
-In the data generation step, we assume six years and 200 individuals in each year:
+In the data generation step, we assume six periods and 200 individuals in each period:
 
 ```{r}
 
 set.seed(999)
 
-dd <- genData(6, defT, id = "year")
-dd <- genCluster(dd, "year", 200, level1ID = "id")
+dd <- genData(6, defT, id = "period")
+dd <- genCluster(dd, "period", 200, level1ID = "id")
 
 dd <- addColumns(defY, dd)
 dd <- genFactor(dd, "y")
 
 dd[, fy := relevel(fy, ref = "4")]
-dd[, year := factor(year)]
+dd[, period := factor(period)]
 ```
 
-Here is what the dataset looks like:
+Here are a few rows of the data set:
 
 ```{r, echo=FALSE}
-dd[, .(year, id, A, x1, x2, fy)]
+dd[, .(period, id, A, x1, x2, fy)]
 ```
 
-Here are a couple of figures that allow us to visualize the relationship of the exposure $A$ with the covariates and time:
+Here are a two figures that allow us to visualize the relationship of the exposure $A$ with the covariates and time:
 
-```{r, echo=FALSE, fig.width = 6, fig.height = 2.5}
-dsum <- dd[, .(p_rx = mean(A)), keyby = .(year, x2)]
+```{r exp_plots, echo=FALSE, fig.width = 6, fig.height = 2.5}
+dsum <- dd[, .(p_rx = mean(A)), keyby = .(period, x2)]
 
-ggplot(data = dsum, aes(x = year, y = p_rx)) +
+ggplot(data = dsum, aes(x = period, y = p_rx)) +
   geom_line(aes(group = x2, color = factor(x2))) +
   geom_point(aes(color = factor(x2)), size = .6) +
   theme(panel.grid = element_blank())  +
@@ -140,15 +142,15 @@ ggplot(data = dsum, aes(x = fx1, y = p_rx)) +
   ylab("P(A = 1)")
 ```
 
-Typically, I would like to plot the raw outcome data to get an initial sense of the how the outcome relates to the covariates of interest, but with a categorical measure that has four levels, it is so obvious how to present the data in an insightful way. At the very least, we can show the distributions of the outcome over time and exposure:
+Typically, I would like to plot the raw outcome data to get an initial sense of the how the outcome relates to the covariates of interest, but with a categorical measure that has four levels, it is not so obvious how to present the data in an insightful way. At the very least, we can show the distributions of the outcome over time and exposure, without taking into account the covariates (so there might be some confounding inherent in the plots):
 
-```{r, echo=FALSE, fig.width = 9, fig.height = 2.5}
-dsum <- dd[, .N, keyby = .(fy, A, year)]
-dsum[, p := N/sum(N), keyby = .(year, A)]
+```{r out_plot, echo=FALSE, fig.width = 9, fig.height = 2.5}
+dsum <- dd[, .N, keyby = .(fy, A, period)]
+dsum[, p := N/sum(N), keyby = .(period, A)]
 dsum[, response := factor(fy, levels = c(1, 2, 3, 4))]
 dsum[, A := factor(A, labels = c("not exposed", "exposed"))]
 
-ggplot(data = dsum, aes(x = year,  group = A)) +
+ggplot(data = dsum, aes(x = period,  group = A)) +
   geom_line(aes(y = p, color = A), size = 0.6) +
   facet_grid(. ~ response, labeller = label_both) +
   theme(panel.grid = element_blank(),
@@ -159,15 +161,15 @@ ggplot(data = dsum, aes(x = year,  group = A)) +
 
 ### "Traditional" analysis
 
-Since we suspect that there might be confounding due to covariates $x_1$ and $x_2$, and there appears to be different effects of exposure over time, it would not be unreasonble to estimate a multinomial model that adjusts for both covariates and includes an interaction term for exposure and year.
+If we do suspect there might be confounding due to covariates $x_1$ and $x_2$, and we see that there appears to be different effects of exposure over time, it would not be unreasonable to estimate a multinomial model that adjusts for both covariates and includes an interaction term for exposure and period.
 
 ```{r}
-fit <- multinom(fy ~ x1 + x2 + A*year, data = dd, trace = FALSE)
+fit <- multinom(fy ~ x1 + x2 + A*period, data = dd, trace = FALSE)
 ```
 
 #### Interpreting the results
 
-The parameter estimates for a multinomial model are shown in the table below. In this case, the fourth response category is the reference, so the table shows the odds ratios for each response relative to the reference (the intercepts or $\alpha_j$'s are not shown in the table). Each section of the table (labeled "1", "2", and "3") represent the estimated parameters for each response level. While some may be able to get a lot out of this table, I find it a little overwhelming, particularly when it comes to understanding (a) the impact of time on the exposure effect, and (b) how responses other than the reference category compare to each other. 
+The parameter estimates for a multinomial model are shown in the table below. In this case, the fourth response category is the reference, so the table shows the odds ratios for each response relative to the reference (the intercepts $\alpha_y$'s are not shown in the table). Each section of the table (labeled "1", "2", and "3") represent the estimated parameters for each response level. While some readers may be able to get a lot out of this table, I find it a little overwhelming, particularly when it comes to understanding (a) the impact of time on the exposure effect, and (b) how responses other than the reference category compare to each other.
 
 ```{r, echo=FALSE, results='asis', warning=FALSE, message=FALSE}
 
@@ -199,13 +201,15 @@ gtsummary::tbl_regression(fit, exponentiate = TRUE) %>% multinom_pivot_wider()
 
 #### Probability scale
 
-What I really want is to be able to see the estimates on the probability scale. This is always challenging because we can only get predicted probabilities at *specific* levels of the covariates (i.e. the model is *conditional*), and it is not clear what levels of the covariates we should use for this purpose. While we could just use the average value of each covariate to generate an average probability for each exposure group and each time period, there is something arbitrary to doing this. A maybe somewhat more palatable approach is get estimates of the *marginal* probabilities. A while ago, I [presented an approach](https://www.rdatagen.net/post/2021-06-15-estimating-a-risk-difference-using-logistic-regression/){target="_blank"} in the context of logistic regression (which is just a special case of multinomial regression, where the categorical outcome has only two levels) that estimated a probability for each individual under each treatment arm, and then calculated an average risk difference by averaging across all the patients. This could presumably work here, but I decided to try another approach that eliminates the covariates from the analysis by using propensity score matching.
+What I really want is to be able to see the estimates on the probability scale. This is always challenging because we can only get predicted probabilities at *specific* levels of the covariates (i.e. the model is *conditional*), and it is not clear what levels of the covariates we should use for this purpose. While we could just use the average value of each covariate to generate an average probability for each exposure group and each time period, there is something arbitrary to doing this. 
+
+Perhaps, a somewhat more palatable approach is get estimates of the *marginal* probabilities. A while ago, I [presented an approach](https://www.rdatagen.net/post/2021-06-15-estimating-a-risk-difference-using-logistic-regression/){target="_blank"} in the context of logistic regression (which is just a special case of multinomial regression, where the categorical outcome has only two levels) that estimated a predicted probability for each individual under each treatment arm, and then calculated an average risk difference by averaging across all the patients. This could presumably work here, but I decided to try another approach that eliminates the covariates from the analysis by using propensity score matching.
 
 ### Propensity score matching
 
-I've described propensity score matching in an earlier [post](https://www.rdatagen.net/post/different-models-estimate-different-causal-effects-part-ii/){target="_blank"} (and provided at least one good reference), so I won't go into much detail here. The general idea is that we can estimate a probability of exposure (i.e., the propensity score), and then match individuals based on those scores. If done well, this creates two comparable groups that are balanced with respect to the confounders (assuming all the confounders have been measured and are included in the exposure model for the propensity score). And then, we can estimate the multinomial model without any covariates - and convert to probabilities without conditioning on any covariates.
+I've described propensity score matching in an earlier [post](https://www.rdatagen.net/post/different-models-estimate-different-causal-effects-part-ii/){target="_blank"} (and provided at least one good reference there), so I won't go into much detail here. The general idea is that we can estimate a probability of exposure (i.e., the propensity score), and then match individuals in the two exposure groups based on those scores. If done well, this creates two comparable groups that are balanced with respect to the confounders (assuming all the confounders have been measured and are included in the exposure model for the propensity score). Once the matching is done, we can estimate the multinomial model without any covariates - and convert to predicted probabilities without relaying on any assumptions about the covariates.
 
-In the first step, I matched within each year. This way, the groups were balanced at each time point, and I could estimate marginal probabilities for each year.
+In the first step, I am matching individuals within each time period This way, the groups will be balanced at each time point, and I could estimate marginal probabilities for each period.
 
 ```{r}
 matchby <- function(dx) {
@@ -216,49 +220,49 @@ matchby <- function(dx) {
   
   }
 
-m.out <- rbindlist(lapply(1:6, function(x) matchby(dd[year==x])))
+m.out <- rbindlist(lapply(1:6, function(x) matchby(dd[period==x])))
 ```
 
 #### Analysis of matched data
 
-In the second step, I fit a multinomial model that includes only exposure and time, and then generate predicted probability for each exposure and year combination.
+In the second step, I fit a multinomial model that includes only exposure and time, and then generate predicted probability for each exposure and period combination.
 
 ```{r}
-mfit <- multinom(fy ~ A*year, data = m.out, trace = FALSE)
+mfit <- multinom(fy ~ A*period, data = m.out, trace = FALSE)
 
-dnew <- data.table(expand.grid(A = c(0,1), year = factor(c(1:6))))
+dnew <- data.table(expand.grid(A = c(0,1), period = factor(c(1:6))))
 dpred <- data.table(predict(mfit, newdata = dnew, "probs"))
 
 dpred <- cbind(dnew, dpred)
-dplot <- melt(data = dpred, id.vars = c("A", "year"), 
+dplot <- melt(data = dpred, id.vars = c("A", "period"), 
               value.name = "proportion", variable.name = "response")
 dplot[, response := factor(response, levels = c(1, 2, 3, 4))]
 dplot[, A := factor(A, labels = c("not exposed", "exposed"))]
 ```
 
-Here are the predicted probabilities for Year 2:
+Here are the predicted probabilities for second time period:
 
 ```{r, echo = FALSE}
 setkey(dplot, "response")
-dplot[year == 2]
+dplot[period == 2]
 ```
 
 #### Bootstrap estimates of confidence bands
 
-To go along with our point estimates, we need a measure of uncertainty, which we will estimate by bootstrap. For this analysis, I am bootstrapping the whole process, starting by sampling with replacement within each year and each exposure group, doing the matching, fitting the model, and generating the predictions.
+To go along with our point estimates, we need a measure of uncertainty, which we will estimate by bootstrap. For this analysis, I am bootstrapping the whole process, starting by sampling with replacement within each period and each exposure group, doing the matching, fitting the model, and generating the predictions.
 
 ```{r}
 bs <- function(x) {
   
-  ids <- dd[, .(id = sample(id, .N, replace = T)), keyby = .(year, A)][, id]
+  ids <- dd[, .(id = sample(id, .N, replace = T)), keyby = .(period, A)][, id]
   db <- dd[ids]
   db[, id := .I]
   
-  mb.out <- rbindlist(lapply(1:6, function(x) matchby(db[year==x])))
+  mb.out <- rbindlist(lapply(1:6, function(x) matchby(db[period==x])))
   
-  mfit <- multinom(fy ~ A*year, data = mb.out, trace = FALSE)
+  mfit <- multinom(fy ~ A*period, data = mb.out, trace = FALSE)
   
-  dbnew <- data.table(expand.grid(A = c(0,1), year = factor(c(1:6))))
+  dbnew <- data.table(expand.grid(A = c(0,1), period = factor(c(1:6))))
   dbpred <- data.table(predict(mfit, newdata = dbnew, "probs"))
   
   cbind(iter = x, dnew, dbpred)
@@ -270,20 +274,20 @@ bspred <- rbindlist(lapply(1:500, function(x) bs(x)))
 
 #### Plot point estimates and confidence bands
 
-Before creating the figure, I've extracted 95% confidence intervals for each response level and year from the bootstrap data.
+What follows is the code to generate the figure showing the predicted probabilities for each arm. But before creating the plot, I've extracted 95% confidence intervals for each response level and period from the bootstrap data that will be used to draw the confidence bands.
 
-```{r, fig.height=2.5, fig.width = 9}
-bsplot <- melt(data = bspred, id.vars = c("iter", "A", "year"), 
+```{r final_plot, fig.height=2.5, fig.width = 9}
+bsplot <- melt(data = bspred, id.vars = c("iter", "A", "period"), 
   value.name = "proportion", variable.name = "response")
 bsplot[, response := factor(response, levels = c(1, 2, 3, 4))]
 bsplot[, A := factor(A, labels = c("not exposed", "exposed"))]
 
 ci <- bsplot[, 
   .(l95 = quantile(proportion, 0.025), u95 = quantile(proportion, 0.975)), 
-  keyby = .(response, A, year)
+  keyby = .(response, A, period)
 ]
 
-ggplot(data = dplot, aes(x = year,  group = A)) +
+ggplot(data = dplot, aes(x = period,  group = A)) +
   geom_ribbon(data = ci, 
               aes(ymin = l95, ymax = u95, fill = A),
               alpha = .2)  +
@@ -295,6 +299,4 @@ ggplot(data = dplot, aes(x = year,  group = A)) +
   scale_fill_manual(values = c("#806cc6", "#b2c66c"))
 ```
 
-The point estimates mirror the marginal raw data plots quite closely, which is hardly surprising since we treated time as a categorical variable and the model is saturated. The benefit of doing the modeling is that we have generated estimates of uncertainty, and are in a position to draw some inferences. For example, it looks like the exposure has an increasing effect on the probability of a level "1" response in the last three years. Likewise, the effect of the exposure on the probability of a level "2" response was strongest in the first two years, and then disappears. There is too much uncertainty to say anything definitive about level "3" and "4" responses.
-
-
+The point estimates mirror the marginal raw data plots quite closely, which is hardly surprising since we treated time as a categorical variable and the model is saturated. The benefit of doing the modeling is that we have generated estimates of uncertainty, and are in a position to make some inferences. For example, it looks like the exposure has an increasing effect on the probability of a level "1" response in the last three periods. Likewise, the effect of the exposure on the probability of a level "2" response was strongest in the first two periods, and then disappears. And there is too much uncertainty to say anything definitive about level "3" and "4" responses.
