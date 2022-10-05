@@ -1,0 +1,166 @@
+---
+title: Modeling the secular trend in a cluster randomized trial using a GAM
+author: Package Build
+date: '2022-10-11'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: 'true'
+---
+
+
+
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(data.table)
+library(mgcv)
+library(lme4)
+library(splines)
+library(gamm4)</code></pre>
+<p><span class="math display">\[
+Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
+\]</span></p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;b0&quot;, formula = 0, variance = 6)
+def &lt;- defData(def, varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+def &lt;- defData(def, varname = &quot;mu&quot;, formula = 0, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, varname = &quot;s2&quot;, formula = 16, dist = &quot;nonrandom&quot;)
+
+defOut &lt;- defDataAdd(varname = &quot;y&quot;, 
+  formula = &quot;100 + b0 + b1k - 0.1 * k^2 + 5*A&quot;, 
+  variance = 36)</code></pre>
+<pre class="r"><code>set.seed(123)
+
+dd &lt;- genData(48, def, id = &quot;site&quot;)
+dd &lt;- addPeriods(dd, 20, &quot;site&quot;, perName = &quot;k&quot;)
+
+dd &lt;- addCorGen(dtOld = dd, idvar = &quot;site&quot;, nvars = 20, 
+  rho = .7, corstr = &quot;ar1&quot;,
+  dist = &quot;normal&quot;, param1 = &quot;mu&quot;, param2 = &quot;s2&quot;, cnames = &quot;b1k&quot;)
+
+dd &lt;- genCluster(dd, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defOut, dd)</code></pre>
+<pre class="r"><code>dp &lt;- dd[, .(avg = mean(y)), keyby = .(A, site, k)]
+
+ggplot(data = dp, aes(x = k, y = avg)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  ylab(&quot;average Y&quot;) +
+  xlab(&quot;period (k)&quot;) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+<div id="linear-model-with-cubic-spline" class="section level3">
+<h3>Linear model with cubic spline</h3>
+<p><span class="math display">\[
+Y_{ijl} = \beta_0 + s(k) + \delta A
+\]</span></p>
+<pre class="r"><code>lmfit &lt;- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)</code></pre>
+</div>
+<div id="put-3-plots-together" class="section level3">
+<h3>Put 3 plots together</h3>
+<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y &lt;- predict(lmfit, ddpred)
+
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
+<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
+ggplot(data = ddx, aes(x = k, y = y)) +
+  geom_jitter(aes(x = k, y = y), data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
+              size = .01, color = &quot;grey75&quot;) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  ylab(&quot;average Y&quot;) +
+  xlab(&quot;period (k)&quot;) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+  facet_wrap(~site, ncol = 4) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="768" /></p>
+</div>
+<div id="mixed-effects-model-with-cubic-spline" class="section level3">
+<h3>Mixed effects model with cubic spline</h3>
+<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
+
+lmefit &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)</code></pre>
+<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y &lt;- predict(lmefit, ddpred)
+
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
+<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
+ggplot(data = ddx, aes(x = k, y = y)) +
+  geom_jitter(aes(x = k, y = y), 
+              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
+              size = .01, color = &quot;grey75&quot;) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  ylab(&quot;average Y&quot;) +
+  xlab(&quot;period (k)&quot;) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+  facet_wrap(~site, ncol = 4) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="768" /></p>
+</div>
+<div id="generalized-additive-model" class="section level3">
+<h3>Generalized additive model</h3>
+<pre class="r"><code>dd$site &lt;- as.factor(dd$site)
+
+gamfit &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)</code></pre>
+<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y &lt;- predict(gamfit$gam, ddpred)
+
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
+ggplot(data = ddx, aes(x = k, y = y)) +
+  geom_jitter(aes(x = k, y = y), 
+              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
+              size = .01, color = &quot;grey75&quot;) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
+  ylab(&quot;average Y&quot;) +
+  xlab(&quot;period (k)&quot;) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+  facet_wrap(~site, ncol = 4) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="768" /></p>
+<pre class="r"><code>coef(summary(lmfit))[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+<pre><code>##   Estimate Std. Error 
+##     6.2340     0.0881</code></pre>
+<pre class="r"><code>summary(lmefit)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+<pre><code>##   Estimate Std. Error 
+##      6.612      0.802</code></pre>
+<pre class="r"><code>cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]</code></pre>
+<pre><code>## [1] 6.209 0.865</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="768" /></p>
+</div>
