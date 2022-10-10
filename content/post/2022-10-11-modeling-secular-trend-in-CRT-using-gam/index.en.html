@@ -15,13 +15,23 @@ draft: 'true'
 
 
 
+<p>A key challenge - maybe <em>the</em> key challenge - of a <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/" target="_blank">stepped wedge clinical trial design</a> is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.</p>
+<p>I am not going to talk more about stepped wedge designs here (there is a huge and growing literature describing the issues, starting with <a href="https://academic.oup.com/ije/article/49/3/1043/5835358" target="_blank">this paper</a> would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.</p>
+<p>As I typically do here, I am simulating data and exploring a few modeling options.</p>
+<div id="simulating-the-data" class="section level3">
+<h3>Simulating the data</h3>
 <pre class="r"><code>library(simstudy)
 library(ggplot2)
+library(cowplot)
 library(data.table)
 library(mgcv)
 library(lme4)
 library(splines)
 library(gamm4)</code></pre>
+</div>
+<div id="data-generating-process" class="section level3">
+<h3>Data generating process</h3>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure1-1.png" width="672" /></p>
 <p><span class="math display">\[
 Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
 \]</span></p>
@@ -44,123 +54,59 @@ dd &lt;- addCorGen(dtOld = dd, idvar = &quot;site&quot;, nvars = 20,
 
 dd &lt;- genCluster(dd, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
 dd &lt;- addColumns(defOut, dd)</code></pre>
-<pre class="r"><code>dp &lt;- dd[, .(avg = mean(y)), keyby = .(A, site, k)]
-
-ggplot(data = dp, aes(x = k, y = avg)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  ylab(&quot;average Y&quot;) +
-  xlab(&quot;period (k)&quot;) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
+</div>
+<div id="time-without-structure" class="section level3">
+<h3>Time without structure</h3>
+<p>In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period <span class="math inline">\(k\)</span>, as in this model for an outcome <span class="math inline">\(Y_{ijk}\)</span> for individivual <span class="math inline">\(i\)</span> in group <span class="math inline">\(j\)</span>:</p>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_k
+\]</span></p>
+<p>where <span class="math inline">\(A_j\)</span> is an indicator for treatment <span class="math inline">\(j\)</span>, and is set to 1 if cluster <span class="math inline">\(j\)</span> has been randomized to the intervention. <span class="math inline">\(\beta_0\)</span> and <span class="math inline">\(b_0\)</span> are the intercept and random intercept, respectively. <span class="math inline">\(\delta\)</span> is the effect size parameter. <span class="math inline">\(\gamma_k\)</span> is the time-specific effect for period <span class="math inline">\(k\)</span>. This is a totally reasonable approach to take, but if <span class="math inline">\(k\)</span> starts to get quite large, this means we need to need estimate large number of parameters, which is not always desirable.</p>
+</div>
+<div id="time-with-over-simplified-structure" class="section level3">
+<h3>Time with over-simplified structure</h3>
+<p>An alternative approach is to model time in a linear fashion as</p>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma k
+\]</span>
+where we have a single parameter <span class="math inline">\(\gamma\)</span> instead of <span class="math inline">\(k\)</span> parameters. This gets around the problem of a large number paramters, but it imposes a very strong assumption that the outcome <span class="math inline">\(Y\)</span> changes linerally over time. This is unlikely to be the case. We could fit a quadratic model like</p>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_0 k + \gamma_1 k^2
+\]</span>
+but the assumption is still quite strong. So, I am looking for something a little more flexible.</p>
+</div>
 <div id="linear-model-with-cubic-spline" class="section level3">
 <h3>Linear model with cubic spline</h3>
 <p><span class="math display">\[
-Y_{ijl} = \beta_0 + s(k) + \delta A
+Y_{ijk} = \beta_0 + s(k) + \delta A_j
 \]</span></p>
-<pre class="r"><code>lmfit &lt;- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)</code></pre>
-</div>
-<div id="put-3-plots-together" class="section level3">
-<h3>Put 3 plots together</h3>
-<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y &lt;- predict(lmfit, ddpred)
-
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="672" /></p>
-<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = &quot;grey75&quot;) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  ylab(&quot;average Y&quot;) +
-  xlab(&quot;period (k)&quot;) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="768" /></p>
-</div>
-<div id="mixed-effects-model-with-cubic-spline" class="section level3">
-<h3>Mixed effects model with cubic spline</h3>
-<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
-
-lmefit &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)</code></pre>
-<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
-ddpred$y &lt;- predict(lmefit, ddpred)
-
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="672" /></p>
-<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), 
-              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = &quot;grey75&quot;) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  ylab(&quot;average Y&quot;) +
-  xlab(&quot;period (k)&quot;) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="768" /></p>
-</div>
-<div id="generalized-additive-model" class="section level3">
-<h3>Generalized additive model</h3>
-<pre class="r"><code>dd$site &lt;- as.factor(dd$site)
-
-gamfit &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)</code></pre>
-<pre class="r"><code>ddpred &lt;- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y &lt;- predict(gamfit$gam, ddpred)
-
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
-<pre class="r"><code>ddx &lt;- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), 
-              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = &quot;grey75&quot;) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c(&quot;#a53e3e&quot;, &quot;#3ea5a5&quot;),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c(&quot;no treatment&quot;, &quot;treatment&quot;)) +
-  ylab(&quot;average Y&quot;) +
-  xlab(&quot;period (k)&quot;) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) </code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="768" /></p>
-<pre class="r"><code>coef(summary(lmfit))[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+<pre class="r"><code>lmfit &lt;- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)
+coef(summary(lmfit))[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
 ##     6.2340     0.0881</code></pre>
-<pre class="r"><code>summary(lmefit)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+</div>
+<div id="mixed-effects-model-with-site-specific-cubic-spline" class="section level3">
+<h3>Mixed effects model with site-specific cubic spline</h3>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + cs_j(k) + \delta A_j
+\]</span></p>
+<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
+
+lmefit &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+summary(lmefit)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
 ##      6.612      0.802</code></pre>
-<pre class="r"><code>cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]</code></pre>
+</div>
+<div id="generalized-additive-model-with-site-specific-smoothing" class="section level3">
+<h3>Generalized additive model with site-specific smoothing</h3>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + f_j(k) + \delta A_j
+\]</span></p>
+<pre class="r"><code>dd$site &lt;- as.factor(dd$site)
+
+gamfit &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)
+cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]</code></pre>
 <pre><code>## [1] 6.209 0.865</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="768" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure2-1.png" width="864" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure3-1.png" width="768" /></p>
 </div>

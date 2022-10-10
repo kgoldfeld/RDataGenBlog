@@ -17,9 +17,20 @@ draft: 'true'
 options(digits = 3)
 ```
 
+A key challenge - maybe *the* key challenge - of a [stepped wedge clinical trial design](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.
+
+I am not going to talk more about stepped wedge designs here (there is a huge and growing literature describing the issues, starting with [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.
+
+As I typically do here, I am simulating data and exploring a few modeling options.
+
+### Simulating the data
+
+
+
 ```{r, message=FALSE}
 library(simstudy)
 library(ggplot2)
+library(cowplot)
 library(data.table)
 library(mgcv)
 library(lme4)
@@ -27,11 +38,9 @@ library(splines)
 library(gamm4)
 ```
 
-$$
-Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
-$$
+### Data generating process
 
-```{r}
+```{r figure1, fig.width = 7, fig.height=3, echo = FALSE}
 def <- defData(varname = "b0", formula = 0, variance = 6)
 def <- defData(def, varname = "A", formula = "1;1", dist = "trtAssign")
 def <- defData(def, varname = "mu", formula = 0, dist = "nonrandom")
@@ -40,9 +49,8 @@ def <- defData(def, varname = "s2", formula = 16, dist = "nonrandom")
 defOut <- defDataAdd(varname = "y", 
   formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
   variance = 36)
-```
 
-```{r}
+
 set.seed(123)
 
 dd <- genData(48, def, id = "site")
@@ -54,9 +62,7 @@ dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20,
 
 dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
 dd <- addColumns(defOut, dd)
-```
 
-```{r, fig.width = 7, fig.height=3}
 dp <- dd[, .(avg = mean(y)), keyby = .(A, site, k)]
 
 ggplot(data = dp, aes(x = k, y = avg)) +
@@ -70,130 +76,160 @@ ggplot(data = dp, aes(x = k, y = avg)) +
         legend.title = element_blank()) 
 ```
 
+$$
+Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
+$$
+
+```{r, eval = FALSE}
+def <- defData(varname = "b0", formula = 0, variance = 6)
+def <- defData(def, varname = "A", formula = "1;1", dist = "trtAssign")
+def <- defData(def, varname = "mu", formula = 0, dist = "nonrandom")
+def <- defData(def, varname = "s2", formula = 16, dist = "nonrandom")
+
+defOut <- defDataAdd(varname = "y", 
+  formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
+  variance = 36)
+```
+
+```{r, eval=FALSE}
+set.seed(123)
+
+dd <- genData(48, def, id = "site")
+dd <- addPeriods(dd, 20, "site", perName = "k")
+
+dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
+  rho = .7, corstr = "ar1",
+  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
+
+dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
+dd <- addColumns(defOut, dd)
+```
+
+
+### Time without structure
+
+In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period $k$, as in this model for an outcome $Y_{ijk}$ for individivual $i$ in group $j$:
+
+$$
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_k
+$$
+
+where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_0$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, this means we need to need estimate large number of parameters, which is not always desirable. 
+
+### Time with over-simplified structure
+
+An alternative approach is to model time in a linear fashion as
+
+$$
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma k
+$$
+where we have a single parameter $\gamma$ instead of $k$ parameters. This gets around the problem of a large number paramters, but it imposes a very strong assumption that the outcome $Y$ changes linerally over time. This is unlikely to be the case. We could fit a quadratic model like
+
+$$
+Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_0 k + \gamma_1 k^2
+$$
+but the assumption is still quite strong. So, I am looking for something a little more flexible.
+
 ### Linear model with cubic spline
 
 $$
-Y_{ijl} = \beta_0 + s(k) + \delta A
+Y_{ijk} = \beta_0 + s(k) + \delta A_j
 $$
 
 ```{r}
 lmfit <- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)
+coef(summary(lmfit))["A", c("Estimate", "Std. Error")]
 ```
 
-### Put 3 plots together
 
-```{r, fig.width = 7, fig.height=3}
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y <- predict(lmfit, ddpred)
+### Mixed effects model with site-specific cubic spline
 
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c("no treatment", "treatment")) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) 
-```
+$$
+Y_{ijk} = \beta_0 + cs_j(k) + \delta A_j
+$$
 
-```{r, fig.width = 8, fig.height = 3}
-ddx <- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = "grey75") +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c("no treatment", "treatment")) +
-  ylab("average Y") +
-  xlab("period (k)") +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) 
-```
-
-### Mixed effects model with cubic spline
 
 ```{r, eval=TRUE}
 dd[, normk := (k - min(k))/(max(k) - min(k))]
 
 lmefit <- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+summary(lmefit)$coefficients["A", c("Estimate", "Std. Error")]
 ```
 
-```{r, fig.width = 7, fig.height=3}
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
-ddpred$y <- predict(lmefit, ddpred)
+### Generalized additive model with site-specific smoothing
 
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c("no treatment", "treatment")) +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) 
-```
-
-```{r, fig.width = 8, fig.height = 3}
-ddx <- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), 
-              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = "grey75") +
-  geom_line(aes(group = site, color = factor(A))) +
-  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
-                     guide = guide_legend(reverse = TRUE),
-                     labels = c("no treatment", "treatment")) +
-  ylab("average Y") +
-  xlab("period (k)") +
-  theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) 
-```
-
-### Generalized additive model
+$$
+Y_{ijk} = \beta_0 + f_j(k) + \delta A_j
+$$
 
 ```{r}
 dd$site <- as.factor(dd$site)
 
 gamfit <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
+cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]
 ```
 
-```{r, fig.width = 7, fig.height=3}
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y <- predict(gamfit$gam, ddpred)
 
-ggplot(data = ddpred, aes(x = k, y = y)) +
+```{r figure2, fig.width = 9, fig.height=2.5, echo=FALSE}
+
+# lm fit plot
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y <- predict(lmfit, ddpred)
+
+lmplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
   geom_line(aes(group = site, color = factor(A))) +
   scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
                      guide = guide_legend(reverse = TRUE),
                      labels = c("no treatment", "treatment")) +
   theme(panel.grid = element_blank(),
         legend.title = element_blank()) 
-```
 
-```{r, fig.width = 8, fig.height = 3}
-ddx <- ddpred[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)]
-ggplot(data = ddx, aes(x = k, y = y)) +
-  geom_jitter(aes(x = k, y = y), 
-              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
-              size = .01, color = "grey75") +
+### mixed effects with cubic spline
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y <- predict(lmefit, ddpred)
+
+lmeplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
   geom_line(aes(group = site, color = factor(A))) +
   scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
                      guide = guide_legend(reverse = TRUE),
                      labels = c("no treatment", "treatment")) +
-  ylab("average Y") +
-  xlab("period (k)") +
   theme(panel.grid = element_blank(),
-        legend.title = element_blank()) +
-  facet_wrap(~site, ncol = 4) 
+        legend.title = element_blank())
+
+### gamfit plot
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y <- predict(gamfit$gam, ddpred)
+
+gamplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) 
+
+# combine all 3
+
+prow <- plot_grid(lmplot + theme(legend.position = "none"),
+                  lmeplot + theme(legend.position = "none"),
+                  gamplot + theme(legend.position = "none"),
+  labels = c('lm', 'lme', 'gam'), nrow = 1, label_size = 10)
+
+legend <- get_legend(
+  # create some space to the left of the legend
+  lmplot + theme(legend.box.margin = margin(0, 0, 0, 12))
+)
+
+plot_grid(prow, legend, rel_widths = c(3, .5))
+
 ```
 
-```{r}
-coef(summary(lmfit))["A", c("Estimate", "Std. Error")]
-summary(lmefit)$coefficients["A", c("Estimate", "Std. Error")]
-cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]
-```
 
-```{r, fig.width = 8, fig.height=4, echo=FALSE}
+
+```{r figure3, fig.width = 8, fig.height=4, echo=FALSE}
 ddpred.lm <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
 ddpred.lm$y <- predict(lmfit, ddpred.lm)
 ddpred.lm$mod <- "lm"
@@ -215,10 +251,10 @@ ddx <- ddpred[site %in% x_sites]
 
 ggplot(data = ddx, aes(x = k, y = y)) +
   geom_jitter(aes(x = k, y = y), 
-              data = dd[site %in% c(3, 6, 8, 22, 1, 41, 28, 35)], 
+              data = dd[site %in% x_sites], 
               size = .01, color = "grey70") +
   geom_line(aes(group = mod, color = mod)) +
-  scale_color_manual(values = c("#a53e3e", "#3e72a5",  "#3ea572")) +
+  scale_color_manual(values = c("#72a53e", "#3e3ea5",  "#a5723e")) +
   ylab("average Y") +
   xlab("period (k)") +
   theme(panel.grid = element_blank(),
