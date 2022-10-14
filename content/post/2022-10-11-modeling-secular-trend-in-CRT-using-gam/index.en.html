@@ -16,10 +16,11 @@ draft: 'true'
 
 
 <p>A key challenge - maybe <em>the</em> key challenge - of a <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/" target="_blank">stepped wedge clinical trial design</a> is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.</p>
-<p>I am not going to talk more about stepped wedge designs here (there is a huge and growing literature describing the issues, starting with <a href="https://academic.oup.com/ije/article/49/3/1043/5835358" target="_blank">this paper</a> would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.</p>
+<p>I am not going to talk more about stepped wedge designs here (if you want more background <a href="https://academic.oup.com/ije/article/49/3/1043/5835358" target="_blank">this paper</a> would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.</p>
 <p>As I typically do here, I am simulating data and exploring a few modeling options.</p>
 <div id="simulating-the-data" class="section level3">
 <h3>Simulating the data</h3>
+<p>Before we start, here are the libraries I’ve used to generate and present the data:</p>
 <pre class="r"><code>library(simstudy)
 library(ggplot2)
 library(cowplot)
@@ -31,10 +32,24 @@ library(gamm4)</code></pre>
 </div>
 <div id="data-generating-process" class="section level3">
 <h3>Data generating process</h3>
+<p>I am generating data for 48 clusters over 20 periods. For each cluster and period, there are 30 individuals. Here is what the cluster averages at each time point <span class="math inline">\(k\)</span> look like:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure1-1.png" width="672" /></p>
+<p>The data generation process that underlies this plot is:</p>
 <p><span class="math display">\[
-Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
+Y_{ijk} \sim N(\mu =100 + b^0_{j} + b^1_{jk} - 0.1k^2 + 5A_j, \sigma^2 = 36)
 \]</span></p>
+<p><span class="math inline">\(Y_{ijk}\)</span> is the outcome measurement for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> at period <span class="math inline">\(k\)</span>. In this case, <span class="math inline">\(k \in \{0, \dots, 19\}\)</span>. There is an increasing decline in <span class="math inline">\(Y\)</span> over time (based on the quadratic term <span class="math inline">\(k^2\)</span>). <span class="math inline">\(A_j\)</span> is a treatment indicator for cluster <span class="math inline">\(j\)</span>, and <span class="math inline">\(A \in \{0 ,1\}\)</span>.</p>
+<p><span class="math inline">\(b_{0j}\)</span> is a cluster-level random intercept, <span class="math inline">\(b^0_{j} \sim N(\mu = 0, \sigma^2 = 6)\)</span>. <span class="math inline">\(b^1_{jk}\)</span> is a cluster-specific time period effect for each time period <span class="math inline">\(k\)</span>; the vector of cluster-time effects <span class="math inline">\(\mathbf{b^1_j} \sim N(0, \Sigma)\)</span>, where <span class="math inline">\(\Sigma = DRD\)</span> is a <span class="math inline">\(20 \times 20\)</span> covariance matrix based on an auto-regressive correlation structure <span class="math inline">\(R\)</span> and a diagonal matrix <span class="math inline">\(D\)</span>:</p>
+<p><span class="math display">\[ D = 16 * I_{20 \times 20}\]</span>
+and</p>
+<p><span class="math display">\[ R =\begin{bmatrix}
+1 &amp; \rho &amp; \rho^2 &amp; \dots &amp; \rho^{19} \\
+\rho &amp; 1 &amp; \rho &amp; \dots &amp; \rho^{18} \\
+\rho^2 &amp; \rho &amp; 1 &amp; \dots &amp; \rho^{17} \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+\rho^{19} &amp; \rho^{18} &amp; \rho^{17} &amp; \dots &amp; 1 \\
+\end{bmatrix}, \ \ \rho = 0.7 \]</span></p>
+<p>The <code>simstudy</code> definitions prepare for <span class="math inline">\(b^0\)</span>, <span class="math inline">\(A\)</span>, <span class="math inline">\(D\)</span>, and <span class="math inline">\(Y\)</span>. The vector <span class="math inline">\(\mathbf{b^1}\)</span> is generated separately in the actual data generation process. Here are the definitions:</p>
 <pre class="r"><code>def &lt;- defData(varname = &quot;b0&quot;, formula = 0, variance = 6)
 def &lt;- defData(def, varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
 def &lt;- defData(def, varname = &quot;mu&quot;, formula = 0, dist = &quot;nonrandom&quot;)
@@ -43,6 +58,7 @@ def &lt;- defData(def, varname = &quot;s2&quot;, formula = 16, dist = &quot;nonr
 defOut &lt;- defDataAdd(varname = &quot;y&quot;, 
   formula = &quot;100 + b0 + b1k - 0.1 * k^2 + 5*A&quot;, 
   variance = 36)</code></pre>
+<p>And here is the data generation process. <code>addCorGen</code> adds the correlated cluster-time effects:</p>
 <pre class="r"><code>set.seed(123)
 
 dd &lt;- genData(48, def, id = &quot;site&quot;)
@@ -55,58 +71,64 @@ dd &lt;- addCorGen(dtOld = dd, idvar = &quot;site&quot;, nvars = 20,
 dd &lt;- genCluster(dd, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
 dd &lt;- addColumns(defOut, dd)</code></pre>
 </div>
-<div id="time-without-structure" class="section level3">
-<h3>Time without structure</h3>
-<p>In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period <span class="math inline">\(k\)</span>, as in this model for an outcome <span class="math inline">\(Y_{ijk}\)</span> for individivual <span class="math inline">\(i\)</span> in group <span class="math inline">\(j\)</span>:</p>
+<div id="some-modeling-options" class="section level3">
+<h3>Some modeling options</h3>
+<p>If we are interested in accounting for the secular (or time) trend when estimating the treatment effect, we have a number of different options. We can assume there is no structure to the pattern of time, we can impose an extreme form of structure, or we can try to find a middle ground.</p>
+<div id="time-without-structure" class="section level4">
+<h4>Time without structure</h4>
+<p>In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period <span class="math inline">\(k\)</span>, as in this model for an outcome <span class="math inline">\(Y_{ijk}\)</span> for individual <span class="math inline">\(i\)</span> in group <span class="math inline">\(j\)</span>:</p>
 <p><span class="math display">\[
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_k
+Y_{ijk} = \beta_0 + \gamma_k + \delta A_j + b_j +e_{ijk}
 \]</span></p>
-<p>where <span class="math inline">\(A_j\)</span> is an indicator for treatment <span class="math inline">\(j\)</span>, and is set to 1 if cluster <span class="math inline">\(j\)</span> has been randomized to the intervention. <span class="math inline">\(\beta_0\)</span> and <span class="math inline">\(b_0\)</span> are the intercept and random intercept, respectively. <span class="math inline">\(\delta\)</span> is the effect size parameter. <span class="math inline">\(\gamma_k\)</span> is the time-specific effect for period <span class="math inline">\(k\)</span>. This is a totally reasonable approach to take, but if <span class="math inline">\(k\)</span> starts to get quite large, this means we need to need estimate large number of parameters, which is not always desirable.</p>
+<p>where <span class="math inline">\(A_j\)</span> is an indicator for treatment <span class="math inline">\(j\)</span>, and is set to 1 if cluster <span class="math inline">\(j\)</span> has been randomized to the intervention. <span class="math inline">\(\beta_0\)</span> and <span class="math inline">\(b_0\)</span> are the intercept and random intercept, respectively. <span class="math inline">\(\delta\)</span> is the effect size parameter. <span class="math inline">\(\gamma_k\)</span> is the time-specific effect for period <span class="math inline">\(k\)</span>. This is a totally reasonable approach to take, but if <span class="math inline">\(k\)</span> starts to get quite large, we would need to need estimate large number of parameters, which is not always desirable.</p>
 </div>
-<div id="time-with-over-simplified-structure" class="section level3">
-<h3>Time with over-simplified structure</h3>
+<div id="time-with-over-simplified-structure" class="section level4">
+<h4>Time with over-simplified structure</h4>
 <p>An alternative approach is to model time in a linear fashion as</p>
 <p><span class="math display">\[
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma k
-\]</span>
-where we have a single parameter <span class="math inline">\(\gamma\)</span> instead of <span class="math inline">\(k\)</span> parameters. This gets around the problem of a large number paramters, but it imposes a very strong assumption that the outcome <span class="math inline">\(Y\)</span> changes linerally over time. This is unlikely to be the case. We could fit a quadratic model like</p>
-<p><span class="math display">\[
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_0 k + \gamma_1 k^2
-\]</span>
-but the assumption is still quite strong. So, I am looking for something a little more flexible.</p>
-</div>
-<div id="linear-model-with-cubic-spline" class="section level3">
-<h3>Linear model with cubic spline</h3>
-<p><span class="math display">\[
-Y_{ijk} = \beta_0 + s(k) + \delta A_j
+Y_{ijk} = \beta_0 + \gamma k + \delta A_j  + b_j + e_{ijk}
 \]</span></p>
-<pre class="r"><code>lmfit &lt;- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)
-coef(summary(lmfit))[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
-<pre><code>##   Estimate Std. Error 
-##     6.2340     0.0881</code></pre>
-</div>
-<div id="mixed-effects-model-with-site-specific-cubic-spline" class="section level3">
-<h3>Mixed effects model with site-specific cubic spline</h3>
+<p>where we have a single parameter <span class="math inline">\(\gamma\)</span> instead of <span class="math inline">\(k\)</span> parameters. This gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome <span class="math inline">\(Y\)</span> changes linearly over time. This is unlikely to be the case. We could fit a quadratic model like</p>
 <p><span class="math display">\[
-Y_{ijk} = \beta_0 + cs_j(k) + \delta A_j
+Y_{ijk} = \beta_0  + \gamma_0 k + \gamma_1 k^2 + \delta A_j + b_j  + e_{ijk}
+\]</span></p>
+<p>but the assumption is still quite strong. So, I am looking for something a little more flexible.</p>
+</div>
+<div id="mixed-effects-model-with-fixed-cubic-spline-and-random-intercept" class="section level4">
+<h4>Mixed effects model with fixed cubic spline and random intercept</h4>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + cs(k) + \delta A_j + b_j  + e_{ijk}
 \]</span></p>
 <pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
 
-lmefit &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)
-summary(lmefit)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+fix_cs &lt;- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
+summary(fix_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+<pre><code>##   Estimate Std. Error 
+##      6.234      0.852</code></pre>
+</div>
+<div id="mixed-effects-model-with-random-cubic-spline" class="section level4">
+<h4>Mixed effects model with random cubic spline</h4>
+<p><span class="math display">\[
+Y_{ijk} = \beta_0 + \delta A_j + cs_j(k) + e_{ijk}
+\]</span></p>
+<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
+
+ran_cs &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+summary(ran_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
 ##      6.612      0.802</code></pre>
 </div>
-<div id="generalized-additive-model-with-site-specific-smoothing" class="section level3">
-<h3>Generalized additive model with site-specific smoothing</h3>
+<div id="generalized-additive-model-with-site-specific-smoothing" class="section level4">
+<h4>Generalized additive model with site-specific smoothing</h4>
 <p><span class="math display">\[
-Y_{ijk} = \beta_0 + f_j(k) + \delta A_j
+Y_{ijk} = \beta_0 + \delta A_j + f_j(k) +e_{ijk}
 \]</span></p>
 <pre class="r"><code>dd$site &lt;- as.factor(dd$site)
 
-gamfit &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)
-cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]</code></pre>
+gam &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)
+cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]</code></pre>
 <pre><code>## [1] 6.209 0.865</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure2-1.png" width="864" /></p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure3-1.png" width="768" /></p>
+</div>
 </div>

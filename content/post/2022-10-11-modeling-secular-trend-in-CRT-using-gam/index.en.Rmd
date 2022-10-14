@@ -19,13 +19,13 @@ options(digits = 3)
 
 A key challenge - maybe *the* key challenge - of a [stepped wedge clinical trial design](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.
 
-I am not going to talk more about stepped wedge designs here (there is a huge and growing literature describing the issues, starting with [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.
+I am not going to talk more about stepped wedge designs here (if you want more background [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect.
 
 As I typically do here, I am simulating data and exploring a few modeling options.
 
 ### Simulating the data
 
-
+Before we start, here are the libraries I've used to generate and present the data:
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -40,6 +40,8 @@ library(gamm4)
 
 ### Data generating process
 
+I am generating data for 48 clusters over 20 periods. For each cluster and period, there are 30 individuals. Here is what the cluster averages at each time point $k$ look like: 
+
 ```{r figure1, fig.width = 7, fig.height=3, echo = FALSE}
 def <- defData(varname = "b0", formula = 0, variance = 6)
 def <- defData(def, varname = "A", formula = "1;1", dist = "trtAssign")
@@ -49,7 +51,6 @@ def <- defData(def, varname = "s2", formula = 16, dist = "nonrandom")
 defOut <- defDataAdd(varname = "y", 
   formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
   variance = 36)
-
 
 set.seed(123)
 
@@ -76,9 +77,28 @@ ggplot(data = dp, aes(x = k, y = avg)) +
         legend.title = element_blank()) 
 ```
 
+The data generation process that underlies this plot is:
+
 $$
-Y_{ijk} = 100 + b_{0j} + b_{1jk} - 0.1k^2 + 5A_j
+Y_{ijk} \sim N(\mu =100 + b^0_{j} + b^1_{jk} - 0.1k^2 + 5A_j, \sigma^2 = 36)
 $$
+
+$Y_{ijk}$ is the outcome measurement for individual $i$ in cluster $j$ at period $k$. In this case, $k \in \{0, \dots, 19\}$. There is an increasing decline in $Y$ over time (based on the quadratic term $k^2$). $A_j$ is a treatment indicator for cluster $j$, and $A \in \{0 ,1\}$. 
+
+$b_{0j}$ is a cluster-level random intercept, $b^0_{j} \sim N(\mu = 0, \sigma^2 = 6)$. $b^1_{jk}$ is a cluster-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b^1_j} \sim N(0, \Sigma)$, where $\Sigma = DRD$ is a $20 \times 20$ covariance matrix based on an auto-regressive correlation structure $R$ and a diagonal matrix $D$:
+
+$$ D = 16 * I_{20 \times 20}$$
+and 
+
+$$ R =\begin{bmatrix}
+1 & \rho & \rho^2 & \dots & \rho^{19} \\
+\rho & 1 & \rho & \dots & \rho^{18} \\
+\rho^2 & \rho & 1 & \dots & \rho^{17} \\
+\vdots & \vdots & \vdots & \vdots & \vdots \\
+\rho^{19} & \rho^{18} & \rho^{17} & \dots & 1 \\
+\end{bmatrix}, \ \ \rho = 0.7 $$
+
+The `simstudy` definitions prepare for $b^0$, $A$, $D$, and $Y$. The vector $\mathbf{b^1}$ is generated separately in the actual data generation process. Here are the definitions:
 
 ```{r, eval = FALSE}
 def <- defData(varname = "b0", formula = 0, variance = 6)
@@ -90,6 +110,8 @@ defOut <- defDataAdd(varname = "y",
   formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
   variance = 36)
 ```
+
+And here is the data generation process. `addCorGen` adds the correlated cluster-time effects:
 
 ```{r, eval=FALSE}
 set.seed(123)
@@ -105,92 +127,100 @@ dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
 dd <- addColumns(defOut, dd)
 ```
 
+### Some modeling options
 
-### Time without structure
+If we are interested in accounting for the secular (or time) trend when estimating the treatment effect, we have a number of different options. We can assume there is no structure to the pattern of time, we can impose an extreme form of structure, or we can try to find a middle ground.
 
-In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period $k$, as in this model for an outcome $Y_{ijk}$ for individivual $i$ in group $j$:
+#### Time without structure
+
+In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period $k$, as in this model for an outcome $Y_{ijk}$ for individual $i$ in group $j$:
 
 $$
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_k
+Y_{ijk} = \beta_0 + \gamma_k + \delta A_j + b_j +e_{ijk}
 $$
 
-where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_0$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, this means we need to need estimate large number of parameters, which is not always desirable. 
+where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_0$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, we would need to need estimate large number of parameters, which is not always desirable. 
 
-### Time with over-simplified structure
+#### Time with over-simplified structure
 
 An alternative approach is to model time in a linear fashion as
 
 $$
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma k
+Y_{ijk} = \beta_0 + \gamma k + \delta A_j  + b_j + e_{ijk}
 $$
-where we have a single parameter $\gamma$ instead of $k$ parameters. This gets around the problem of a large number paramters, but it imposes a very strong assumption that the outcome $Y$ changes linerally over time. This is unlikely to be the case. We could fit a quadratic model like
+
+where we have a single parameter $\gamma$ instead of $k$ parameters. This gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome $Y$ changes linearly over time. This is unlikely to be the case. We could fit a quadratic model like
 
 $$
-Y_{ijk} = \beta_0 + b_j + \delta A_j + \gamma_0 k + \gamma_1 k^2
+Y_{ijk} = \beta_0  + \gamma_0 k + \gamma_1 k^2 + \delta A_j + b_j  + e_{ijk}
 $$
+
 but the assumption is still quite strong. So, I am looking for something a little more flexible.
 
-### Linear model with cubic spline
+#### Mixed effects model with fixed cubic spline and random intercept
 
 $$
-Y_{ijk} = \beta_0 + s(k) + \delta A_j
-$$
-
-```{r}
-lmfit <- lm(y ~ A + bs(x = k, degree = 3, intercept = TRUE) - 1, data = dd)
-coef(summary(lmfit))["A", c("Estimate", "Std. Error")]
-```
-
-
-### Mixed effects model with site-specific cubic spline
-
-$$
-Y_{ijk} = \beta_0 + cs_j(k) + \delta A_j
+Y_{ijk} = \beta_0 + cs(k) + \delta A_j + b_j  + e_{ijk}
 $$
 
 
 ```{r, eval=TRUE}
 dd[, normk := (k - min(k))/(max(k) - min(k))]
 
-lmefit <- lmer(y ~ A + ( bs(normk) | site) , data = dd)
-summary(lmefit)$coefficients["A", c("Estimate", "Std. Error")]
+fix_cs <- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
+summary(fix_cs)$coefficients["A", c("Estimate", "Std. Error")]
 ```
 
-### Generalized additive model with site-specific smoothing
+
+#### Mixed effects model with random cubic spline
 
 $$
-Y_{ijk} = \beta_0 + f_j(k) + \delta A_j
+Y_{ijk} = \beta_0 + \delta A_j + cs_j(k) + e_{ijk}
+$$
+
+
+```{r, eval=TRUE}
+dd[, normk := (k - min(k))/(max(k) - min(k))]
+
+ran_cs <- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+summary(ran_cs)$coefficients["A", c("Estimate", "Std. Error")]
+```
+
+#### Generalized additive model with site-specific smoothing
+
+$$
+Y_{ijk} = \beta_0 + \delta A_j + f_j(k) +e_{ijk}
 $$
 
 ```{r}
 dd$site <- as.factor(dd$site)
 
-gamfit <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
-cbind(summary(gamfit$gam)$p.coeff, summary(gamfit$gam)$se)[2,]
+gam <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
+cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]
 ```
 
 
 ```{r figure2, fig.width = 9, fig.height=2.5, echo=FALSE}
 
-# lm fit plot
+### random intercept with cubic spline
 
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y <- predict(lmfit, ddpred)
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y <- predict(fix_cs, ddpred)
 
-lmplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+fcsplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
   geom_line(aes(group = site, color = factor(A))) +
   scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
                      guide = guide_legend(reverse = TRUE),
                      labels = c("no treatment", "treatment")) +
   theme(panel.grid = element_blank(),
-        legend.title = element_blank()) 
+        legend.title = element_blank())
 
-### mixed effects with cubic spline
+### random cubic spline
 
 ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
-ddpred$y <- predict(lmefit, ddpred)
+ddpred$y <- predict(ran_cs, ddpred)
 
-lmeplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+rcsplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
   geom_line(aes(group = site, color = factor(A))) +
   scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
                      guide = guide_legend(reverse = TRUE),
@@ -201,7 +231,7 @@ lmeplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
 ### gamfit plot
 
 ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y <- predict(gamfit$gam, ddpred)
+ddpred$y <- predict(gam$gam, ddpred)
 
 gamplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
   geom_line(aes(group = site, color = factor(A))) +
@@ -213,14 +243,15 @@ gamplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
 
 # combine all 3
 
-prow <- plot_grid(lmplot + theme(legend.position = "none"),
-                  lmeplot + theme(legend.position = "none"),
+prow <- plot_grid(fcsplot + theme(legend.position = "none"),
+                  rcsplot + theme(legend.position = "none"),
                   gamplot + theme(legend.position = "none"),
-  labels = c('lm', 'lme', 'gam'), nrow = 1, label_size = 10)
+                  
+  labels = c('fixed cs', 'random cs' ,'gam'), nrow = 1, label_size = 10)
 
 legend <- get_legend(
   # create some space to the left of the legend
-  lmplot + theme(legend.box.margin = margin(0, 0, 0, 12))
+  fcsplot + theme(legend.box.margin = margin(0, 0, 0, 12))
 )
 
 plot_grid(prow, legend, rel_widths = c(3, .5))
@@ -228,23 +259,22 @@ plot_grid(prow, legend, rel_widths = c(3, .5))
 ```
 
 
-
 ```{r figure3, fig.width = 8, fig.height=4, echo=FALSE}
-ddpred.lm <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred.lm$y <- predict(lmfit, ddpred.lm)
-ddpred.lm$mod <- "lm"
+ddpred.fcs <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred.fcs$y <- predict(fix_cs, ddpred.fcs)
+ddpred.fcs$mod <- "fixed cs"
 
-ddpred.lme <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
-ddpred.lme$y <- predict(lmefit, ddpred.lme)
-ddpred.lme$mod <- "lme"
+ddpred.rcs <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred.rcs$y <- predict(ran_cs, ddpred.rcs)
+ddpred.rcs$mod <- "random cs"
 
 ddpred.gam <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred.gam$y <- predict(gamfit$gam, ddpred.gam)
+ddpred.gam$y <- predict(gam$gam, ddpred.gam)
 ddpred.gam$mod <- "gam"
 
-ddpred <- rbind(ddpred.lm, ddpred.lme, ddpred.gam, fill = TRUE)
+ddpred <- rbind(ddpred.fcs, ddpred.rcs, ddpred.gam, fill = TRUE)
 
-ddpred$mod <- factor(ddpred$mod, levels = c("lm",  "lme", "gam"))
+ddpred$mod <- factor(ddpred$mod, levels = c("fixed cs","random cs", "gam"))
 
 x_sites <- c(3, 6, 8, 22, 1, 41, 28, 35)
 ddx <- ddpred[site %in% x_sites]
@@ -254,7 +284,7 @@ ggplot(data = ddx, aes(x = k, y = y)) +
               data = dd[site %in% x_sites], 
               size = .01, color = "grey70") +
   geom_line(aes(group = mod, color = mod)) +
-  scale_color_manual(values = c("#72a53e", "#3e3ea5",  "#a5723e")) +
+  scale_color_manual(values = c("#72a53e", "#3e3ea5",  "#a5723e", "black")) +
   ylab("average Y") +
   xlab("period (k)") +
   theme(panel.grid = element_blank(),
