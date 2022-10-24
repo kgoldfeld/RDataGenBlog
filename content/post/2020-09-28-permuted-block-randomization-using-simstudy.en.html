@@ -11,7 +11,6 @@ subtitle: ''
 image: ''
 ---
 
-<script src="/rmarkdown-libs/header-attrs/header-attrs.js"></script>
 
 
 <p>Along with preparing power analyses and statistical analysis plans (SAPs), generating study randomization lists is something a practicing biostatistician is occasionally asked to do. While not a particularly interesting activity, it offers the opportunity to tackle a small programming challenge. The title is a little misleading because you should probably skip all this and just use the <code>blockrand</code> package if you want to generate randomization schemes; don’t try to reinvent the wheel. But, I can’t resist. Since I was recently asked to generate such a list, I’ve been wondering how hard it would be to accomplish this using <code>simstudy</code>. There are already built-in functions for simulating stratified randomization schemes, so maybe it could be a good solution. The key element that is missing from simstudy, of course, is the permuted block setup.</p>
@@ -196,11 +195,42 @@ microbenchmark(
  rbindlist(lapply(strata, function(s) sBlkRandom(s, 50, c(&quot;A&quot;, &quot;B&quot;), c(2, 4)))),
  rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c(&quot;A&quot;, &quot;B&quot;), c(2, 4))))
 )</code></pre>
+<pre><code>## Warning in microbenchmark(rbindlist(lapply(strata, function(s) sBlkRandom(s, :
+## less accurate nanosecond times to avoid potential integer overflows</code></pre>
 <pre><code>## Unit: milliseconds
 ##                                                                                   expr
 ##    rbindlist(lapply(strata, function(s) sBlkRandom(s, 50, c(&quot;A&quot;,      &quot;B&quot;), c(2, 4))))
 ##  rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c(&quot;A&quot;,      &quot;B&quot;), c(2, 4))))
 ##  min  lq mean median  uq max neval cld
-##  276 290  331    304 344 698   100   b
-##   38  40   48     44  49 120   100  a</code></pre>
+##  150 156  166    163 172 219   100   b
+##   17  18   20     19  21  34   100  a</code></pre>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>An earlier version of the post did not include the <code>blkRandom</code> function. Here it is:</p>
+<pre class="r"><code>blkRandom &lt;- function(n, levels, blk_sizes) {
+  
+  n_arms &lt;- length(levels)
+  p_blk &lt;- 1/length(blk_sizes)
+  
+  v &lt;- sapply(blk_sizes, function(x) paste(x, p_blk, sep = &quot;|&quot;))
+  mixformula &lt;- paste(v, collapse = &quot;+&quot;)
+  
+  def &lt;- defData(varname = &quot;blk_size&quot;, formula = mixformula, 
+                 dist = &quot;mixture&quot;, id = &quot;blk_id&quot;)
+  
+  maxblocks &lt;- ceiling(n / min(blk_sizes))
+  
+  dd &lt;- genData(maxblocks, def)
+  nblocks &lt;- dd[, threshold := (cumsum(blk_size) &gt;= n) * .I][threshold &gt; 0]
+  dd &lt;- dd[1:nblocks[1, threshold]]
+  
+  di &lt;- genCluster(dd, cLevelVar = &quot;blk_id&quot;, numIndsVar = &quot;blk_size&quot;, level1ID = &quot;id&quot;)
+  dtrt &lt;- trtAssign(di, nTrt = n_arms, strata = &quot;blk_id&quot;, grpName = &quot;arm&quot;)
+  
+  dtrt[, arm := factor(arm, labels = levels)]
+  
+  dtrt[]
+  
+}</code></pre>
 </div>

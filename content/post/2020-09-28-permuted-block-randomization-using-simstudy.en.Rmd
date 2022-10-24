@@ -205,3 +205,37 @@ microbenchmark(
  rbindlist(lapply(strata, function(s) rand_stratum(s, 50, c("A", "B"), c(2, 4))))
 )
 ```
+
+### Addendum
+
+An earlier version of the post did not include the `blkRandom` function. Here it is:
+
+```{r, eval=FALSE}
+blkRandom <- function(n, levels, blk_sizes) {
+  
+  n_arms <- length(levels)
+  p_blk <- 1/length(blk_sizes)
+  
+  v <- sapply(blk_sizes, function(x) paste(x, p_blk, sep = "|"))
+  mixformula <- paste(v, collapse = "+")
+  
+  def <- defData(varname = "blk_size", formula = mixformula, 
+                 dist = "mixture", id = "blk_id")
+  
+  maxblocks <- ceiling(n / min(blk_sizes))
+  
+  dd <- genData(maxblocks, def)
+  nblocks <- dd[, threshold := (cumsum(blk_size) >= n) * .I][threshold > 0]
+  dd <- dd[1:nblocks[1, threshold]]
+  
+  di <- genCluster(dd, cLevelVar = "blk_id", numIndsVar = "blk_size", level1ID = "id")
+  dtrt <- trtAssign(di, nTrt = n_arms, strata = "blk_id", grpName = "arm")
+  
+  dtrt[, arm := factor(arm, labels = levels)]
+  
+  dtrt[]
+  
+}
+
+
+```
