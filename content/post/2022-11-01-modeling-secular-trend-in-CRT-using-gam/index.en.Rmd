@@ -1,0 +1,438 @@
+---
+title: Modeling the secular trend in a cluster randomized trial using a GAM
+author: Package Build
+date: '2022-11-01'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: 'true'
+---
+
+```{r options, echo = FALSE}
+options(digits = 3)
+```
+
+A key challenge - maybe *the* key challenge - of a [stepped wedge clinical trial design](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.
+
+I am not going to talk more about stepped wedge designs here (if you want more background [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect. I will consider these modeling approaches more explicitly for stepped wedge designs in a future post.
+
+### Simulating the data
+
+I will frame this discussion around a simulated data set, which I will describe in a bit of detail. Before we start, here are the libraries I use to generate and present the data:
+
+```{r, message=FALSE}
+library(simstudy)
+library(ggplot2)
+library(cowplot)
+library(data.table)
+library(mgcv)
+library(lme4)
+library(splines)
+```
+
+### Data generating process
+
+I am generating data for 48 clusters over 20 periods. For each cluster and period, there are 30 individuals. Here is what the cluster averages at each time point $k$ look like: 
+
+```{r figure1, fig.width = 7, fig.height=3, echo = FALSE}
+def <- defData(varname = "b0", formula = 0, variance = 6)
+def <- defData(def, varname = "A", formula = "1;1", dist = "trtAssign")
+def <- defData(def, varname = "mu", formula = 0, dist = "nonrandom")
+def <- defData(def, varname = "s2", formula = 16, dist = "nonrandom")
+
+defOut <- defDataAdd(varname = "y", 
+  formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
+  variance = 9)
+
+set.seed(123)
+
+dd <- genData(48, def, id = "site")
+dd <- addPeriods(dd, 20, "site", perName = "k")
+
+dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
+  rho = .7, corstr = "ar1",
+  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
+
+dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
+dd <- addColumns(defOut, dd)
+
+dp <- dd[, .(avg = mean(y)), keyby = .(A, site, k)]
+
+ggplot(data = dp, aes(x = k, y = avg)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  ylab("average Y") +
+  xlab("period (k)") +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) 
+```
+
+The data generation process that underlies this plot is:
+
+$$
+Y_{ijk} \sim N(\mu =100 + b^0_{j} + b^1_{jk} - 0.1k^2 + 5A_j, \sigma^2 = 9)
+$$
+
+$Y_{ijk}$ is the outcome measurement for individual $i$ in cluster $j$ at period $k$. In this case, $k \in \{0, \dots, 19\}$. There is an increasing decline in $Y$ over time (based on the quadratic term $k^2$). $A_j$ is a treatment indicator for cluster $j$, and $A \in \{0 ,1\}$. 
+
+$b_{0j}$ is a cluster-level random intercept, $b^0_{j} \sim N(\mu = 0, \sigma^2 = 6)$. $b^1_{jk}$ is a cluster-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b^1_j} \sim N(0, \Sigma)$, where $\Sigma = DRD$ is a $20 \times 20$ covariance matrix based on an auto-regressive correlation structure $R$ and a diagonal matrix $D$:
+
+$$ D = 16 * I_{20 \times 20}$$
+and 
+
+$$ R =\begin{bmatrix}
+1 & \rho & \rho^2 & \dots & \rho^{19} \\
+\rho & 1 & \rho & \dots & \rho^{18} \\
+\rho^2 & \rho & 1 & \dots & \rho^{17} \\
+\vdots & \vdots & \vdots & \vdots & \vdots \\
+\rho^{19} & \rho^{18} & \rho^{17} & \dots & 1 \\
+\end{bmatrix}, \ \ \rho = 0.7 $$
+
+The `simstudy` definitions prepare for $b^0$, $A$, $D$, and $Y$. The vector $\mathbf{b^1}$ is generated separately in the actual data generation process using `addCorGen`, using $\mu = 0$ and $\sigma^2 = 16$. Here are the definitions:
+
+```{r, eval = FALSE}
+def <- defData(varname = "b0", formula = 0, variance = 6)
+def <- defData(def, varname = "A", formula = "1;1", dist = "trtAssign")
+def <- defData(def, varname = "mu", formula = 0, dist = "nonrandom")
+def <- defData(def, varname = "s2", formula = 16, dist = "nonrandom")
+
+defOut <- defDataAdd(varname = "y", 
+  formula = "100 + b0 + b1k - 0.1 * k^2 + 5*A", 
+  variance = 9)
+```
+
+And here is the data generation process. `addCorGen` adds the correlated cluster-time effects $\mathbf{b^1}$:
+
+```{r, eval=FALSE}
+set.seed(123)
+
+dd <- genData(48, def, id = "site")
+dd <- addPeriods(dd, 20, "site", perName = "k")
+
+dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
+  rho = .7, corstr = "ar1",
+  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
+
+dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
+dd <- addColumns(defOut, dd)
+```
+
+### Some modeling options
+
+If we are interested in accounting for the secular (or time) trend when estimating the treatment effect, we have a number of different options. We can assume there is no structure to the pattern of time, we can impose an extreme form of structure, or we can try to find a middle ground.
+
+#### Time without structure
+
+In stepped wedge designs - it is quite common to assume little if no structure in time trends. In the context of a CRT this could be set up by including a time-specific effect for each period $k$, as in this model for an outcome $Y_{ijk}$ for individual $i$ in group $j$:
+
+$$
+Y_{ijk} = \beta_0 + \gamma_k + \delta A_j + b_j +e_{ijk}
+$$
+
+where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_0$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, we would need to need estimate large number of parameters, which is not always desirable. 
+
+#### Time with over-simplified structure
+
+An alternative approach is to model time in a linear fashion as
+
+$$
+Y_{ijk} = \beta_0 + \gamma k + \delta A_j  + b_j + e_{ijk}
+$$
+
+where we have a single parameter $\gamma$ instead of $k$ parameters. Here is an estimate of the treatment effect $\delta$ using a mixed effects model assuming a common linear time trend:
+
+```{r, eval=TRUE}
+linear <- lmer(y ~ A + k + ( 1  | site) , data = dd)
+summary(linear)$coefficients["A", c("Estimate", "Std. Error")]
+```
+
+The linear model gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome $Y$ changes linearly over time. This is unlikely to be the case. We could fit a quadratic model like
+
+$$
+Y_{ijk} = \beta_0  + \gamma_0 k + \gamma_1 k^2 + \delta A_j + b_j  + e_{ijk}
+$$
+
+but the assumption is still quite strong. We could fit a mixed effects model with a random slope $b_{1j}$ as well:
+
+$$
+Y_{ijk} = \beta_0  + \gamma k + \delta A_j + b_{0j} + b_{1j} k  + e_{ijk}
+$$
+
+But, if the temporal trend is not linear, there is no reason to think this would be the best approach.
+
+#### Mixed effects model with *fixed* cubic spline and random intercept
+
+We can introduce some flexibility into the model by using a [cubic spline](https://datascienceplus.com/cubic-and-smoothing-splines-in-r/){target="_blank"}, which is constructed using a piece-wise cubic polynomial defined by specific points (knots) along the x-axis.
+
+$$
+Y_{ijk} = \beta_0 + cs(k) + \delta A_j + b_j  + e_{ijk}
+$$
+
+The cubic spline model is fit in `R` using the function `bs` in the `splines` package. In order to get more stable estimates, I've standardized the time measurement before using it in the model. In this case, the effect size estimate and standard error are the same as the linear model.
+
+```{r, eval=TRUE}
+dd[, normk := (k - min(k))/(max(k) - min(k))]
+
+fix_cs <- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
+summary(fix_cs)$coefficients["A", c("Estimate", "Std. Error")]
+```
+
+#### Mixed effects model with *random* cubic spline
+
+Since there is no reason to believe that each cluster shares the same time trend, as assumed in the first two models estimated here. So now we introduce additional flexibility by fitting random cubic spline for each cluster.
+
+$$
+Y_{ijk} = \beta_0 + \delta A_j + b_j + cs_j(k) + e_{ijk}
+$$
+
+The only difference between the fixed cubic spline model estimation is that the `bs` function appears in random effect portion of the model. The effect size estimate is slightly more biased than the previous estimates but has slightly less uncertainty.
+
+```{r, eval=TRUE}
+ran_cs <- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+summary(ran_cs)$coefficients["A", c("Estimate", "Std. Error")]
+```
+
+#### Generalized additive model with site-specific smoothing
+
+Another flexible modeling approach is the [generalized additive model](https://m-clark.github.io/generalized-additive-models/){target="_blank"}, which provides potentially even more flexibility than the spline models and can provide protections against over fitting. The underlying flexibility of the GAM is due to the wide range of basis functions that are available for the construction of the curve. I recommend taking a look the [link](https://m-clark.github.io/generalized-additive-models/){target="_blank"} for a nice introduction.
+
+In this case, the model includes cluster-specific curves $f_j(k)$: 
+
+$$
+Y_{ijk} = \beta_0 + \delta A_j + f_j(k) + e_{ijk}
+$$
+
+We estimate the model using the `gamm` function in the `mgcv` package. By setting the `bs` argument to "fs" in the smoothing function `s`, we will get estimated  cluster-specific curves. "fs" refers to a special smooth factor interaction basis, where the interaction in this case is between site and time $k$. 
+
+```{r}
+dd$site <- as.factor(dd$site)
+
+gam <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
+cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]
+```
+
+The figure below shows the predicted site-specific curves for each of the models estimated here. The rigidity of the linear and fixed cubic spline models is pretty clear here. And in this case, the two more flexible methods appear to generate quite similar predicted curves.
+
+```{r figure2, fig.width = 10, fig.height=6, echo=FALSE}
+### random intercept linear model
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y <- predict(linear, ddpred)
+
+linplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  scale_y_continuous(limits = c(50, 120)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank())
+
+
+### random intercept with cubic spline
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y <- predict(fix_cs, ddpred)
+
+fcsplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  scale_y_continuous(limits = c(50, 120)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank())
+
+### random cubic spline
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred$y <- predict(ran_cs, ddpred)
+
+rcsplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  scale_y_continuous(limits = c(50, 120)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank())
+
+### gamfit plot
+
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y <- predict(gam$gam, ddpred)
+
+gamplot <- ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_line(aes(group = site, color = factor(A))) +
+  scale_color_manual(values = c("#a53e3e", "#3ea5a5"),
+                     guide = guide_legend(reverse = TRUE),
+                     labels = c("no treatment", "treatment")) +
+  scale_y_continuous(limits = c(50, 120)) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) 
+
+# combine all 4
+
+prow <- plot_grid(
+  linplot + theme(legend.position = "none"),
+  fcsplot + theme(legend.position = "none"),
+  rcsplot + theme(legend.position = "none"),
+  gamplot + theme(legend.position = "none"),
+  labels = c('linear', 'fixed cubic spline', 
+             'random cubic spline' ,'gam'), 
+  nrow = 2, label_size = 9, 
+  label_x = c(.15, .05, .05, .15),
+  label_y = c(.25, .25, .25, .25))
+
+legend <- get_legend(
+  # create some space to the left of the legend
+  fcsplot + theme(legend.box.margin = margin(0, 0, 0, 12))
+)
+
+plot_grid(prow, legend, rel_widths = c(3, .5))
+
+```
+
+The next figure shows the individual-level outcomes and the predicted curves for a small number of sites. It is clear that the curves for the less flexible methods are biased. Also, the similarity of the flexible models is particularly evident here.
+
+```{r figure3, fig.width = 9, fig.height=6, echo=FALSE}
+ddpred.lin <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred.lin$y <- predict(linear, ddpred.lin)
+ddpred.lin$mod <- "linear"
+
+ddpred.fcs <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred.fcs$y <- predict(fix_cs, ddpred.fcs)
+ddpred.fcs$mod <- "fixed cubic spline"
+
+ddpred.rcs <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
+ddpred.rcs$y <- predict(ran_cs, ddpred.rcs)
+ddpred.rcs$mod <- "random cubic spline"
+
+ddpred.gam <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred.gam$y <- predict(gam$gam, ddpred.gam)
+ddpred.gam$mod <- "gam"
+
+ddpred <- rbind(ddpred.lin, ddpred.fcs, ddpred.rcs, ddpred.gam, fill = TRUE)
+
+ddpred$mod <- factor(ddpred$mod, levels = c("linear","fixed cubic spline","random cubic spline", "gam"))
+
+x_sites <- c(3, 6, 35, 41)
+ddx <- ddpred[site %in% x_sites]
+
+ggplot(data = ddx, aes(x = k, y = y)) +
+  geom_jitter(aes(x = k, y = y), 
+              data = dd[site %in% x_sites], 
+              size = .3, color = "grey70",
+              width = 1, height = 0) +
+  geom_line(aes(group = mod, color = mod), size = 0.8) +
+  scale_color_manual(
+    values = c("#a5713e","#72a53e", "#3e3ea5",  "#713ea5")) +
+  ylab("average Y") +
+  xlab("period (k)") +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
+  facet_wrap(~site, ncol = 2) 
+```
+
+### Evaluating bias and variance of treatment effect estimate
+
+The results from a single data set are interesting, but we really need to understand how well the models perform over a large number of data sets. How do the model estimates of the true treatment effect $\delta = 5$ compare when considering bias, variance, and 95% coverage?
+
+The replication process requires generating data (in function `s_generate`) and then fitting the models (in function `replicate`). The data generation uses the data definitions provided earlier in the post. In this case, we will use 1000 data sets.
+
+```{r, eval=FALSE}
+s_generate <- function() {
+  
+  dd <- genData(48, def, id = "site")
+  dd <- addPeriods(dd, 20, "site", perName = "k")
+  
+  dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
+                  rho = .7, corstr = "ar1",
+                  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
+  
+  dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
+  dd <- addColumns(defOut, dd)
+  
+  dd[, normk := (k - min(k))/(max(k) - min(k))]
+  dd[, site := as.factor(site)]
+  
+  dd[]
+}
+
+replicate <- function(){
+  
+  dd <- s_generate()
+  
+  linear <- lmer(y ~ A + k + ( 1  | site) , data = dd)
+  est.lin <- summary(linear)$coefficients["A", c("Estimate", "Std. Error")]
+  
+  fix_cs <- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
+  est.fcs <- summary(fix_cs)$coefficients["A", c("Estimate", "Std. Error")]
+  
+  ran_cs <- lmer(y ~ A + ( bs(normk) | site) , data = dd)
+  est.rcs <- summary(ran_cs)$coefficients["A", c("Estimate", "Std. Error")]
+  
+  gam <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
+  est.gam <- cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]
+  
+  dres <- data.table(t(est.lin), t(est.fcs), t(est.rcs), t(est.gam))
+  setnames(dres, 
+    c("d.lin", "se.lin","d.fcs","se.fcs","d.rcs","se.rcs", "d.gam", "se.gam")
+  )
+  
+  dres[]
+}
+
+res <- rbindlist(pblapply(1:1000, function(x) replicate()))
+```
+
+```{r, echo=FALSE}
+load("replication_code/res.rdata")
+```
+
+Each replication provides the point estimate of the treatment effect as well as the estimate of the standard error. Here is what the results look like:
+
+```{r}
+res
+```
+
+The average of the point estimates across all replications provides an estimate of the bias for each model. The four approaches are relatively unbiased, and this includes the less flexible approaches that didn't seem to do so well at prediction on the individual level. The random cubic spline seems to have slightly less bias:
+
+```{r}
+res[, .(lin = mean(d.lin), fcs = mean(d.fcs), rcs = mean(d.rcs), gam = mean(d.gam))] - 5
+```
+
+A comparison of the observed standard errors suggests that the random cubic spline model is slightly more variable than the other three modeling approaches, suggesting a bias-variance trade-off.
+
+```{r}
+res[, .(lin = sd(d.lin), fcs = sd(d.fcs), rcs = sd(d.rcs), gam = sd(d.gam))]
+```
+
+And while all four methods underestimate the uncertainty, on average, the random cubic spline model most severely underestimated the standard errors:
+
+```{r}
+res[, .(lin = mean(se.lin), fcs = mean(se.fcs), rcs = mean(se.rcs), gam = mean(se.gam))]
+```
+
+Consistent with the disparities in variance estimates, the random cubic splines did not perform as well with respect to the coverage rates of the 95% confidence intervals:
+
+```{r}
+coverage <- function(est, se) {
+  rmin <- est - 1.96 * se
+  rmax <- est + 1.96 * se
+  
+  mean(rmin < 5 & rmax > 5)
+}
+
+res[, .(lin = coverage(d.lin, se.lin), fcs = coverage(d.fcs, se.fcs),
+        rcs = coverage(d.rcs, se.rcs), gam = coverage(d.gam, se.gam))]
+```
+
+As I think about using the flexible random cubic spline and GAM models to evaulate a stepped wedge design, I am very curious to see how the bias-variance trade-off plays out and to see if the less flexible methods continue to perform as well as the GAM model, at least with respect to the parameter of interest. More to come.
+
