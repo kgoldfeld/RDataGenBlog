@@ -1,5 +1,5 @@
 ---
-title: Modeling the secular trend in a cluster randomized trial using a GAM
+title: Modeling the secular trend in a cluster randomized trial using very flexible models
 author: Package Build
 date: '2022-11-01'
 slug: []
@@ -17,13 +17,13 @@ draft: 'true'
 options(digits = 3)
 ```
 
-A key challenge - maybe *the* key challenge - of a [stepped wedge clinical trial design](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis.
+A key challenge - maybe *the* key challenge - of a [stepped wedge clinical trial design](https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/){target="_blank"} is the threat of confounding by time. This is a cross-over design where the unit of randomization is a group or cluster, where each cluster begins in the control state and transitions to the intervention. It is the transition point that is randomized. Since outcomes could be changing over time regardless of the intervention, it is important to model the time trends when conducting the efficacy analysis. The question is *how* we choose to model time, and I am going to suggest that we might want to use a very flexible model, such as a cubic spline or a generalized additive model (GAM).
 
-I am not going to talk more about stepped wedge designs here (if you want more background [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect. I will consider these modeling approaches more explicitly for stepped wedge designs in a future post.
+I am not going to talk more about stepped wedge designs here (if you want more background [this paper](https://academic.oup.com/ije/article/49/3/1043/5835358){target="_blank"} would be a fine place to start), but will briefly describe a flexible way to model time trends. And I am going to simplify a bit to assume that we are talking about a cluster randomized trial (CRT), where clusters are randomized to treatment or control only. Confounding by time is not really an issue here, since treatment and control are implemented in parallel across different clusters, but we still might want to model time to get more efficient estimates of the treatment effect. I will consider the flexible modeling approaches for stepped wedge designs in a future post.
 
-### Simulating the data
+### Simulating the data (the data generation process)
 
-I will frame this discussion around a simulated data set, which I will describe in a bit of detail. Before we start, here are the libraries I use to generate and present the data:
+As I typically do, I will frame this discussion around a simulated data set, which I will describe in some detail. Before we start, here are the libraries I use to generate and present the data:
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -35,9 +35,7 @@ library(lme4)
 library(splines)
 ```
 
-### Data generating process
-
-I am generating data for 48 clusters over 20 periods. For each cluster and period, there are 30 individuals. Here is what the cluster averages at each time point $k$ look like: 
+The simulated data will include 48 clusters over 20 time periods. 24 will be randomized to the control arm, 24 to the intervention. For each cluster and period, there are 30 individuals. The figure shows the cluster averages at each time point $k$ for one randomly generated data set: 
 
 ```{r figure1, fig.width = 7, fig.height=3, echo = FALSE}
 def <- defData(varname = "b0", formula = 0, variance = 6)
@@ -61,6 +59,9 @@ dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20,
 dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
 dd <- addColumns(defOut, dd)
 
+dd[, normk := (k - min(k))/(max(k) - min(k))]
+dd[, site := as.factor(site)]
+
 dp <- dd[, .(avg = mean(y)), keyby = .(A, site, k)]
 
 ggplot(data = dp, aes(x = k, y = avg)) +
@@ -80,9 +81,9 @@ $$
 Y_{ijk} \sim N(\mu =100 + b^0_{j} + b^1_{jk} - 0.1k^2 + 5A_j, \sigma^2 = 9)
 $$
 
-$Y_{ijk}$ is the outcome measurement for individual $i$ in cluster $j$ at period $k$. In this case, $k \in \{0, \dots, 19\}$. There is an increasing decline in $Y$ over time (based on the quadratic term $k^2$). $A_j$ is a treatment indicator for cluster $j$, and $A \in \{0 ,1\}$. 
+$Y_{ijk}$ is the outcome measurement for individual $i$ in cluster $j$ at period $k$. In this case, $k \in \{0, \dots, 19\}$. There is an increasing decline in $Y$ over time (based on the quadratic term $k^2$). $A_j$ is a treatment indicator for cluster $j$, and $A \in \{0 ,1\}$, and the treatment effect is $5$. 
 
-$b_{0j}$ is a cluster-level random intercept, $b^0_{j} \sim N(\mu = 0, \sigma^2 = 6)$. $b^1_{jk}$ is a cluster-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b^1_j} \sim N(0, \Sigma)$, where $\Sigma = DRD$ is a $20 \times 20$ covariance matrix based on an auto-regressive correlation structure $R$ and a diagonal matrix $D$:
+$b_{0j}$ is a cluster-level random intercept for cluster $j$, $b^0_{j} \sim N(\mu = 0, \sigma^2 = 6)$. $b^1_{jk}$ is a cluster-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b^1_j} \sim N(0, \Sigma)$, where $\Sigma = DRD$ is a $20 \times 20$ covariance matrix based on a diagonal matrix $D$ and an auto-regressive correlation structure $R$:
 
 $$ D = 16 * I_{20 \times 20}$$
 and 
@@ -95,7 +96,7 @@ $$ R =\begin{bmatrix}
 \rho^{19} & \rho^{18} & \rho^{17} & \dots & 1 \\
 \end{bmatrix}, \ \ \rho = 0.7 $$
 
-The `simstudy` definitions prepare for $b^0$, $A$, $D$, and $Y$. The vector $\mathbf{b^1}$ is generated separately in the actual data generation process using `addCorGen`, using $\mu = 0$ and $\sigma^2 = 16$. Here are the definitions:
+The `simstudy` definitions establish $b^0$, $A$, $D$, and $Y$. The vector $\mathbf{b^1}$ is created separately in the actual data generation process using `addCorGen`, using $\mu = 0$ and $\sigma^2 = 16$. Here are the initial definitions:
 
 ```{r, eval = FALSE}
 def <- defData(varname = "b0", formula = 0, variance = 6)
@@ -108,25 +109,34 @@ defOut <- defDataAdd(varname = "y",
   variance = 9)
 ```
 
-And here is the data generation process. `addCorGen` adds the correlated cluster-time effects $\mathbf{b^1}$:
+I've wrapped the data generation process inside a function so that I can use it in a replication study at the end of the post. The function adds a normalized version of time and ensures that the site variable is a factor, both adjustments needed for modeling.
 
 ```{r, eval=FALSE}
+s_generate <- function() {
+  
+  d <- genData(48, def, id = "site")
+  d <- addPeriods(d, 20, "site", perName = "k")
+  
+  d <- addCorGen(dtOld = d, idvar = "site", nvars = 20, 
+                 rho = .7, corstr = "ar1",
+                 dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
+  
+  d <- genCluster(d, "timeID", numIndsVar = 30, level1ID = "id")
+  d <- addColumns(defOut, d)
+  
+  d[, normk := (k - min(k))/(max(k) - min(k))]
+  d[, site := as.factor(site)]
+  
+  d[]
+}
+
 set.seed(123)
-
-dd <- genData(48, def, id = "site")
-dd <- addPeriods(dd, 20, "site", perName = "k")
-
-dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
-  rho = .7, corstr = "ar1",
-  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
-
-dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
-dd <- addColumns(defOut, dd)
+dd <- s_generate()
 ```
 
 ### Some modeling options
 
-If we are interested in accounting for the secular (or time) trend when estimating the treatment effect, we have a number of different options. We can assume there is no structure to the pattern of time, we can impose an extreme form of structure, or we can try to find a middle ground.
+If we are interested in accounting for the secular (or time) trend when estimating the treatment effect, we have a number of different options. We can assume there is no structure to the pattern of time, we can impose an extreme form of structure, or we can try to find a flexible middle ground.
 
 #### Time without structure
 
@@ -136,7 +146,7 @@ $$
 Y_{ijk} = \beta_0 + \gamma_k + \delta A_j + b_j +e_{ijk}
 $$
 
-where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_0$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, we would need to need estimate large number of parameters, which is not always desirable. 
+where $A_j$ is an indicator for treatment $j$, and is set to 1 if cluster $j$ has been randomized to the intervention. $\beta_0$ and $b_j$ are the intercept and random intercept, respectively. $\delta$ is the effect size parameter. $\gamma_k$ is the time-specific effect for period $k$. This is a totally reasonable approach to take, but if $k$ starts to get quite large, we would need to need estimate large number of parameters ($K$ period parameters, to be more precise), which is not always desirable, so we won't take this approach here. 
 
 #### Time with over-simplified structure
 
@@ -146,20 +156,20 @@ $$
 Y_{ijk} = \beta_0 + \gamma k + \delta A_j  + b_j + e_{ijk}
 $$
 
-where we have a single parameter $\gamma$ instead of $k$ parameters. Here is an estimate of the treatment effect $\delta$ using a mixed effects model assuming a common linear time trend:
+where we have a single parameter $\gamma$ instead of $K$ period parameters. Here is an estimate of the treatment effect $\delta$ using a mixed effects model assuming a common linear time trend:
 
 ```{r, eval=TRUE}
 linear <- lmer(y ~ A + k + ( 1  | site) , data = dd)
 summary(linear)$coefficients["A", c("Estimate", "Std. Error")]
 ```
 
-The linear model gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome $Y$ changes linearly over time. This is unlikely to be the case. We could fit a quadratic model like
+The linear model gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome $Y$ changes linearly over time (and in this case at the same rate for each cluster). This is unlikely to be the case. We could fit a quadratic model like
 
 $$
 Y_{ijk} = \beta_0  + \gamma_0 k + \gamma_1 k^2 + \delta A_j + b_j  + e_{ijk}
 $$
 
-but the assumption is still quite strong. We could fit a mixed effects model with a random slope $b_{1j}$ as well:
+but the assumption is still quite strong. We could also fit a mixed effects model with a random slope $b_{1j}$ as well:
 
 $$
 Y_{ijk} = \beta_0  + \gamma k + \delta A_j + b_{0j} + b_{1j} k  + e_{ijk}
@@ -178,15 +188,13 @@ $$
 The cubic spline model is fit in `R` using the function `bs` in the `splines` package. In order to get more stable estimates, I've standardized the time measurement before using it in the model. In this case, the effect size estimate and standard error are the same as the linear model.
 
 ```{r, eval=TRUE}
-dd[, normk := (k - min(k))/(max(k) - min(k))]
-
 fix_cs <- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
 summary(fix_cs)$coefficients["A", c("Estimate", "Std. Error")]
 ```
 
 #### Mixed effects model with *random* cubic spline
 
-Since there is no reason to believe that each cluster shares the same time trend, as assumed in the first two models estimated here. So now we introduce additional flexibility by fitting random cubic spline for each cluster.
+There is no reason to believe that each cluster shares the same time trend, as assumed in the first two models estimated here. So now we introduce additional flexibility by fitting random cubic spline for each cluster.
 
 $$
 Y_{ijk} = \beta_0 + \delta A_j + b_j + cs_j(k) + e_{ijk}
@@ -212,13 +220,11 @@ $$
 We estimate the model using the `gamm` function in the `mgcv` package. By setting the `bs` argument to "fs" in the smoothing function `s`, we will get estimated  cluster-specific curves. "fs" refers to a special smooth factor interaction basis, where the interaction in this case is between site and time $k$. 
 
 ```{r}
-dd$site <- as.factor(dd$site)
-
 gam <- gamm(y ~ A + s(k, site, bs = "fs", k = 5), data = dd, method="REML")
 cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]
 ```
 
-The figure below shows the predicted site-specific curves for each of the models estimated here. The rigidity of the linear and fixed cubic spline models is pretty clear here. And in this case, the two more flexible methods appear to generate quite similar predicted curves.
+The figure below shows the predicted site-specific curves for each of the estimated models. The rigidity of the linear and fixed cubic spline models is pretty clear. And in at least this particular case, the two flexible methods appear to generate quite similar predicted curves.
 
 ```{r figure2, fig.width = 10, fig.height=6, echo=FALSE}
 ### random intercept linear model
@@ -299,7 +305,7 @@ plot_grid(prow, legend, rel_widths = c(3, .5))
 
 ```
 
-The next figure shows the individual-level outcomes and the predicted curves for a small number of sites. It is clear that the curves for the less flexible methods are biased. Also, the similarity of the flexible models is particularly evident here.
+The next figure shows the individual-level outcomes and the predicted curves for a small number of sites. It is clear that the curves for the less flexible methods are biased. The similarity of the flexible models is particularly evident here.
 
 ```{r figure3, fig.width = 9, fig.height=6, echo=FALSE}
 ddpred.lin <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A, normk)]
@@ -342,29 +348,11 @@ ggplot(data = ddx, aes(x = k, y = y)) +
 
 ### Evaluating bias and variance of treatment effect estimate
 
-The results from a single data set are interesting, but we really need to understand how well the models perform over a large number of data sets. How do the model estimates of the true treatment effect $\delta = 5$ compare when considering bias, variance, and 95% coverage?
+The results from a single data set are interesting, but we really need to understand how well the models perform over a large number of data sets. How do the model estimates of the true treatment effect ($\delta = 5$) compare when considering bias, variance, and coverage of the 95% confidence interval?
 
-The replication process requires generating data (in function `s_generate`) and then fitting the models (in function `replicate`). The data generation uses the data definitions provided earlier in the post. In this case, we will use 1000 data sets.
+The replication process requires generating data and then fitting the models. The data generation uses the data definitions and data generating function provided earlier in the post. In this case, we will use 1000 data sets.
 
 ```{r, eval=FALSE}
-s_generate <- function() {
-  
-  dd <- genData(48, def, id = "site")
-  dd <- addPeriods(dd, 20, "site", perName = "k")
-  
-  dd <- addCorGen(dtOld = dd, idvar = "site", nvars = 20, 
-                  rho = .7, corstr = "ar1",
-                  dist = "normal", param1 = "mu", param2 = "s2", cnames = "b1k")
-  
-  dd <- genCluster(dd, "timeID", numIndsVar = 30, level1ID = "id")
-  dd <- addColumns(defOut, dd)
-  
-  dd[, normk := (k - min(k))/(max(k) - min(k))]
-  dd[, site := as.factor(site)]
-  
-  dd[]
-}
-
 replicate <- function(){
   
   dd <- s_generate()
@@ -383,7 +371,7 @@ replicate <- function(){
   
   dres <- data.table(t(est.lin), t(est.fcs), t(est.rcs), t(est.gam))
   setnames(dres, 
-    c("d.lin", "se.lin","d.fcs","se.fcs","d.rcs","se.rcs", "d.gam", "se.gam")
+    c("d.lin", "se.lin", "d.fcs", "se.fcs", "d.rcs", "se.rcs", "d.gam", "se.gam")
   )
   
   dres[]
@@ -396,7 +384,7 @@ res <- rbindlist(pblapply(1:1000, function(x) replicate()))
 load("replication_code/res.rdata")
 ```
 
-Each replication provides the point estimate of the treatment effect as well as the estimate of the standard error. Here is what the results look like:
+Each replication provides the point estimate of the treatment effect as well as the estimate of the standard error. Here is a sampling of the results:
 
 ```{r}
 res
@@ -434,5 +422,5 @@ res[, .(lin = coverage(d.lin, se.lin), fcs = coverage(d.fcs, se.fcs),
         rcs = coverage(d.rcs, se.rcs), gam = coverage(d.gam, se.gam))]
 ```
 
-As I think about using the flexible random cubic spline and GAM models to evaulate a stepped wedge design, I am very curious to see how the bias-variance trade-off plays out and to see if the less flexible methods continue to perform as well as the GAM model, at least with respect to the parameter of interest. More to come.
+It will be interesting to see how the bias-variance trade-off plays out in the context of a stepped wedge design, particularly if the outcomes are binary. Will the less flexible methods continue to perform as well as the GAM model, and will the cubic spline model continue to underestimate the standard errors? More to come.
 
