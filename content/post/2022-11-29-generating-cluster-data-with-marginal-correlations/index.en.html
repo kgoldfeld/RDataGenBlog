@@ -28,31 +28,48 @@ log \left( \frac{\pi_{ij}}{1-p{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i
 <p><span class="math display">\[
 log \left( \frac{\pi_{ij}}{1-p{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i
 \]</span></p>
-<p>As before, we would generate the <span class="math inline">\(\pi_{ij}\)</span>’s, but those probabilities would be uncorrelated now (except of course the correlation due to randomization assignment, but this would be across cluster boundaries). We would introduce within-cluster correlation directly into the <span class="math inline">\(Y_{ij}\)</span>’s by using using multivariate data generation process. If we were in the realm of normally distributed outcomes, we would use a multivariate normal data generating process <span class="math inline">\(MVN(\mathbf{\mu}, \Sigma)\)</span>, where <span class="math inline">\(\Sigma\)</span> is a covariance matrix. (This could be done in <code>simstudy</code> using <code>genCorData</code> or <code>addCorData</code>.) In this case, with a binary outcome, we need an analogous approach. This is what is implemented in the <code>simstudy</code> functions <code>genCorGen</code> and <code>addCorGen</code>.</p>
+<p>As before, we would generate the <span class="math inline">\(\pi_{ij}\)</span>’s, but those probabilities would be uncorrelated now (except of course the correlation due to randomization assignment, but this would be across cluster boundaries). We would introduce within-cluster correlation directly into the <span class="math inline">\(Y_{ij}\)</span>’s by using using multivariate data generation process. If we were in the realm of normally distributed outcomes, we would use a multivariate normal data generating process <span class="math inline">\(MVN(\mathbf{\mu}, \Sigma)\)</span>, where <span class="math inline">\(\Sigma\)</span> is a covariance matrix. (This could be done in <code>simstudy</code> using <code>genCorData</code> or <code>addCorData</code>.) In this case, with a binary outcome, we need an analogous approach. This is what is implemented in the <code>simstudy</code> functions <code>genCorGen</code> and <code>addCorGen</code>. The models that would be used to analyze these “marginal models” are based on generalized estimating equations (GEE).</p>
 </div>
 <div id="the-correlation-structure" class="section level3">
 <h3>The correlation structure</h3>
-<p>OK - that is a bit more background than I intended (though probably not enough). Now onto the functions and simulations.</p>
-<p>Ultimately, we might be interested in using <code>addCorGen</code> to generate data with a somewhat complex correlation structure. In the first example, we have a scenario with multiple measurement periods though an individual is measured only once.</p>
+<p>OK - that is a bit more background than I intended (though probably not enough). Now onto the new function and simulations.</p>
+<p>In the first example, an individual in a cluster is measured once during a specific time period, but the measurements for a particular cluster can span mulitple time periods, so different individuals in the same cluster might be in different time periods.</p>
+<p>If we have 3 time periods and 3 individuals in each time period, the correlation between two individuals in the same time period might be <span class="math inline">\(\rho_1\)</span>, the correlation between individuals in adjacent time periods (periods 1/2 and periods 2/3) is <span class="math inline">\(\rho_2\)</span>, and the correlation between individuals in time periods 1 and 3 would be <span class="math inline">\(\rho_3\)</span>. The correlation structure for the cluster would be represented like this with each period represented in <span class="math inline">\(3 \times 3\)</span> sub-blocks:</p>
+<p><span class="math display">\[
+\mathbf{R} =
+\left( \begin{matrix}
+1 &amp; \rho_1 &amp; \rho_1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_3 &amp; \rho_3 &amp; \rho_3 \\
+\rho_1 &amp; 1 &amp; \rho_1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_3 &amp; \rho_3 &amp; \rho_3 \\
+\rho_1 &amp; \rho_1 &amp; 1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_3 &amp; \rho_3 &amp; \rho_3 \\
+\rho_2 &amp; \rho_2 &amp; \rho_2 &amp; 1 &amp; \rho_1 &amp; \rho_1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 \\
+\rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_1 &amp; 1 &amp; \rho_1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 \\
+\rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_1 &amp; \rho_1 &amp; 1 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 \\
+\rho_3 &amp; \rho_3 &amp; \rho_3 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; 1 &amp; \rho_1 &amp; \rho_1 \\
+\rho_3 &amp; \rho_3 &amp; \rho_3 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_1 &amp; 1 &amp; \rho_1 \\
+\rho_3 &amp; \rho_3 &amp; \rho_3 &amp; \rho_2 &amp; \rho_2 &amp; \rho_2 &amp; \rho_1 &amp; \rho_1 &amp; 1
+\end{matrix} \right )
+\]</span></p>
+<p>The overall correlation matrix for the full data set (assuming 5 clusters) is represented by block matrix <span class="math inline">\(\textbf{B}\)</span> with</p>
+<p><span class="math display">\[
+\mathbf{B} =
+\left( \begin{matrix}
+\mathbf{R} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} \\
+\mathbf{0} &amp; \mathbf{R} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} \\
+\mathbf{0} &amp; \mathbf{0} &amp; \mathbf{R} &amp; \mathbf{0} &amp; \mathbf{0} \\
+\mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{R} &amp; \mathbf{0} \\
+\mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{0} &amp; \mathbf{R} \\
+\end{matrix} \right )
+\]</span></p>
+<p>where <span class="math inline">\(\mathbf{0}\)</span> is a <span class="math inline">\(9 \times 9\)</span> matrix of <span class="math inline">\(0\)</span>’s.</p>
+</div>
+<div id="generating-data---multiple-time-periods-single-individual-measurement" class="section level3">
+<h3>Generating data - multiple time periods, single individual measurement</h3>
+<p>The new function <code>genBlockMat</code> enables us to generate the <span class="math inline">\(R\)</span> blocks (though currently it requires that the number of individuals per period per cluster are constant - I will relax that requirement in the future). Here are a couple of examples. In the first we are fixing <span class="math inline">\(\rho_1 = 0.3\)</span>, <span class="math inline">\(\rho_2 = 0.2\)</span>, and <span class="math inline">\(\rho_3 = 0.1\)</span>:</p>
 <pre class="r"><code>library(simstudy)
-library(data.table)</code></pre>
-<div id="multiple-time-periods-single-individual-measurement" class="section level4">
-<h4>Multiple time periods, single individual measurement</h4>
-<pre class="r"><code>b0 &lt;- -1.0; delta &lt;- 1; number_inds = 3;
+library(data.table)
 
-###
-
-defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
-
-defI &lt;- defDataAdd(varname = &quot;z&quot;, formula = 0, variance = 0.10)
-defI &lt;- defDataAdd(defI, varname = &quot;p&quot;,
-                   formula = &quot;..b0 + ..delta * A + .5*z&quot;,
-                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
-
-###
-
-target_cor &lt;- genBlockMat(rho = c(0.3, 0.2, 0.1), nInds = number_inds, nPeriods = 3)
-target_cor</code></pre>
+R &lt;- genBlockMat(rho = c(0.3, 0.2, 0.1), nInds = 3 , nPeriods = 3)
+R</code></pre>
 <pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9]
 ##  [1,]  1.0  0.3  0.3  0.2  0.2  0.2  0.1  0.1  0.1
 ##  [2,]  0.3  1.0  0.3  0.2  0.2  0.2  0.1  0.1  0.1
@@ -63,9 +80,41 @@ target_cor</code></pre>
 ##  [7,]  0.1  0.1  0.1  0.2  0.2  0.2  1.0  0.3  0.3
 ##  [8,]  0.1  0.1  0.1  0.2  0.2  0.2  0.3  1.0  0.3
 ##  [9,]  0.1  0.1  0.1  0.2  0.2  0.2  0.3  0.3  1.0</code></pre>
-<pre class="r"><code>###
+<p>In the second example, we specify using an auto-regressive structure with <span class="math inline">\(\rho=0.3\)</span>, so that <span class="math inline">\(\rho_1 = \rho =0.3\)</span>, <span class="math inline">\(\rho_2 = \rho^2 = 0.09\)</span>, and <span class="math inline">\(\rho_3 = \rho^3 = 0.027\)</span>:</p>
+<pre class="r"><code>genBlockMat(rho = 0.3, corstr = &quot;ar1&quot;, nInds = 3 , nPeriods = 3)</code></pre>
+<pre><code>##        [,1]  [,2]  [,3] [,4] [,5] [,6]  [,7]  [,8]  [,9]
+##  [1,] 1.000 0.300 0.300 0.09 0.09 0.09 0.027 0.027 0.027
+##  [2,] 0.300 1.000 0.300 0.09 0.09 0.09 0.027 0.027 0.027
+##  [3,] 0.300 0.300 1.000 0.09 0.09 0.09 0.027 0.027 0.027
+##  [4,] 0.090 0.090 0.090 1.00 0.30 0.30 0.090 0.090 0.090
+##  [5,] 0.090 0.090 0.090 0.30 1.00 0.30 0.090 0.090 0.090
+##  [6,] 0.090 0.090 0.090 0.30 0.30 1.00 0.090 0.090 0.090
+##  [7,] 0.027 0.027 0.027 0.09 0.09 0.09 1.000 0.300 0.300
+##  [8,] 0.027 0.027 0.027 0.09 0.09 0.09 0.300 1.000 0.300
+##  [9,] 0.027 0.027 0.027 0.09 0.09 0.09 0.300 0.300 1.000</code></pre>
+<p>Finally, we can specify using an exchangeable or compound symmetry structure with <span class="math inline">\(\rho=0.3\)</span>, so that <span class="math inline">\(\rho_1 = \rho_2 = \rho_3 = \rho = 0.3\)</span> (i.e., there is constant between-individual correlation within each cluster over time):</p>
+<pre class="r"><code>genBlockMat(rho = 0.3, corstr = &quot;cs&quot;, nInds = 3 , nPeriods = 3)</code></pre>
+<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9]
+##  [1,]  1.0  0.3  0.3  0.3  0.3  0.3  0.3  0.3  0.3
+##  [2,]  0.3  1.0  0.3  0.3  0.3  0.3  0.3  0.3  0.3
+##  [3,]  0.3  0.3  1.0  0.3  0.3  0.3  0.3  0.3  0.3
+##  [4,]  0.3  0.3  0.3  1.0  0.3  0.3  0.3  0.3  0.3
+##  [5,]  0.3  0.3  0.3  0.3  1.0  0.3  0.3  0.3  0.3
+##  [6,]  0.3  0.3  0.3  0.3  0.3  1.0  0.3  0.3  0.3
+##  [7,]  0.3  0.3  0.3  0.3  0.3  0.3  1.0  0.3  0.3
+##  [8,]  0.3  0.3  0.3  0.3  0.3  0.3  0.3  1.0  0.3
+##  [9,]  0.3  0.3  0.3  0.3  0.3  0.3  0.3  0.3  1.0</code></pre>
+<p>Using the first target correlation matrix (<span class="math inline">\(\rho_1 = 0.3\)</span>, <span class="math inline">\(\rho_2 = 0.2\)</span>, and <span class="math inline">\(\rho_3 = 0.1\)</span>), we can go ahead and generate some data. The probability of outcome <span class="math inline">\(Y\)</span> will be a function of cluster-level treatment <span class="math inline">\(A\)</span>, <span class="math inline">\(A \in \{0,1\}\)</span> and individual-level covariate <span class="math inline">\(z\)</span>, a continuous measure centered closely around 0. Here are the data definitions:</p>
+<pre class="r"><code>b0 &lt;- -1.0; delta &lt;- 1; number_inds = 3;
 
-set.seed(1234)
+defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+defI &lt;- defDataAdd(varname = &quot;z&quot;, formula = 0, variance = 0.10)
+defI &lt;- defDataAdd(defI, varname = &quot;p&quot;,
+                   formula = &quot;..b0 + ..delta * A + .5*z&quot;,
+                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)</code></pre>
+<p>The key to generating the data using the specified correlation matrix <span class="math inline">\(R\)</span> is that the data need to be set up in the correct order; it will need to be sorted by cluster and period (and in this case the order of individuals does not matter). First, we generate the cluster level data, and period data for the clusters, and then the 3 individuals within each cluster and time period.</p>
+<pre class="r"><code>set.seed(1234)
 
 dc &lt;- genData(n = 10, dtDefs = defC, id = &quot;site&quot;)
 dc &lt;- addPeriods(dtName = dc, nPeriods = number_inds, 
@@ -74,15 +123,11 @@ dd &lt;- genCluster(dtClust = dc, cLevelVar = &quot;timeID&quot;,
         numIndsVar = 3, level1ID = &quot;idnum&quot;)
 dd &lt;- addColumns(defI, dd)
 
-setkey(dd, &quot;site&quot;, &quot;period&quot;,&quot;idnum&quot;)
-
-genCorDT &lt;- function(dx) {
-  
-  addCorGen(dx, idvar = &quot;site&quot;, corMatrix = target_cor,
+setkey(dd, &quot;site&quot;, &quot;period&quot;, &quot;idnum&quot;)</code></pre>
+<p>The correlated outcomes are generated using <code>addCorGen</code>. This is where the correlation matrix <span class="math inline">\(R\)</span> is applied. Once again, it is critical that the data are sorted in the correct order - by site and period:</p>
+<pre class="r"><code>dres &lt;- addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
       dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;)
-}
 
-dres &lt;- genCorDT(dd)
 head(dres, n = 9)</code></pre>
 <pre><code>##    site period A timeID idnum          z         p y
 ## 1:    1      0 1      1     1  0.3109796 0.5387943 0
@@ -94,21 +139,24 @@ head(dres, n = 9)</code></pre>
 ## 7:    1      2 1      3     7  0.4332353 0.5539436 1
 ## 8:    1      2 1      3     8 -0.5335796 0.4336954 0
 ## 9:    1      2 1      3     9 -0.1984128 0.4752187 1</code></pre>
-<pre class="r"><code>reps &lt;- lapply(1:2500, function(x) genCorDT(dd))
+<p>To convince you that the data are indeed being generated as we designed, we can generate a large number of data sets (we’ll use 2,500) using <code>addCorGen</code> (but fixing the individual level probabilities). The empirical within cluster correlation can be estimated as the correlation of the repeated data sets (within each cluster). I am outputting the nine <span class="math inline">\(\pi\)</span>’s for the indviduals in a single cluster next to the mean observed outcome for that individual. And, more importantly, I am showing the correlation that is calculated based on the 2,500 data sets. In both cases, the observed values are very much consistent with the true values used to generate the data. Thogh I am not showing you, this is the case for all 10 clusters.</p>
+<pre class="r"><code>reps &lt;- lapply(1:2500, 
+  function(x)  addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
+      dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;))
 
-empir &lt;- function(s) {
+empir_corr &lt;- function(cluster) {
   drep &lt;- data.table::rbindlist(reps, idcol = &quot;rep&quot;)
-  drep &lt;- drep[site == s, ]
+  drep &lt;- drep[site == cluster, ]
   drep[, seq := 1:.N, keyby = rep]
   dmat &lt;- as.matrix(dcast(drep, rep ~ seq, value.var = &quot;y&quot;)[, -1])
   
-  mu &lt;- cbind(round(apply(dmat, 2, mean), 2), round(dd[site == s, p], 2))
-  S &lt;- round(cor(dmat), 1) 
+  mu &lt;- cbind(round(apply(dmat, 2, mean), 2), round(dd[site == cluster, p], 2))
+  R_hat &lt;- round(cor(dmat), 1) 
   
-  return(list(mu = mu, S = S))
+  return(list(mu = mu, R_hat = R_hat))
 }
 
-empir(s=7)</code></pre>
+empir_corr(cluster = 7)</code></pre>
 <pre><code>## $mu
 ##   [,1] [,2]
 ## 1 0.33 0.32
@@ -121,7 +169,7 @@ empir(s=7)</code></pre>
 ## 8 0.28 0.28
 ## 9 0.31 0.31
 ## 
-## $S
+## $R_hat
 ##     1   2   3   4   5   6   7   8   9
 ## 1 1.0 0.3 0.3 0.2 0.2 0.2 0.1 0.1 0.1
 ## 2 0.3 1.0 0.3 0.2 0.2 0.2 0.1 0.1 0.1
@@ -133,23 +181,23 @@ empir(s=7)</code></pre>
 ## 8 0.1 0.1 0.1 0.2 0.2 0.2 0.3 1.0 0.3
 ## 9 0.1 0.1 0.1 0.2 0.2 0.2 0.3 0.3 1.0</code></pre>
 </div>
-</div>
 <div id="multiple-time-periods-repeated-individual-measurements" class="section level3">
 <h3>Multiple time periods, repeated individual measurements</h3>
-<pre class="r"><code>b0 &lt;- -1.0; b1 &lt;- .5; delta &lt;- -0.3; number_inds = 3;
-
-###
-
-defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
-
-defI &lt;- defDataAdd(varname = &quot;z&quot;, formula = 0, variance = 0.10)
-defI &lt;- defDataAdd(defI, varname = &quot;p&quot;,
-                   formula = &quot;..b0 + ..b1* measure + ..delta * A * measure + z&quot;,
-                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
-###
-
-target_cor &lt;- genBlockMat(rho = c(0.3, .1), nInds = number_inds, nPeriods = 2, iRho = 0.5)
-target_cor</code></pre>
+<p>In this next example, I will simulate a case where there are two measurement periods but for the same individual in each period (say a bseline and follow-up). In this case, the within-individual (between period) correlation (<span class="math inline">\(\rho^*\)</span>) can be different from the between-individual, within-period correlation (<span class="math inline">\(\rho_1\)</span>) and the between-individual, between-period correlation (<span class="math inline">\(\rho_2\)</span>):</p>
+<p><span class="math display">\[
+\mathbf{R} =
+\left( \begin{matrix}
+1 &amp; \rho_1 &amp; \rho_1 &amp; \rho^* &amp; \rho_2 &amp; \rho_2 \\
+\rho_1 &amp; 1 &amp; \rho_1 &amp; \rho_2 &amp; \rho^* &amp; \rho_2 \\
+\rho_1 &amp; \rho_1 &amp; 1 &amp; \rho_2 &amp; \rho_2 &amp; \rho^* \\
+\rho^* &amp; \rho_2 &amp; \rho_2 &amp; 1 &amp; \rho_1 &amp; \rho_1 \\
+\rho_2 &amp; \rho^* &amp; \rho_2 &amp; \rho_1 &amp; 1 &amp; \rho_1 \\
+\rho_2 &amp; \rho_2 &amp; \rho^* &amp; \rho_1 &amp; \rho_1 &amp; 1 \\
+\end{matrix} \right )
+\]</span></p>
+<p><code>genBlockMat</code> implements this with an additional argument <em>iRho</em>. Here we are using <em>iRho</em> to set <span class="math inline">\(\rho^* = 0.5\)</span>:</p>
+<pre class="r"><code>R &lt;- genBlockMat(rho = c(0.3, .1), nInds = number_inds, nPeriods = 2, iRho = 0.5)
+R</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
 ## [1,]  1.0  0.3  0.3  0.5  0.1  0.1
 ## [2,]  0.3  1.0  0.3  0.1  0.5  0.1
@@ -157,7 +205,15 @@ target_cor</code></pre>
 ## [4,]  0.5  0.1  0.1  1.0  0.3  0.3
 ## [5,]  0.1  0.5  0.1  0.3  1.0  0.3
 ## [6,]  0.1  0.1  0.5  0.3  0.3  1.0</code></pre>
-<pre class="r"><code>###
+<p>The data generation here is slightly modified, to accommodate the structure of individuals repeated in in both time periods. The clusters are generated first, as before, but then the individuals are created within the clusters. Once the individuals are created, then the time periods are introduced before generating the outcome (which in this case depends on the time period). Before generating the correlated outcomes using <code>addCorGen</code>, it is now important that the data be sorted by cluster, period, <em>and</em> individual, as this is in line with the correlation structure.</p>
+<pre class="r"><code>b0 &lt;- -1.0; b1 &lt;- .5; delta &lt;- -0.3; number_inds = 3;
+
+defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+defI &lt;- defDataAdd(varname = &quot;z&quot;, formula = 0, variance = 0.10)
+defI &lt;- defDataAdd(defI, varname = &quot;p&quot;,
+                   formula = &quot;..b0 + ..b1* measure + ..delta * A * measure + z&quot;,
+                   dist = &quot;nonrandom&quot;, link = &quot;logit&quot;)
 
 set.seed(1234)
 
@@ -169,7 +225,8 @@ dd &lt;- addColumns(defI, dd)
 
 setkey(dd, &quot;site&quot;, &quot;measure&quot;, &quot;idnum&quot;)
 
-dres &lt;- genCorDT(dd)
+dres &lt;- addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
+      dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;)
 
 head(dres, n = 6)</code></pre>
 <pre><code>##    idnum measure site A timeID          z         p y
@@ -179,11 +236,12 @@ head(dres, n = 6)</code></pre>
 ## 4:     1       1    1 1      2 -0.1968381 0.2695635 0
 ## 5:     2       1    1 1      4 -0.1633853 0.2762009 0
 ## 6:     3       1    1 1      6  0.2783134 0.3724579 0</code></pre>
-<pre class="r"><code>###
+<p>Finally, we can confirm that the data generation process is working as anticipated by looking at the empirical means and correlation matrix based on 2,500 data sets:</p>
+<pre class="r"><code>reps &lt;- lapply(1:2500, function(x) 
+  addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
+      dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;))
 
-reps &lt;- lapply(1:2500, function(x) genCorDT(dd))
-
-empir(s = 2)</code></pre>
+empir_corr(cluster = 2)</code></pre>
 <pre><code>## $mu
 ##   [,1] [,2]
 ## 1 0.36 0.36
@@ -193,7 +251,7 @@ empir(s = 2)</code></pre>
 ## 5 0.31 0.31
 ## 6 0.27 0.27
 ## 
-## $S
+## $R_hat
 ##     1   2   3   4   5   6
 ## 1 1.0 0.3 0.3 0.5 0.1 0.1
 ## 2 0.3 1.0 0.3 0.1 0.5 0.1
