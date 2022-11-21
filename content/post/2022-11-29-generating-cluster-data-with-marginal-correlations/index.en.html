@@ -14,27 +14,28 @@ draft: TRUE
 
 
 
-<p>A student is working on a project to derive an analytic solution to the problem of sample size determination in the context of cluster randomized trials and repeated individual-level measurement (something I’ve <a href="https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/" target="_blank">thought</a> a little bit about before). Though the goal is an analytic solution, we do want confirmation with simulation. So, I was a little disheartened to discover that the routines I’d developed for this sort of data generation were not quite up to the task. I’ve had to quickly fix that, and the updates are available in the development version of <code>simstudy</code>, which can be downloaded using <em>devtools::install_github(“kgoldfeld/simstudy”)</em>. While some of the changes are under the hood, I have added a new function, <code>genMatBlock</code>, which I’ll describe here and show some examples.</p>
+<p>A student is working on a project to derive an analytic solution to the problem of sample size determination in the context of cluster randomized trials and repeated individual-level measurement (something I’ve <a href="https://www.rdatagen.net/post/2021-11-23-design-effects-with-baseline-measurements/" target="_blank">thought</a> a little bit about before). Though the goal is an analytic solution, we do want confirmation with simulation. So, I was a little disheartened to discover that the routines I’d developed in <code>simstudy</code> for this were not quite up to the task. I’ve had to quickly fix that, and the updates are available in the development version of <code>simstudy</code>, which can be downloaded using <em>devtools::install_github(“kgoldfeld/simstudy”)</em>. While some of the changes are under the hood, I have added a new function, <code>genBlockMat</code>, which I’ll describe here.</p>
 <div id="correlation-in-cluster-randomized-trials" class="section level3">
 <h3>Correlation in cluster randomized trials</h3>
-<p>The fundamental issue with cluster randomized trials is that the outcomes for a group of patients in a specific cluster are going to be correlated, which impacts both how much we “learn” from each individual and estimate of uncertainty (i.e., standard errors). The more highly correlated individuals are, the less we learn from each individual. (In the extreme case, if there is perfect correlation, we really only have a sample of one from each group.) That correlation structure can depend on whether outcomes generally vary over time (so that patient outcomes within a cluster close to time might be more correlated than outcomes collect from patients far apart in time) and whether measurements are collected for the same individuals over time (you might expect the measurements of the same individual to be more highly correlated than measurements of two different individuals). The assumed correlation structure needs to reflect all of these design issues.</p>
-<p>In simulating data from a cluster randomized trial, have at least two options. The first is to use random effects to induce correlation. A simple data generating process for a binary outcome with a treatment indicator and one covariate that would result in within-cluster correlation would start with a formulation like this:</p>
+<p>The fundamental issue with cluster randomized trials is that outcomes for a group of patients in a specific cluster are possibly correlated; the degree to which this is true impacts both how much we “learn” from each individual. The more highly correlated individuals are, the less information we actually have. (In the extreme case, if there is perfect correlation, we really only have a sample of one from each group.)</p>
+<p>When generating data and modeling associations, the structure of the correlation needs to reflect the context of the study design. The specific structure can depend on whether outcomes generally vary over time (so that patient outcomes within a cluster closer temporally might be more highly correlated than outcomes collected from patients far apart in time) and whether measurements are collected for the same individuals over time (you might expect the measurements of the same individual to be more highly correlated than measurements of two different individuals).</p>
+<p>There are at least two ways to go about simulating correlated data from a cluster randomized trial. The first is to use a random effect to <em>induce</em> correlation. For example, a simple data generating process for a binary outcome with a treatment indicator and one covariate would start with a formulation like this:</p>
 <p><span class="math display">\[ P(Y_{ij} = 1) = \pi_{ij}, \ \ \ Y_{ij} \in \{0,1\}\]</span>
 <span class="math display">\[
-log \left( \frac{\pi_{ij}}{1-p{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i + b_j
+log \left( \frac{\pi_{ij}}{1-\pi_{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i + b_j
 \]</span></p>
-<p>where <span class="math inline">\(Y_{ij}\)</span> is the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span>. (<span class="math inline">\(A\)</span> is a treatment indicator and <span class="math inline">\(X\)</span> is a covariate.) The key here is <span class="math inline">\(b_j\)</span>, which is a cluster level effect that is typically assumed to have a normal distribution N(0, <span class="math inline">\(\sigma_b^2)\)</span>. In the simulation, we would use use values to generate a probability <span class="math inline">\(\pi_{ij}\)</span> for each, and each of those <span class="math inline">\(\pi_{ij}\)</span>’s within a cluster would be correlated by the presence of the cluster effect <span class="math inline">\(b_j\)</span>. It would follow that the <span class="math inline">\(Y_{ij}\)</span>’s would also be correlated within cluster <span class="math inline">\(j\)</span>. We can call this the <em>conditional</em> data generation process, and we could use a mixed-effects regression model to recover the parameters.</p>
-<p>Alternatively, we can dispose of <span class="math inline">\(b_j\)</span>, like this:</p>
+<p>where <span class="math inline">\(Y_{ij}\)</span> is the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span>. (<span class="math inline">\(A\)</span> is a treatment indicator and <span class="math inline">\(X\)</span> is a covariate.) The key here is <span class="math inline">\(b_j\)</span>, which is a cluster level effect that is typically assumed to have a normal distribution N(0, <span class="math inline">\(\sigma_b^2)\)</span>. In a simulation, we would use use specific values to generate a probability <span class="math inline">\(\pi_{ij}\)</span> for each; each of the <span class="math inline">\(\pi_{ij}\)</span>’s within a cluster would be correlated by the presence of the cluster effect <span class="math inline">\(b_j\)</span>. It would follow that the <span class="math inline">\(Y_{ij}\)</span>’s would also be correlated within cluster <span class="math inline">\(j\)</span>. We can call this the <em>conditional</em> data generation process, and we could use a mixed-effects regression model to recover the parameters. But we won’t do this here.</p>
+<p>Instead, we can dispose of <span class="math inline">\(b_j\)</span>, like this:</p>
 <p><span class="math display">\[
-log \left( \frac{\pi_{ij}}{1-p{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i
+log \left( \frac{\pi_{ij}}{1-\pi_{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i
 \]</span></p>
-<p>As before, we would generate the <span class="math inline">\(\pi_{ij}\)</span>’s, but those probabilities would be uncorrelated now (except of course the correlation due to randomization assignment, but this would be across cluster boundaries). We would introduce within-cluster correlation directly into the <span class="math inline">\(Y_{ij}\)</span>’s by using using multivariate data generation process. If we were in the realm of normally distributed outcomes, we would use a multivariate normal data generating process <span class="math inline">\(MVN(\mathbf{\mu}, \Sigma)\)</span>, where <span class="math inline">\(\Sigma\)</span> is a covariance matrix. (This could be done in <code>simstudy</code> using <code>genCorData</code> or <code>addCorData</code>.) In this case, with a binary outcome, we need an analogous approach. This is what is implemented in the <code>simstudy</code> functions <code>genCorGen</code> and <code>addCorGen</code>. The models that would be used to analyze these “marginal models” are based on generalized estimating equations (GEE).</p>
+<p>As before, we would generate the <span class="math inline">\(\pi_{ij}\)</span>’s, but the probabilities are going to be uncorrelated now (except of course the correlation due to randomization assignment, but this would be across clusters). The within-cluster correlation is directly introduced into the <span class="math inline">\(Y_{ij}\)</span>’s by using using multivariate data generation process. If we were in the realm of normally distributed outcomes, we would use a multivariate normal data generating process <span class="math inline">\(MVN(\mathbf{\mu}, \Sigma)\)</span>, where <span class="math inline">\(\Sigma\)</span> is a covariance matrix. (This could be done in <code>simstudy</code> using <code>genCorData</code> or <code>addCorData</code>.) In this case, with a binary outcome, we need an analogous approach, which is implemented in the <code>simstudy</code> functions <code>genCorGen</code> and <code>addCorGen</code>. To recover the parameters used to generate these data, a generalized estimating equations (GEE) model would be used; and rather than being <em>conditional</em>, the parameter estimates from this model will be <em>marginal</em>, just as the data generation process was.</p>
 </div>
-<div id="the-correlation-structure" class="section level3">
-<h3>The correlation structure</h3>
+<div id="generating-data---multiple-time-periods-single-individual-measurement" class="section level3">
+<h3>Generating data - multiple time periods, single individual measurement</h3>
 <p>OK - that is a bit more background than I intended (though probably not enough). Now onto the new function and simulations.</p>
-<p>In the first example, an individual in a cluster is measured once during a specific time period, but the measurements for a particular cluster can span multiple time periods, so different individuals in the same cluster might be in different time periods.</p>
-<p>If we have 3 time periods and 3 individuals in each time period, the correlation between two individuals in the same time period might be <span class="math inline">\(\alpha_1\)</span>, the correlation between individuals in adjacent time periods (periods 1/2 and periods 2/3) is <span class="math inline">\(\alpha_2\)</span>, and the correlation between individuals in time periods 1 and 3 would be <span class="math inline">\(\alpha_3\)</span>. The correlation structure for the cluster would be represented like this with each period represented in <span class="math inline">\(3 \times 3\)</span> sub-blocks:</p>
+<p>In the first example here, the outcomes are measured at three different periods, but an individual in a cluster is measured only once. In other words, the time periods include different sets of individuals.</p>
+<p>If we have 3 time periods and 3 individuals in each time period, the within-cluster correlation between two individuals in the same time period is <span class="math inline">\(\alpha_1\)</span>, the correlation between individuals in adjacent time periods (periods 1&amp;2 and periods 2&amp;3) is <span class="math inline">\(\alpha_2\)</span>, and the correlation between individuals in time periods 1 and 3 would be <span class="math inline">\(\alpha_3\)</span>. The correlation structure for the cluster would be represented like this with each period represented in <span class="math inline">\(3 \times 3\)</span> sub-blocks:</p>
 <p><span class="math display">\[
 \mathbf{R} =
 \left( \begin{matrix}
@@ -61,9 +62,6 @@ log \left( \frac{\pi_{ij}}{1-p{ij}} \right) = \beta_0 + \beta_1 A_j + \beta_2X_i
 \end{matrix} \right )
 \]</span></p>
 <p>where <span class="math inline">\(\mathbf{0}\)</span> is a <span class="math inline">\(9 \times 9\)</span> matrix of <span class="math inline">\(0\)</span>’s.</p>
-</div>
-<div id="generating-data---multiple-time-periods-single-individual-measurement" class="section level3">
-<h3>Generating data - multiple time periods, single individual measurement</h3>
 <p>The new function <code>genBlockMat</code> enables us to generate the <span class="math inline">\(R\)</span> blocks (though currently it requires that the number of individuals per period per cluster are constant - I will relax that requirement in the future). Here are a couple of examples. In the first we are fixing <span class="math inline">\(\alpha_1 = 0.3\)</span>, <span class="math inline">\(\alpha_2 = 0.2\)</span>, and <span class="math inline">\(\alpha_3 = 0.1\)</span>:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
@@ -80,8 +78,8 @@ R</code></pre>
 ##  [7,]  0.1  0.1  0.1  0.2  0.2  0.2  1.0  0.3  0.3
 ##  [8,]  0.1  0.1  0.1  0.2  0.2  0.2  0.3  1.0  0.3
 ##  [9,]  0.1  0.1  0.1  0.2  0.2  0.2  0.3  0.3  1.0</code></pre>
-<p>In the second example, we specify using an auto-regressive structure with <span class="math inline">\(\alpha = 0.3\)</span>, so that <span class="math inline">\(\alpha_1 = \alpha =0.3\)</span>, <span class="math inline">\(\alpha_2 = \alpha^2 = 0.09\)</span>, and <span class="math inline">\(\alpha_3 = \alpha^3 = 0.027\)</span>:</p>
-<pre class="r"><code>genBlockMat(rho =0.3, corstr = &quot;ar1&quot;, nInds = 3 , nPeriods = 3)</code></pre>
+<p>In the second example, we specify the correlation using an auto-regressive structure with <span class="math inline">\(\alpha = 0.3\)</span>, so that <span class="math inline">\(\alpha_1 = \alpha =0.3\)</span>, <span class="math inline">\(\alpha_2 = \alpha^2 = 0.09\)</span>, and <span class="math inline">\(\alpha_3 = \alpha^3 = 0.027\)</span>:</p>
+<pre class="r"><code>genBlockMat(rho = 0.3, corstr = &quot;ar1&quot;, nInds = 3 , nPeriods = 3)</code></pre>
 <pre><code>##        [,1]  [,2]  [,3] [,4] [,5] [,6]  [,7]  [,8]  [,9]
 ##  [1,] 1.000 0.300 0.300 0.09 0.09 0.09 0.027 0.027 0.027
 ##  [2,] 0.300 1.000 0.300 0.09 0.09 0.09 0.027 0.027 0.027
@@ -104,7 +102,8 @@ R</code></pre>
 ##  [7,]  0.3  0.3  0.3  0.3  0.3  0.3  1.0  0.3  0.3
 ##  [8,]  0.3  0.3  0.3  0.3  0.3  0.3  0.3  1.0  0.3
 ##  [9,]  0.3  0.3  0.3  0.3  0.3  0.3  0.3  0.3  1.0</code></pre>
-<p>Using the first target correlation matrix (<span class="math inline">\(\alpha_1 = 0.3\)</span>, <span class="math inline">\(\alpha_2 = 0.2\)</span>, and <span class="math inline">\(\alpha_3 = 0.1\)</span>), we can go ahead and generate some data. The probability of outcome <span class="math inline">\(Y\)</span> will be a function of cluster-level treatment <span class="math inline">\(A\)</span>, <span class="math inline">\(A \in \{0,1\}\)</span> and individual-level covariate <span class="math inline">\(z\)</span>, a continuous measure centered closely around 0. Here are the data definitions:</p>
+<p>Using the first target correlation matrix (<span class="math inline">\(\alpha_1 = 0.3\)</span>, <span class="math inline">\(\alpha_2 = 0.2\)</span>, and <span class="math inline">\(\alpha_3 = 0.1\)</span>), we can go ahead and generate some data. The probability of outcome <span class="math inline">\(Y\)</span> will be a function of cluster-level treatment <span class="math inline">\(A\)</span>, <span class="math inline">\(A \in \{0,1\}\)</span> and individual-level covariate <span class="math inline">\(z\)</span>, a continuous measure centered closely around 0.</p>
+<p>Here are the data definitions:</p>
 <pre class="r"><code>b0 &lt;- -1.0; delta &lt;- 1; number_inds = 3;
 
 defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
@@ -117,14 +116,14 @@ defI &lt;- defDataAdd(defI, varname = &quot;p&quot;,
 <pre class="r"><code>set.seed(1234)
 
 dc &lt;- genData(n = 10, dtDefs = defC, id = &quot;site&quot;)
-dc &lt;- addPeriods(dtName = dc, nPeriods = number_inds, 
+dc &lt;- addPeriods(dtName = dc, nPeriods = 3, 
         idvars = &quot;site&quot;, perName = &quot;period&quot;)
 dd &lt;- genCluster(dtClust = dc, cLevelVar = &quot;timeID&quot;, 
-        numIndsVar = 3, level1ID = &quot;idnum&quot;)
+        numIndsVar = number_inds, level1ID = &quot;idnum&quot;)
 dd &lt;- addColumns(defI, dd)
 
 setkey(dd, &quot;site&quot;, &quot;period&quot;, &quot;idnum&quot;)</code></pre>
-<p>The correlated outcomes are generated using <code>addCorGen</code>. This is where the correlation matrix <span class="math inline">\(R\)</span> is applied. Once again, it is critical that the data are sorted in the correct order - by site and period:</p>
+<p>The correlated outcomes are generated using <code>addCorGen</code>, where the correlation matrix <span class="math inline">\(R\)</span> is applied. And, as I said before (I cannot reiterate this point enough), it is critical that the data are sorted in the correct order - by site and period:</p>
 <pre class="r"><code>dres &lt;- addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
       dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;)
 
@@ -139,7 +138,7 @@ head(dres, n = 9)</code></pre>
 ## 7:    1      2 1      3     7  0.4332353 0.5539436 1
 ## 8:    1      2 1      3     8 -0.5335796 0.4336954 0
 ## 9:    1      2 1      3     9 -0.1984128 0.4752187 1</code></pre>
-<p>To convince myself that the data are indeed being generated intended, I have generated a large number of data sets using <code>addCorGen</code> while fixing the individual level probabilities. The empirical within-cluster correlation can be estimated as the observed correlation of the repeated data sets (within each cluster). I am outputting the nine <span class="math inline">\(\pi\)</span>’s for the individuals in a single cluster next to the mean observed outcome for that individual. And, more importantly, I am showing the correlation calculated based on the 2,500 sets of outcomes. In both cases, the observed values are very much consistent with the true values used to generate the data. Thoth I am not showing you, this is the case for all 10 clusters.</p>
+<p>To convince myself that the data are indeed being generated intended, I am generating a large number of data sets using <code>addCorGen</code> (with fixed individual level probabilities). The empirical within-cluster correlation can be estimated as the observed correlation of the repeated data sets (within each cluster). I am outputting the nine <span class="math inline">\(\pi\)</span>’s for the individuals in a one of the clusters next to the mean observed outcome for that individual. And, more importantly, I am showing the within-cluster correlation calculated from the 2,500 observations. In both cases, the observed values are very much consistent with the true values used to generate the data. Though I am not showing you, this is the case for all 10 clusters.</p>
 <pre class="r"><code>reps &lt;- lapply(1:2500, 
   function(x)  addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
       dist = &quot;binary&quot;, param1 = &quot;p&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;))
@@ -185,7 +184,7 @@ empir_corr(cluster = 7)</code></pre>
 </div>
 <div id="multiple-time-periods-repeated-individual-measurements" class="section level3">
 <h3>Multiple time periods, repeated individual measurements</h3>
-<p>In this next example, I will simulate a case where there are two measurement periods but for the same individual in each period (say a baseline and follow-up). In this case, the within-individual (between period) correlation (<span class="math inline">\(\alpha^*\)</span>) can be different from the between-individual, within-period correlation (<span class="math inline">\(\alpha_1\)</span>) and the between-individual, between-period correlation (<span class="math inline">\(\alpha_2\)</span>):</p>
+<p>In this next example, I will simulate a case where there are two measurement periods but the same set of individuals is in each period (say a baseline and follow-up). In this case, the within-individual (between-period) correlation (<span class="math inline">\(\alpha^*\)</span>) can be different from the between-individual, within-period correlation (<span class="math inline">\(\alpha_1\)</span>) and the between-individual, between-period correlation (<span class="math inline">\(\alpha_2\)</span>):</p>
 <p><span class="math display">\[
 \mathbf{R} =
 \left( \begin{matrix}
@@ -197,7 +196,7 @@ empir_corr(cluster = 7)</code></pre>
 \alpha_2 &amp; \alpha_2 &amp; \alpha^* &amp; \alpha_1 &amp; \alpha_1 &amp; 1 \\
 \end{matrix} \right )
 \]</span></p>
-<p><code>genBlockMat</code> implements this with an additional argument <em>iRho</em>. Here we are using <em>iRho</em> to set <span class="math inline">\(\alpha^* = 0.5\)</span>:</p>
+<p><code>genBlockMat</code> implements this with an additional argument <em>iRho</em> for the within-individual correlations. Here we are using <em>iRho</em> to set <span class="math inline">\(\alpha^* = 0.5\)</span>:</p>
 <pre class="r"><code>R &lt;- genBlockMat(rho =c(0.3, .1), nInds = number_inds, nPeriods = 2, iRho = 0.5)
 R</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
@@ -207,7 +206,7 @@ R</code></pre>
 ## [4,]  0.5  0.1  0.1  1.0  0.3  0.3
 ## [5,]  0.1  0.5  0.1  0.3  1.0  0.3
 ## [6,]  0.1  0.1  0.5  0.3  0.3  1.0</code></pre>
-<p>The data generation process here is slightly modified to accommodate the structure of individuals repeated in in both time periods. The clusters are generated first, as before, but then the individuals are created within the clusters. Once the individuals are created, then the time periods are introduced before generating the outcome (which in this case depends on the time period). Before generating the correlated outcomes using <code>addCorGen</code>, it is now important that the data be sorted by cluster, period, <em>and</em> individual, as this is in line with the correlation structure.</p>
+<p>The data generation process here is slightly modified to accommodate this structure of individuals repeated across time periods. The clusters are generated first, as before, but then the individuals are created within the clusters. Once the individuals are created, then the time periods are introduced before generating the outcome (which in this case depends on the time period). Before generating the correlated outcomes using <code>addCorGen</code>, it is now important that the data be sorted by cluster, period, <em>and</em> individual, as this is in line with the correlation structure.</p>
 <pre class="r"><code>b0 &lt;- -1.0; b1 &lt;- .5; delta &lt;- -0.3; number_inds = 3;
 
 defC &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
@@ -264,7 +263,7 @@ empir_corr(cluster = 2)</code></pre>
 </div>
 <div id="varying-cluster-sizes-for-single-period-designs" class="section level3">
 <h3>Varying cluster sizes for single period designs</h3>
-<p>I’ve alluded to the fact that <code>genBlockMat</code> and <code>addCorGen</code> cannot accommodate varying cluster sizes (yet), but if we need to generate clustered data with correlated outcomes and varying cluster sizes in a <em>single</em> period using <code>addCorGen</code>, that <em>is</em> now possible. I mentioned that I made some adjustments to <code>addCorGen</code> (primarily to speed up its performance), but I was able to make it more flexible as well. Here is a simple example to demonstrate how this works.</p>
+<p>I’ve alluded to the fact that <code>genBlockMat</code> and <code>addCorGen</code> cannot accommodate varying cluster sizes (yet), but if we need to generate clustered data with correlated outcomes and varying cluster sizes in a <em>single</em> period using <code>addCorGen</code>, that <em>is</em> now possible. Here is a simple example to demonstrate how this works.</p>
 <p>I am generating three clusters with sizes of 3, 4, and 2 individuals, respectively. The outcome is binary, and the probability of success varies slightly by cluster. First, we generate the clusters:</p>
 <pre class="r"><code>d1 &lt;- defData(varname = &quot;n&quot;, formula = &quot;c(3, 4, 2)&quot;, dist = &quot;nonrandom&quot;)
 d1 &lt;- defData(d1, varname = &quot;p&quot;, formula = 0.4, variance = 40, dist = &quot;beta&quot;)
@@ -326,42 +325,10 @@ mu</code></pre>
 ## 7 0.0 0.0 0.0 0.4 0.4 0.4 1.0 0.0 0.0
 ## 8 0.0 0.0 0.0 0.0 0.0 0.0 0.0 1.0 0.4
 ## 9 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.4 1.0</code></pre>
-<p>To finish off, here is a much larger data set with 100 clusters with varying sizes (averaging around 50) and a GEE model estimation:</p>
-<pre class="r"><code>d1 &lt;- defData(varname = &quot;n&quot;, formula = 50, dist = &quot;poisson&quot;)
-d1 &lt;- defData(d1, varname = &quot;p&quot;, formula = 0.4, variance = 40, dist = &quot;beta&quot;)
-
-set.seed(1)
-
-ds &lt;- genData(100, d1, id = &quot;site&quot;)
-dd &lt;- genCluster(dtClust = ds, cLevelVar = &quot;site&quot;, numIndsVar = &quot;n&quot;, &quot;id&quot;)
-dd &lt;- addCorGen(dd, idvar = &quot;site&quot;, rho = 0.2, corstr = &quot;cs&quot;, param1 = &quot;p&quot;, 
-  dist = &quot;binary&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;)
-
-geepack::geeglm(y ~ 1, family = binomial(&quot;logit&quot;), data = dd, 
-    id = site, corstr = &quot;exchangeable&quot;)</code></pre>
-<pre><code>## 
-## Call:
-## geepack::geeglm(formula = y ~ 1, family = binomial(&quot;logit&quot;), 
-##     data = dd, id = site, corstr = &quot;exchangeable&quot;)
-## 
-## Coefficients:
-## (Intercept) 
-##  -0.4462463 
-## 
-## Degrees of Freedom: 5075 Total (i.e. Null);  5074 Residual
-## 
-## Scale Link:                   identity
-## Estimated Scale Parameters:  [1] 1.001538
-## 
-## Correlation:  Structure = exchangeable    Link = identity 
-## Estimated Correlation Parameters:
-##     alpha 
-## 0.2106828 
-## 
-## Number of clusters:   100   Maximum cluster size: 65</code></pre>
-<p>The model estimate of <span class="math inline">\(\alpha\)</span> is 0.21, which is quite close to what was specified in the data generation process (as the argument <em>rho</em>.) And the mean probability</p>
-<p><span class="math display">\[
-\frac{1}{1+e^{0.446}} = 0.39
-\]</span></p>
-<p>is close to the average used to generate the data.</p>
+<!-- To finish off, here is a much larger data set with 100 clusters with varying sizes (averaging around 50) and a GEE model estimation: -->
+<!-- The model estimate of $\alpha$ is 0.21, which is quite close to what was specified in the data generation process (as the argument *rho*.) And the mean probability -->
+<!-- $$ -->
+<!-- \frac{1}{1+e^{0.446}} = 0.39 -->
+<!-- $$ -->
+<!-- is close to the average used to generate the data. -->
 </div>
