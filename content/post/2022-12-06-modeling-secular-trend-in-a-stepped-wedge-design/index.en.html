@@ -1,0 +1,59 @@
+---
+title: Modeling secular trend in a stepped-wedge design
+author: Package Build
+date: '2022-12-06'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p><img src="images/Step_design.png" /></p>
+<p><span class="math display">\[
+Y_{ijt} = a_{j} + b_{jk} + A_{jk} (\delta + d_j)
+\]</span>
+<span class="math display">\[
+a_j \sim N(0, \sigma^2_a) \\
+b_{jt} \sim N(0, \Sigma_b) \\
+d_j \sim N(0, \sigma^2_d)
+\]</span></p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(data.table)
+library(mgcv)
+library(lme4)
+library(splines)
+library(gamm4)</code></pre>
+<pre class="r"><code>def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 9)
+def &lt;- defData(def, varname = &quot;d&quot;, formula = 0, variance = 2)
+def &lt;- defData(def, varname = &quot;mu&quot;, formula = 0, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, varname = &quot;s2&quot;, formula = 16, dist = &quot;nonrandom&quot;)
+
+defOut &lt;- defDataAdd(varname = &quot;y&quot;, 
+  formula = &quot;a + b + A * (5 + d)&quot;, 
+  variance = 40)</code></pre>
+<pre class="r"><code>set.seed(1234)
+
+dd &lt;- genData(48, def, id = &quot;site&quot;)
+dd &lt;- addPeriods(dd, 20, &quot;site&quot;, perName = &quot;k&quot;)
+
+dd &lt;- addCorGen(dtOld = dd, idvar = &quot;site&quot;, nvars = 20, 
+  rho = .6, corstr = &quot;ar1&quot;,
+  dist = &quot;normal&quot;, param1 = &quot;mu&quot;, param2 = &quot;s2&quot;, cnames = &quot;b&quot;)
+
+dd &lt;- trtStepWedge(dd, &quot;site&quot;, nWaves = 6, lenWaves = 2, startPer = 4, 
+  grpName = &quot;A&quot;, perName = &quot;k&quot;)
+
+dd &lt;- genCluster(dd, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defOut, dd)
+
+dd$site &lt;- as.factor(dd$site)
+dd[, normper := (k - min(k))/(max(k) - min(k))]</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="672" /></p>
