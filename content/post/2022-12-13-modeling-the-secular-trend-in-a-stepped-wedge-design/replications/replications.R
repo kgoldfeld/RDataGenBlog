@@ -1,3 +1,10 @@
+library(simstudy)
+library(ggplot2)
+library(data.table)
+library(mgcv)
+library(lme4)
+library(splines)
+
 s_define <- function() {
   
   def <- defData(varname = "a", formula = 0, variance = 9)
@@ -40,8 +47,8 @@ s_model <- function(dd) {
   fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
   res_fitlme_s <- summary(fitlme_s)$coefficients["A", c("Estimate", "Std. Error")]
   
-  fitgam <- gamm4(y ~ A + s(k, site, bs = "fs", k = 5), data = dd)  
-  res_fitgam <- c(summary(fitgam$gam)$p.coeff["A"], summary(fitgam$gam)$se["A"])
+  fitgam <- gam(y ~ A + s(k, site, bs = "fs", k = 10), data = dd)  
+  res_fitgam <- c(summary(fitgam)$p.coeff["A"], summary(fitgam)$se["A"])
   
   model_results <- data.table(t(res_fitlme_k), t(res_fitlme_s), t(res_fitgam))
   setnames(model_results, c("est.lmek", "se.lmek", "est.lmes", "se.lmes",
@@ -75,7 +82,5 @@ s_replicate <- function(nsim) {
 }
 
 dres <- s_replicate(1000)
+save(dres, file = "replications/res.rdata")
 
-dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]
-dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]
-dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]

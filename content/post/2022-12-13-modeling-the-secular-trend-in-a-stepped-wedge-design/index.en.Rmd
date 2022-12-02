@@ -25,26 +25,26 @@ In a typical stepped-wedge design (if there is such a thing), groups of sites (c
 
 We could use a linear mixed effects model to estimate the intervention effect $\delta$, which might look like this:
   
-  $$
+$$
   Y_{ijk} = a_{j} + \beta_{k} + \delta A_{jk} + e_{ijk}
 $$
   
-  where $Y_{ijk}$ is the (continuous) outcome of individual $i$ in cluster $j$ during time period $k$. $a_j$ is the random intercept for site $j$, and we assume that $a_j \sim N(0, \sigma^2_a)$. $A_{jk}$ is the intervention indicator for site $j$ during time period $k$. $\beta_k$ is a period-specific effect. And $e_{ijk}$ is the individual level effect.
+where $Y_{ijk}$ is the (continuous) outcome of individual $i$ in cluster $j$ during time period $k$. $a_j$ is the random intercept for site $j$, and we assume that $a_j \sim N(0, \sigma^2_a)$. $A_{jk}$ is the intervention indicator for site $j$ during time period $k$. $\beta_k$ is a period-specific effect. And $e_{ijk}$ is the individual level effect.
 
 In the study that is motivating all of this, the situation is different in a key way.The intervention can only be implemented at one site a time (so that the number of waves equals the number of sites), leading to this alternative schematic:
   
-  ![](images/24_waves.png){width=75%}
+![](images/24_waves.png){width=75%}
 
-The challenge under this scenario, is that $k$ (the number of periods) is starting to get quite large, requiring us to estimate a large number of period specific effects $\beta_k$. In addition, the periods are actually shorter, so we have less information available to estimate those period effects. An alternative approach, as you may have anticpated, is to smooth the secular trend, using a model that looks like this:
+The challenge under this scenario, is that $k$ (the number of periods) is starting to get quite large, requiring us to estimate a large number of period specific effects $\beta_k$. In addition, the periods are actually shorter, so we have less information available to estimate those period effects. An alternative approach, as you may have anticipated, is to smooth the secular trend, using a model that looks like this:
   
-  $$
-  Y_{ijk} = a_{j} + s(k) + \delta A_{jk} + e_{ijk}
+$$
+Y_{ijk} = a_{j} + s(k) + \delta A_{jk} + e_{ijk}
 $$
   
-  where $s(.)$ is a smooth function of time. And by using a smooth function, we can take this one step further and specify a site-specific smoothing function $s_j(.)$:
+where $s(.)$ is a smooth function of time. And by using a smooth function, we can take this one step further and specify a site-specific smoothing function $s_j(.)$:
   
-  $$
-  Y_{ijk} = a_{j} + s_j(k) + \delta A_{jk} + e_{ijk}
+$$
+Y_{ijk} = a_{j} + s_j(k) + \delta A_{jk} + e_{ijk}
 $$
   
   So, we will use either splines or generalized additive models to estimate the curve, which will allow us to control for the period effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated that measurements further apart.
@@ -53,20 +53,24 @@ $$
 
 Here is the data generation process that we will use to explore the different models:
   
-  $$
-  Y_{ijk} \sim N(\mu_{ijk}, \sigma^2 = 40)\\
+$$
+Y_{ijk} \sim N(\mu_{ijk}, \sigma^2 = 40) \\
 \mu_{ijk} = a_{j} + b_{jk} + \delta A_{jk} \\ 
 a_j \sim N(0, \sigma^2_a = 9) \\
 b_{jk} \sim N(0, \Sigma_b) \\
 \delta = 5\\
 $$
   
-  In this data generation process, the time effect will *not* be explicitly smooth, but the underlying covariance structure used to generate the period effects will induce some level of smoothness. This is similar to what was described in the previous [post](https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/). As in that earlier example, $b_{jk}$ is a site-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b_j} \sim N(0, \Sigma_b)$, where $\Sigma_b = DRD$ is a $25 \times 25$ covariance matrix based on a diagonal matrix $D$ and an auto-regressive correlation structure $R$:
+In this data generation process, the time effect will *not* be explicitly smooth, but the underlying covariance structure used to generate the period effects will induce some level of smoothness. This is similar to what was described in the previous [post](https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/). As in that earlier example, $b_{jk}$ is a site-specific time period effect for each time period $k$; the vector of cluster-time effects $\mathbf{b_j} \sim N(0, \Sigma_b)$, where $\Sigma_b = DRD$ is a $25 \times 25$ covariance matrix based on a diagonal matrix $D$ and an auto-regressive correlation structure $R$:
   
-  $$ D = 4 * I_{25 \times 25}$$
-  and 
+$$
+D = 4 * I_{25 \times 25}
+$$
 
-$$ R =\begin{bmatrix}
+and 
+
+$$ 
+R =\begin{bmatrix}
 1 & \rho & \rho^2 & \dots & \rho^{24} \\
 \rho & 1 & \rho & \dots & \rho^{23} \\
 \rho^2 & \rho & 1 & \dots & \rho^{22} \\
@@ -81,7 +85,7 @@ Now we are ready to implement this data generating process using `simstudy`. Fir
 library(simstudy)
 library(ggplot2)
 library(data.table)
-library(gamm4)
+library(mgcv)
 library(lme4)
 library(splines)
 ```
@@ -102,14 +106,14 @@ Now, we generate 24 sites, create 25 periods for each site, generate the period-
 set.seed(1234)
 
 ds <- genData(24, def, id = "site")
-ds <- addPeriods(ds, 25, "site", perName = "k")
+ds <- addPeriods(ds, 25, "site", perName = "kk")
 
 ds <- addCorGen(dtOld = ds, idvar = "site", 
                 rho = 0.6, corstr = "ar1",
                 dist = "normal", param1 = "mu_b", param2 = "s2_b", cnames = "b")
 
 ds <- trtStepWedge(ds, "site", nWaves = 24, lenWaves = 1, startPer = 1, 
-                   grpName = "A", perName = "k")
+                   grpName = "A", perName = "kk")
 
 ds$site <- as.factor(ds$site)
 
@@ -124,7 +128,7 @@ dd <- addColumns(defOut, dd)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ggplot(data = dd, aes(x = k, y = y)) +
+ggplot(data = dd, aes(x = kk, y = y)) +
   geom_point(aes(color = factor(A, labels = c("Control", "Intervention"))), 
              size = 0.1) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
@@ -144,17 +148,16 @@ ggplot(data = dd, aes(x = k, y = y)) +
 #### GAM with site-specific smoother
 
 ```{r}
-gamfit <- gamm4(y ~ A + s(k, site, bs = "fs", k = 5), data = dd)  
-
-summary(gamfit$mer)
+gamfit <- gam(y ~ A + s(kk, site, bs = "fs", k = 10), data = dd)
+summary(gamfit)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
-ddpred$y <- predict(gamfit$gam, ddpred)
+ddpred <- dd[, .SD[1,] , keyby = .(site, kk)][, .(site, kk, A)]
+ddpred$y <- predict(gamfit, ddpred)
 
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_point(aes(x = k, y = y), data = dd, size = .01, color = "grey75") +
+ggplot(data = ddpred, aes(x = kk, y = y)) +
+  geom_point(aes(x = kk, y = y), data = dd, size = .01, color = "grey75") +
   geom_line(aes(group = A, color = factor(A, labels = c("Control", "Intervention")))) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
   facet_wrap(~site, ncol = 8) +
@@ -171,19 +174,19 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
 #### Mixed effects model with site-specific natural cubic spline
 
 ```{r}
-dd[, normk := (k - min(k))/(max(k) - min(k))]
+dd[, normk := (kk - min(kk))/(max(kk) - min(kk))]
 knots <- c(.2, .4, .6, .8)
 
-fitlme <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
-summary(fitlme)
+fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
+summary(fitlme_s)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, normk, A)]
-ddpred$y <- predict(fitlme, ddpred)
+ddpred <- dd[, .SD[1,] , keyby = .(site, kk)][, .(site, kk, normk, A)]
+ddpred$y <- predict(fitlme_s, ddpred)
 
-ggplot(data = ddpred, aes(x = k, y = y)) +
-  geom_point(aes(x = k, y = y), data = dd, size = .01, color = "grey75") +
+ggplot(data = ddpred, aes(x = kk, y = y)) +
+  geom_point(aes(x = kk, y = y), data = dd, size = .01, color = "grey75") +
   geom_line(aes(group = A, color = factor(A, labels = c("Control", "Intervention")))) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
   facet_wrap(~site, ncol = 8) +
@@ -198,6 +201,16 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
 ```
 
 ```{r, warning=FALSE, message=FALSE}
-fitlme2 <- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
-summary(fitlme2)
+fitlme_k <- lmer(y ~ A + factor(kk) - 1 + (1|site)  , data = dd)
+summary(fitlme_k)
+```
+
+```{r, echo = FALSE}
+load("replications/res.Rdata")
+```
+
+```{r}
+dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]
+dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]
+dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]
 ```
