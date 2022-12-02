@@ -1,0 +1,224 @@
+---
+title: Modeling the secular trend in a stepped-wedge design
+author: Package Build
+date: '2022-12-13'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+
+
+<p><a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/" target="_blank">Recently</a> I started a discussion about modeling secular trends using flexible models in the context of a cluster randomized trial. My explorations on this topic are motivated by a cluster randomized trial using a stepped-wedge study design that I am involved with. The first post focused on more standard parallel designs; here, I want to extend the discussion explicitly to stepped-wedge designs.</p>
+<div id="the-stepped-wedge-design" class="section level3">
+<h3>The stepped-wedge design</h3>
+<p>Stepped-wedge designs are a special class of cluster randomized trial where each cluster is observed in both treatment arms (as opposed to the classic parallel design where only some of the clusters receive the treatment). This is a special case of a cross-over design, where the cross-over is only in one direction: control (or pre-intervention) to intervention. I’ve written about this in a number of different contexts (for example, with respect to <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/">power analysis</a>, <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">complicated ICC patterns</a>, <a href="https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/">using Bayesian models for estimation</a>, <a href="https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/">open cohorts</a>, and <a href="https://www.rdatagen.net/post/2021-12-07-exploring-design-effects-of-stepped-wedge-designs-with-baseline-measurements/">baseline measurements to improve efficiency</a>), and I won’t give too much background.</p>
+<p>In a typical stepped-wedge design (if there is such a thing), groups of sites (considered waves) is randomized to intervention starting times. For example, if there are 24 sites divided into 6 waves (so 4 sites per wave), there will be six starting times and 7 measurement periods (if we want to have at least one baseline/control period for each wave, and at least one intervention period per wave). Schematically, the design looks like this:</p>
+<p><img src="images/6_waves.png" style="width:75.0%" /></p>
+<p>We could use a linear mixed effects model to estimate the intervention effect <span class="math inline">\(\delta\)</span>, which might look like this:</p>
+<p><span class="math display">\[
+  Y_{ijk} = a_{j} + \beta_{k} + \delta A_{jk} + e_{ijk}
+\]</span></p>
+<p>where <span class="math inline">\(Y_{ijk}\)</span> is the (continuous) outcome of individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(a_j\)</span> is the random intercept for site <span class="math inline">\(j\)</span>, and we assume that <span class="math inline">\(a_j \sim N(0, \sigma^2_a)\)</span>. <span class="math inline">\(A_{jk}\)</span> is the intervention indicator for site <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(\beta_k\)</span> is a period-specific effect. And <span class="math inline">\(e_{ijk}\)</span> is the individual level effect.</p>
+<p>In the study that is motivating all of this, the situation is different in a key way.The intervention can only be implemented at one site a time (so that the number of waves equals the number of sites), leading to this alternative schematic:</p>
+<p><img src="images/24_waves.png" style="width:75.0%" /></p>
+<p>The challenge under this scenario, is that <span class="math inline">\(k\)</span> (the number of periods) is starting to get quite large, requiring us to estimate a large number of period specific effects <span class="math inline">\(\beta_k\)</span>. In addition, the periods are actually shorter, so we have less information available to estimate those period effects. An alternative approach, as you may have anticpated, is to smooth the secular trend, using a model that looks like this:</p>
+<p><span class="math display">\[
+  Y_{ijk} = a_{j} + s(k) + \delta A_{jk} + e_{ijk}
+\]</span></p>
+<p>where <span class="math inline">\(s(.)\)</span> is a smooth function of time. And by using a smooth function, we can take this one step further and specify a site-specific smoothing function <span class="math inline">\(s_j(.)\)</span>:</p>
+<p><span class="math display">\[
+  Y_{ijk} = a_{j} + s_j(k) + \delta A_{jk} + e_{ijk}
+\]</span></p>
+<p>So, we will use either splines or generalized additive models to estimate the curve, which will allow us to control for the period effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated that measurements further apart.</p>
+</div>
+<div id="data-generation-process" class="section level3">
+<h3>Data generation process</h3>
+<p>Here is the data generation process that we will use to explore the different models:</p>
+<p><span class="math display">\[
+  Y_{ijk} \sim N(\mu_{ijk}, \sigma^2 = 40)\\
+\mu_{ijk} = a_{j} + b_{jk} + \delta A_{jk} \\
+a_j \sim N(0, \sigma^2_a = 9) \\
+b_{jk} \sim N(0, \Sigma_b) \\
+\delta = 5\\
+\]</span></p>
+<p>In this data generation process, the time effect will <em>not</em> be explicitly smooth, but the underlying covariance structure used to generate the period effects will induce some level of smoothness. This is similar to what was described in the previous <a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/">post</a>. As in that earlier example, <span class="math inline">\(b_{jk}\)</span> is a site-specific time period effect for each time period <span class="math inline">\(k\)</span>; the vector of cluster-time effects <span class="math inline">\(\mathbf{b_j} \sim N(0, \Sigma_b)\)</span>, where <span class="math inline">\(\Sigma_b = DRD\)</span> is a <span class="math inline">\(25 \times 25\)</span> covariance matrix based on a diagonal matrix <span class="math inline">\(D\)</span> and an auto-regressive correlation structure <span class="math inline">\(R\)</span>:</p>
+<p><span class="math display">\[ D = 4 * I_{25 \times 25}\]</span>
+and</p>
+<p><span class="math display">\[ R =\begin{bmatrix}
+1 &amp; \rho &amp; \rho^2 &amp; \dots &amp; \rho^{24} \\
+\rho &amp; 1 &amp; \rho &amp; \dots &amp; \rho^{23} \\
+\rho^2 &amp; \rho &amp; 1 &amp; \dots &amp; \rho^{22} \\
+\vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
+\rho^{24} &amp; \rho^{23} &amp; \rho^{22} &amp; \dots &amp; 1 \\
+\end{bmatrix}, \ \ \rho = 0.6
+\]</span></p>
+<p>Now we are ready to implement this data generating process using <code>simstudy</code>. First the R packages that we will need:</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(data.table)
+library(gamm4)
+library(lme4)
+library(splines)</code></pre>
+<p>The data definitions for <span class="math inline">\(a_j\)</span>, <span class="math inline">\(b_{jk}\)</span>, and <span class="math inline">\(Y_{ijk}\)</span> are established first:</p>
+<pre class="r"><code>def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = 9)
+def &lt;- defData(def, varname = &quot;mu_b&quot;, formula = 0, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, varname = &quot;s2_b&quot;, formula = 16, dist = &quot;nonrandom&quot;)
+
+defOut &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;a + b + 5 * A&quot;, variance = 40)</code></pre>
+<p>Now, we generate 24 sites, create 25 periods for each site, generate the period-specific effects (<span class="math inline">\(b_{jk}\)</span>) for each site, and assign the treatment status based on the stepped-wedge design:</p>
+<pre class="r"><code>set.seed(1234)
+
+ds &lt;- genData(24, def, id = &quot;site&quot;)
+ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;k&quot;)
+
+ds &lt;- addCorGen(dtOld = ds, idvar = &quot;site&quot;, 
+                rho = 0.6, corstr = &quot;ar1&quot;,
+                dist = &quot;normal&quot;, param1 = &quot;mu_b&quot;, param2 = &quot;s2_b&quot;, cnames = &quot;b&quot;)
+
+ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 24, lenWaves = 1, startPer = 1, 
+                   grpName = &quot;A&quot;, perName = &quot;k&quot;)
+
+ds$site &lt;- as.factor(ds$site)
+
+ds</code></pre>
+<pre><code>##      site  k         a mu_b s2_b timeID          b startTrt A
+##   1:    1  0 -3.621197    0   16      1 -3.6889733        1 0
+##   2:    1  1 -3.621197    0   16      2 -0.4945674        1 1
+##   3:    1  2 -3.621197    0   16      3  3.5849760        1 1
+##   4:    1  3 -3.621197    0   16      4  5.9131962        1 1
+##   5:    1  4 -3.621197    0   16      5  1.7732310        1 1
+##  ---                                                         
+## 596:   24 20  1.378768    0   16    596 -2.9569010       24 0
+## 597:   24 21  1.378768    0   16    597 -2.4822812       24 0
+## 598:   24 22  1.378768    0   16    598  5.8878746       24 0
+## 599:   24 23  1.378768    0   16    599  8.6631430       24 0
+## 600:   24 24  1.378768    0   16    600 -1.9344125       24 1</code></pre>
+<p>And finally, we generate 30 individuals per site per period. The figure shows the outcomes for all the sites overtime:</p>
+<pre class="r"><code>dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defOut, dd)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="960" /></p>
+</div>
+<div id="model-estimation" class="section level3">
+<h3>Model estimation</h3>
+<div id="gam-with-site-specific-smoother" class="section level4">
+<h4>GAM with site-specific smoother</h4>
+<pre class="r"><code>gamfit &lt;- gamm4(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd)  
+
+summary(gamfit$mer)</code></pre>
+<pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
+## 
+## REML criterion at convergence: 120914.9
+## 
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -4.3696 -0.6704  0.0036  0.6768  3.9369 
+## 
+## Random effects:
+##  Groups   Name      Variance Std.Dev.
+##  Xr       s(k,site) 244.21   15.627  
+##  Xr.0     s(k,site) 408.60   20.214  
+##  Xr.1     s(k,site) 130.89   11.441  
+##  Residual            47.19    6.869  
+## Number of obs: 18000, groups:  Xr, 72; Xr.0, 24; Xr.1, 24
+## 
+## Fixed effects:
+##              Estimate Std. Error t value
+## X(Intercept)  -0.3448     0.5708  -0.604
+## XA             4.8892     0.3069  15.931
+## 
+## Correlation of Fixed Effects:
+##    X(Int)
+## XA -0.209</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="960" /></p>
+</div>
+<div id="mixed-effects-model-with-site-specific-natural-cubic-spline" class="section level4">
+<h4>Mixed effects model with site-specific natural cubic spline</h4>
+<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
+knots &lt;- c(.2, .4, .6, .8)
+
+fitlme &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
+summary(fitlme)</code></pre>
+<pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
+## Formula: y ~ A + (ns(normk, knots = knots) - 1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 121248.6
+## 
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -4.1473 -0.6741  0.0059  0.6718  4.1520 
+## 
+## Random effects:
+##  Groups   Name                      Variance Std.Dev. Corr                   
+##  site     ns(normk, knots = knots)1 41.67    6.455                           
+##           ns(normk, knots = knots)2 55.74    7.466    -0.01                  
+##           ns(normk, knots = knots)3 35.20    5.933     0.32 -0.46            
+##           ns(normk, knots = knots)4 65.15    8.072     0.07  0.53 -0.35      
+##           ns(normk, knots = knots)5 20.91    4.573     0.67  0.08  0.35 -0.09
+##  Residual                           48.20    6.943                           
+## Number of obs: 18000, groups:  site, 24
+## 
+## Fixed effects:
+##             Estimate Std. Error t value
+## (Intercept)  -1.9842     0.1868  -10.62
+## A             5.1262     0.3046   16.83
+## 
+## Correlation of Fixed Effects:
+##   (Intr)
+## A -0.094</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
+<pre class="r"><code>fitlme2 &lt;- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
+summary(fitlme2)</code></pre>
+<pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
+## Formula: y ~ A + factor(k) - 1 + (1 | site)
+##    Data: dd
+## 
+## REML criterion at convergence: 122676.6
+## 
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -4.3753 -0.6831  0.0021  0.6782  4.3469 
+## 
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  site     (Intercept)  8.656   2.942   
+##  Residual             53.071   7.285   
+## Number of obs: 18000, groups:  site, 24
+## 
+## Fixed effects:
+##             Estimate Std. Error t value
+## A            5.44768    0.18771  29.022
+## factor(k)0  -1.72745    0.65908  -2.621
+## factor(k)1  -2.64486    0.65912  -4.013
+## factor(k)2  -1.07202    0.65926  -1.626
+## factor(k)3   0.85293    0.65949   1.293
+## factor(k)4  -0.46121    0.65982  -0.699
+## factor(k)5   0.23698    0.66024   0.359
+## factor(k)6  -0.36443    0.66074  -0.552
+## factor(k)7   0.01004    0.66135   0.015
+## factor(k)8   0.11976    0.66204   0.181
+## factor(k)9  -0.65182    0.66282  -0.983
+## factor(k)10  0.37542    0.66370   0.566
+## factor(k)11  0.39040    0.66467   0.587
+## factor(k)12  0.26334    0.66573   0.396
+## factor(k)13  1.48157    0.66687   2.222
+## factor(k)14  0.32006    0.66811   0.479
+## factor(k)15 -0.91115    0.66944  -1.361
+## factor(k)16 -0.91487    0.67085  -1.364
+## factor(k)17 -1.92077    0.67235  -2.857
+## factor(k)18 -1.86880    0.67394  -2.773
+## factor(k)19 -2.25838    0.67562  -3.343
+## factor(k)20 -1.13609    0.67738  -1.677
+## factor(k)21 -1.36548    0.67923  -2.010
+## factor(k)22 -0.91023    0.68117  -1.336
+## factor(k)23 -0.52221    0.68318  -0.764
+## factor(k)24 -1.00048    0.68529  -1.460</code></pre>
+</div>
+</div>
