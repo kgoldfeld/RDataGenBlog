@@ -110,11 +110,12 @@ dd &lt;- addColumns(defOut, dd)</code></pre>
 </div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
-<p>I am fitting three models to this simulated data set: (1) specific (fixed) time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each one, I will plot the predicted values over the actual data points.</p>
-<p>Since there is only so much one can glean from a single data set, I’ve also conducted a experiment using 5000 replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. I’ll report the bias of the estimate, the root mean squared error (RMSE), the true standard error of the estimate, the average estimated standard error, and the coverage rate (i.e. proportion of 95% confidence intervals that include the true value 5).</p>
-<div id="fixed-time-period-effects" class="section level4">
-<h4>Fixed time-period effects</h4>
-<pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
+<p>I am fitting three models to this simulated data set: (1) a mixed effects model with fixed time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each estimated model, I’m plotting the predicted values over the actual data points.</p>
+<p>Since there is only so much one can glean from a single data set, I’ve also conducted an experiment using 5000+ replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. (Code for these replications can be found <a href="https://github.com/kgoldfeld/RDataGenBlog/blob/master/content/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/replications/reps_hpc.R" target="_blank">here</a>). These replications provide information about some operating characteristics of the model approaches (estimated bias, root mean squared error (RMSE), average estimated standard error, and coverage rate, i.e. proportion of 95% confidence intervals that include the true value 5).</p>
+<div id="mixed-effects-model-with-fixed-time-period-effects" class="section level4">
+<h4>Mixed effects model with fixed time-period effects</h4>
+<p>Here’s the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which grinded away for a half hour before I mercifully stopped it). THe model does include a site-specific random intercept.</p>
+<pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(k) - 1 + (1|site), data = dd)
 summary(fitlme_k)</code></pre>
 <pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
 ## Formula: y ~ A + factor(k) - 1 + (1 | site)
@@ -160,14 +161,17 @@ summary(fitlme_k)</code></pre>
 ## factor(k)22 -1.32576    0.74050  -1.790
 ## factor(k)23 -1.12176    0.74229  -1.511
 ## factor(k)24 -1.31230    0.74417  -1.763</code></pre>
+<p>The predicted values indicate that the model does not pick up the site-specific variation over time:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="960" /></p>
+<p>We can see that the estimate from this single data of the treatment effect is 5.8 [95% CI: 5.5, 6.2]. Based on the replications, however, the treatment effect estimate from this model is actually <em>unbiased</em>. However, RMSE = 0.97 (which is equivalent to the true variation or standard error of the estimated treatment effect since there is no bias), but the average estimated standard error was only 0.18, and the coverage of the 95% CIs was only 29%. This model doesn’t seem all that promising.</p>
 </div>
 <div id="mixed-effects-model-with-site-specific-natural-cubic-spline" class="section level4">
 <h4>Mixed effects model with site-specific natural cubic spline</h4>
+<p>With the second model, also a mixed effects model, I’ve included a random cubic spline (based on four knots) instead of the random intercept:</p>
 <pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots &lt;- c(.2, .4, .6, .8)
 
-fitlme_s &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
+fitlme_s &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site), data = dd)
 summary(fitlme_s)</code></pre>
 <pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
 ## Formula: y ~ A + (ns(normk, knots = knots) - 1 | site)
@@ -197,54 +201,37 @@ summary(fitlme_s)</code></pre>
 ## Correlation of Fixed Effects:
 ##   (Intr)
 ## A -0.088</code></pre>
+<p>Now we can see that the model predictions reflect the site-specific time trends:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
+<p>This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 57%. There is room for improvement.</p>
 </div>
 <div id="gam-with-site-specific-smoother" class="section level4">
 <h4>GAM with site-specific smoother</h4>
-<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 10), data = dd)
+<p>This last model is a GAM, and I use the <code>gam</code> function from the <code>mgcv</code> package. A key parameters in the smoothing function <code>s</code> is the <em>bs</em> argument for the type of basis spline. I’ve used “fs”, which allows for “random factor smooth interactions,” which is what we need here. In addition, the dimension of the basis (the argument <em>k</em>, not to be confused with the period <em>k</em>), was set by evaluating the selection criterion (GCV).</p>
+<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 20), data = dd)
 summary(gamfit)</code></pre>
 <pre><code>## 
 ## Family: gaussian 
 ## Link function: identity 
 ## 
 ## Formula:
-## y ~ A + s(k, site, bs = &quot;fs&quot;, k = 10)
+## y ~ A + s(k, site, bs = &quot;fs&quot;, k = 20)
 ## 
 ## Parametric coefficients:
 ##             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)  -0.2515     0.6203  -0.405    0.685    
-## A             4.8612     0.4175  11.644   &lt;2e-16 ***
+## (Intercept)  -0.4669     0.7310  -0.639    0.523    
+## A             5.3006     0.5862   9.042   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
 ## Approximate significance of smooth terms:
 ##             edf Ref.df     F p-value    
-## s(k,site) 223.8    239 38.41  &lt;2e-16 ***
+## s(k,site) 404.6    479 21.26  &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## R-sq.(adj) =  0.399   Deviance explained = 40.6%
-## GCV = 41.919  Scale est. = 41.393    n = 18000</code></pre>
+## R-sq.(adj) =  0.418   Deviance explained = 43.1%
+## GCV = 40.985  Scale est. = 40.059    n = 18000</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
-<pre class="r"><code>dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]</code></pre>
-<pre><code>##        lmek     lmes      gam
-## 1: 4.905926 4.907276 4.986498</code></pre>
-<pre class="r"><code>dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]</code></pre>
-<pre><code>##         lmek      lmes       gam
-## 1: 0.1826432 0.3042101 0.4156805</code></pre>
-<pre class="r"><code>dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]</code></pre>
-<pre><code>##         lmek      lmes       gam
-## 1: 0.9531896 0.6006919 0.6274533</code></pre>
-<pre class="r"><code>coverage &lt;- function(x, a, b) {
-  range &lt;- a + c(-1,1) * 1.96 * b
-  (range[1] &lt; x &amp; x &lt; range[2])
-}
-
-dres[, mean(mapply(&quot;coverage&quot;, 5, est.lmek, se.lmek))]</code></pre>
-<pre><code>## [1] 0.334</code></pre>
-<pre class="r"><code>dres[, mean(mapply(&quot;coverage&quot;, 5, est.lmes, se.lmes))]</code></pre>
-<pre><code>## [1] 0.667</code></pre>
-<pre class="r"><code>dres[, mean(mapply(&quot;coverage&quot;, 5, est.gam, se.gam))]</code></pre>
-<pre><code>## [1] 0.75</code></pre>
 </div>
 </div>

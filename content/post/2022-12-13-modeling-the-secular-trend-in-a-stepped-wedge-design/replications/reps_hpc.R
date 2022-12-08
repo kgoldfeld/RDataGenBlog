@@ -49,7 +49,7 @@ s_model <- function(dd) {
   fitlme_s <- lmer(y ~ A + ( splines::ns(normk, knots = knots) - 1 | site ), data = dd) 
   res_fitlme_s <- summary(fitlme_s)$coefficients["A", c("Estimate", "Std. Error")]
   
-  fitgam <- gam(y ~ A + s(k, site, bs = "fs", k = 7), data = dd)  
+  fitgam <- gam(y ~ A + s(k, site, bs = "fs", k = 20), data = dd)  
   res_fitgam <- c(summary(fitgam)$p.coeff["A"], summary(fitgam)$se["A"])
 
   

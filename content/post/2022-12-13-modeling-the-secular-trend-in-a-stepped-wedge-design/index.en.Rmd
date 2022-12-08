@@ -145,16 +145,20 @@ ggplot(data = dd, aes(x = k, y = y)) +
 
 ### Model estimation
 
-I am fitting three models to this simulated data set: (1) specific (fixed) time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each one, I will plot the predicted values over the actual data points.
+I am fitting three models to this simulated data set: (1) a mixed effects model with fixed time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each estimated model, I'm plotting the predicted values over the actual data points.
 
-Since there is only so much one can glean from a single data set, I've also conducted a experiment using 5000 replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. I'll report the bias of the estimate, the root mean squared error (RMSE), the true standard error of the estimate, the average estimated standard error, and the coverage rate (i.e. proportion of 95% confidence intervals that include the true value 5).
+Since there is only so much one can glean from a single data set, I've also conducted an experiment using 5000+ replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. (Code for these replications can be found [here](https://github.com/kgoldfeld/RDataGenBlog/blob/master/content/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/replications/reps_hpc.R){target="_blank"}). These replications provide information about some operating characteristics of the model approaches (estimated bias, root mean squared error (RMSE), average estimated standard error, and coverage rate, i.e. proportion of 95% confidence intervals that include the true value 5).
 
-#### Fixed time-period effects
+#### Mixed effects model with fixed time-period effects
+
+Here's the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which grinded away for a half hour before I mercifully stopped it). THe model does include a site-specific random intercept.
 
 ```{r, warning=FALSE, message=FALSE}
-fitlme_k <- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
+fitlme_k <- lmer(y ~ A + factor(k) - 1 + (1|site), data = dd)
 summary(fitlme_k)
 ```
+
+The predicted values indicate that the model does not pick up the site-specific variation over time:
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
 ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
@@ -175,15 +179,21 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
   ) 
 ```
 
+We can see that the estimate from this single data of the treatment effect is 5.8 [95\% CI: 5.5, 6.2]. Based on the replications, however, the treatment effect estimate from this model is actually *unbiased*. However, RMSE = 0.97 (which is equivalent to the true variation or standard error of the estimated treatment effect since there is no bias), but the average estimated standard error was only 0.18, and the coverage of the 95\% CIs was only 29\%. This model doesn't seem all that promising.
+
 #### Mixed effects model with site-specific natural cubic spline
+
+With the second model, also a mixed effects model, I've included a random cubic spline (based on four knots) instead of the random intercept:
 
 ```{r}
 dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots <- c(.2, .4, .6, .8)
 
-fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
+fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site), data = dd)
 summary(fitlme_s)
 ```
+
+Now we can see that the model predictions reflect the site-specific time trends:
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
 ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, normk, A)]
@@ -204,10 +214,14 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
   ) 
 ```
 
+This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 57%. There is room for improvement.
+
 #### GAM with site-specific smoother
 
+This last model is a GAM, and I use the `gam` function from the `mgcv` package. A key parameters in the smoothing function `s` is the *bs* argument for the type of basis spline. I've used "fs", which allows for "random factor smooth interactions," which is what we need here. In addition, the dimension of the basis (the argument *k*, not to be confused with the period *k*), was set by evaluating the selection criterion (GCV).
+
 ```{r}
-gamfit <- gam(y ~ A + s(k, site, bs = "fs", k = 10), data = dd)
+gamfit <- gam(y ~ A + s(k, site, bs = "fs", k = 20), data = dd)
 summary(gamfit)
 ```
 
@@ -230,23 +244,3 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
   ) 
 ```
 
-```{r, echo = FALSE}
-load("replications/res10.8.Rdata")
-```
-
-```{r}
-dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]
-dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]
-dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]
-```
-```{r}
-coverage <- function(x, a, b) {
-  range <- a + c(-1,1) * 1.96 * b
-  (range[1] < x & x < range[2])
-}
-
-dres[, mean(mapply("coverage", 5, est.lmek, se.lmek))]
-dres[, mean(mapply("coverage", 5, est.lmes, se.lmes))]
-dres[, mean(mapply("coverage", 5, est.gam, se.gam))]
-
-```
