@@ -47,7 +47,7 @@ $$
 Y_{ijk} = a_{j} + s_j(k) + \delta A_{jk} + e_{ijk}
 $$
   
-  So, we will use either splines or generalized additive models to estimate the curve, which will allow us to control for the period effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated that measurements further apart.
+So, we will use either splines or generalized additive models to estimate the curve, which will allow us to control for the period effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated that measurements further apart.
 
 ### Data generation process
 
@@ -76,7 +76,7 @@ R =\begin{bmatrix}
 \rho^2 & \rho & 1 & \dots & \rho^{22} \\
 \vdots & \vdots & \vdots & \vdots & \vdots \\
 \rho^{24} & \rho^{23} & \rho^{22} & \dots & 1 \\
-\end{bmatrix}, \ \ \rho = 0.6 
+\end{bmatrix}, \ \ \rho = 0.7 
 $$
   
 Now we are ready to implement this data generating process using `simstudy`. First the R packages that we will need:
@@ -106,14 +106,14 @@ Now, we generate 24 sites, create 25 periods for each site, generate the period-
 set.seed(1234)
 
 ds <- genData(24, def, id = "site")
-ds <- addPeriods(ds, 25, "site", perName = "kk")
+ds <- addPeriods(ds, 25, "site", perName = "k")
 
 ds <- addCorGen(dtOld = ds, idvar = "site", 
-                rho = 0.6, corstr = "ar1",
+                rho = 0.8, corstr = "ar1",
                 dist = "normal", param1 = "mu_b", param2 = "s2_b", cnames = "b")
 
 ds <- trtStepWedge(ds, "site", nWaves = 24, lenWaves = 1, startPer = 1, 
-                   grpName = "A", perName = "kk")
+                   grpName = "A", perName = "k")
 
 ds$site <- as.factor(ds$site)
 
@@ -128,7 +128,7 @@ dd <- addColumns(defOut, dd)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ggplot(data = dd, aes(x = kk, y = y)) +
+ggplot(data = dd, aes(x = k, y = y)) +
   geom_point(aes(color = factor(A, labels = c("Control", "Intervention"))), 
              size = 0.1) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
@@ -145,19 +145,23 @@ ggplot(data = dd, aes(x = kk, y = y)) +
 
 ### Model estimation
 
-#### GAM with site-specific smoother
+I am fitting three models to this simulated data set: (1) specific (fixed) time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each one, I will plot the predicted values over the actual data points.
 
-```{r}
-gamfit <- gam(y ~ A + s(kk, site, bs = "fs", k = 10), data = dd)
-summary(gamfit)
+Since there is only so much one can glean from a single data set, I've also conducted a experiment using 5000 replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. I'll report the bias of the estimate, the root mean squared error (RMSE), the true standard error of the estimate, the average estimated standard error, and the coverage rate (i.e. proportion of 95% confidence intervals that include the true value 5).
+
+#### Fixed time-period effects
+
+```{r, warning=FALSE, message=FALSE}
+fitlme_k <- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
+summary(fitlme_k)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ddpred <- dd[, .SD[1,] , keyby = .(site, kk)][, .(site, kk, A)]
-ddpred$y <- predict(gamfit, ddpred)
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y <- predict(fitlme_k, ddpred)
 
-ggplot(data = ddpred, aes(x = kk, y = y)) +
-  geom_point(aes(x = kk, y = y), data = dd, size = .01, color = "grey75") +
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_point(aes(x = k, y = y), data = dd, size = .01, color = "grey75") +
   geom_line(aes(group = A, color = factor(A, labels = c("Control", "Intervention")))) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
   facet_wrap(~site, ncol = 8) +
@@ -174,7 +178,7 @@ ggplot(data = ddpred, aes(x = kk, y = y)) +
 #### Mixed effects model with site-specific natural cubic spline
 
 ```{r}
-dd[, normk := (kk - min(kk))/(max(kk) - min(kk))]
+dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots <- c(.2, .4, .6, .8)
 
 fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
@@ -182,11 +186,11 @@ summary(fitlme_s)
 ```
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
-ddpred <- dd[, .SD[1,] , keyby = .(site, kk)][, .(site, kk, normk, A)]
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, normk, A)]
 ddpred$y <- predict(fitlme_s, ddpred)
 
-ggplot(data = ddpred, aes(x = kk, y = y)) +
-  geom_point(aes(x = kk, y = y), data = dd, size = .01, color = "grey75") +
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_point(aes(x = k, y = y), data = dd, size = .01, color = "grey75") +
   geom_line(aes(group = A, color = factor(A, labels = c("Control", "Intervention")))) +
   scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
   facet_wrap(~site, ncol = 8) +
@@ -200,17 +204,49 @@ ggplot(data = ddpred, aes(x = kk, y = y)) +
   ) 
 ```
 
-```{r, warning=FALSE, message=FALSE}
-fitlme_k <- lmer(y ~ A + factor(kk) - 1 + (1|site)  , data = dd)
-summary(fitlme_k)
+#### GAM with site-specific smoother
+
+```{r}
+gamfit <- gam(y ~ A + s(k, site, bs = "fs", k = 10), data = dd)
+summary(gamfit)
+```
+
+```{r, echo = FALSE, fig.width = 10, fig.height = 4}
+ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
+ddpred$y <- predict(gamfit, ddpred)
+
+ggplot(data = ddpred, aes(x = k, y = y)) +
+  geom_point(aes(x = k, y = y), data = dd, size = .01, color = "grey75") +
+  geom_line(aes(group = A, color = factor(A, labels = c("Control", "Intervention")))) +
+  scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
+  facet_wrap(~site, ncol = 8) +
+  facet_wrap(~site, ncol = 8) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        axis.text.y = element_text(size = 7),
+        strip.text = element_text(size = 8),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()
+  ) 
 ```
 
 ```{r, echo = FALSE}
-load("replications/res.Rdata")
+load("replications/res10.8.Rdata")
 ```
 
 ```{r}
 dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]
 dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]
 dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]
+```
+```{r}
+coverage <- function(x, a, b) {
+  range <- a + c(-1,1) * 1.96 * b
+  (range[1] < x & x < range[2])
+}
+
+dres[, mean(mapply("coverage", 5, est.lmek, se.lmek))]
+dres[, mean(mapply("coverage", 5, est.lmes, se.lmes))]
+dres[, mean(mapply("coverage", 5, est.gam, se.gam))]
+
 ```

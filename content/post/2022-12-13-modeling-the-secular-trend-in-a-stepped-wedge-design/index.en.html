@@ -60,7 +60,7 @@ R =\begin{bmatrix}
 \rho^2 &amp; \rho &amp; 1 &amp; \dots &amp; \rho^{22} \\
 \vdots &amp; \vdots &amp; \vdots &amp; \vdots &amp; \vdots \\
 \rho^{24} &amp; \rho^{23} &amp; \rho^{22} &amp; \dots &amp; 1 \\
-\end{bmatrix}, \ \ \rho = 0.6
+\end{bmatrix}, \ \ \rho = 0.7
 \]</span></p>
 <p>Now we are ready to implement this data generating process using <code>simstudy</code>. First the R packages that we will need:</p>
 <pre class="r"><code>library(simstudy)
@@ -79,30 +79,30 @@ defOut &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;a + b + 5 * A&q
 <pre class="r"><code>set.seed(1234)
 
 ds &lt;- genData(24, def, id = &quot;site&quot;)
-ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;kk&quot;)
+ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;k&quot;)
 
 ds &lt;- addCorGen(dtOld = ds, idvar = &quot;site&quot;, 
-                rho = 0.6, corstr = &quot;ar1&quot;,
+                rho = 0.8, corstr = &quot;ar1&quot;,
                 dist = &quot;normal&quot;, param1 = &quot;mu_b&quot;, param2 = &quot;s2_b&quot;, cnames = &quot;b&quot;)
 
 ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 24, lenWaves = 1, startPer = 1, 
-                   grpName = &quot;A&quot;, perName = &quot;kk&quot;)
+                   grpName = &quot;A&quot;, perName = &quot;k&quot;)
 
 ds$site &lt;- as.factor(ds$site)
 
 ds</code></pre>
-<pre><code>##      site kk         a mu_b s2_b timeID          b startTrt A
+<pre><code>##      site  k         a mu_b s2_b timeID          b startTrt A
 ##   1:    1  0 -3.621197    0   16      1 -3.6889733        1 0
-##   2:    1  1 -3.621197    0   16      2 -0.4945674        1 1
-##   3:    1  2 -3.621197    0   16      3  3.5849760        1 1
-##   4:    1  3 -3.621197    0   16      4  5.9131962        1 1
-##   5:    1  4 -3.621197    0   16      5  1.7732310        1 1
+##   2:    1  1 -3.621197    0   16      2 -1.6620662        1 1
+##   3:    1  2 -3.621197    0   16      3  1.5816344        1 1
+##   4:    1  3 -3.621197    0   16      4  4.0869655        1 1
+##   5:    1  4 -3.621197    0   16      5  1.9385573        1 1
 ##  ---                                                         
-## 596:   24 20  1.378768    0   16    596 -2.9569010       24 0
-## 597:   24 21  1.378768    0   16    597 -2.4822812       24 0
-## 598:   24 22  1.378768    0   16    598  5.8878746       24 0
-## 599:   24 23  1.378768    0   16    599  8.6631430       24 0
-## 600:   24 24  1.378768    0   16    600 -1.9344125       24 1</code></pre>
+## 596:   24 20  1.378768    0   16    596 -1.5470625       24 0
+## 597:   24 21  1.378768    0   16    597 -1.7687554       24 0
+## 598:   24 22  1.378768    0   16    598  4.1179282       24 0
+## 599:   24 23  1.378768    0   16    599  7.1421562       24 0
+## 600:   24 24  1.378768    0   16    600  0.3645013       24 1</code></pre>
 <p>And finally, we generate 30 individuals per site per period. The figure shows the outcomes for all the sites overtime:</p>
 <pre class="r"><code>dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
 dd &lt;- addColumns(defOut, dd)</code></pre>
@@ -110,37 +110,61 @@ dd &lt;- addColumns(defOut, dd)</code></pre>
 </div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
-<div id="gam-with-site-specific-smoother" class="section level4">
-<h4>GAM with site-specific smoother</h4>
-<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(kk, site, bs = &quot;fs&quot;, k = 10), data = dd)
-summary(gamfit)</code></pre>
-<pre><code>## 
-## Family: gaussian 
-## Link function: identity 
+<p>I am fitting three models to this simulated data set: (1) specific (fixed) time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each one, I will plot the predicted values over the actual data points.</p>
+<p>Since there is only so much one can glean from a single data set, I’ve also conducted a experiment using 5000 replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. I’ll report the bias of the estimate, the root mean squared error (RMSE), the true standard error of the estimate, the average estimated standard error, and the coverage rate (i.e. proportion of 95% confidence intervals that include the true value 5).</p>
+<div id="fixed-time-period-effects" class="section level4">
+<h4>Fixed time-period effects</h4>
+<pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(k) - 1 + (1|site)  , data = dd)
+summary(fitlme_k)</code></pre>
+<pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
+## Formula: y ~ A + factor(k) - 1 + (1 | site)
+##    Data: dd
 ## 
-## Formula:
-## y ~ A + s(kk, site, bs = &quot;fs&quot;, k = 10)
+## REML criterion at convergence: 122095.4
 ## 
-## Parametric coefficients:
-##             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)  -0.2609     0.5883  -0.444    0.657    
-## A             4.7112     0.4107  11.472   &lt;2e-16 ***
-## ---
-## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## Scaled residuals: 
+##     Min      1Q  Median      3Q     Max 
+## -4.1545 -0.6781 -0.0090  0.6765  4.2816 
 ## 
-## Approximate significance of smooth terms:
-##            edf Ref.df     F p-value    
-## s(kk,site) 230    239 33.13  &lt;2e-16 ***
-## ---
-## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## Random effects:
+##  Groups   Name        Variance Std.Dev.
+##  site     (Intercept) 10.76    3.280   
+##  Residual             51.37    7.167   
+## Number of obs: 18000, groups:  site, 24
 ## 
-## R-sq.(adj) =  0.361   Deviance explained = 36.9%
-## GCV = 43.886  Scale est. = 43.321    n = 18000</code></pre>
+## Fixed effects:
+##             Estimate Std. Error t value
+## A            5.83701    0.18482  31.582
+## factor(k)0  -1.72745    0.72085  -2.396
+## factor(k)1  -2.44884    0.72089  -3.397
+## factor(k)2  -1.61074    0.72102  -2.234
+## factor(k)3  -0.09524    0.72122  -0.132
+## factor(k)4  -0.85081    0.72151  -1.179
+## factor(k)5  -0.11645    0.72188  -0.161
+## factor(k)6  -0.57468    0.72233  -0.796
+## factor(k)7  -0.13628    0.72287  -0.189
+## factor(k)8   0.01035    0.72348   0.014
+## factor(k)9  -0.63440    0.72418  -0.876
+## factor(k)10  0.33878    0.72496   0.467
+## factor(k)11  0.34778    0.72581   0.479
+## factor(k)12  0.21387    0.72675   0.294
+## factor(k)13  1.25549    0.72777   1.725
+## factor(k)14  0.60881    0.72887   0.835
+## factor(k)15 -0.30760    0.73005  -0.421
+## factor(k)16 -0.56911    0.73131  -0.778
+## factor(k)17 -1.43275    0.73265  -1.956
+## factor(k)18 -1.46688    0.73406  -1.998
+## factor(k)19 -2.12147    0.73555  -2.884
+## factor(k)20 -1.47431    0.73712  -2.000
+## factor(k)21 -1.85067    0.73877  -2.505
+## factor(k)22 -1.32576    0.74050  -1.790
+## factor(k)23 -1.12176    0.74229  -1.511
+## factor(k)24 -1.31230    0.74417  -1.763</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="960" /></p>
 </div>
 <div id="mixed-effects-model-with-site-specific-natural-cubic-spline" class="section level4">
 <h4>Mixed effects model with site-specific natural cubic spline</h4>
-<pre class="r"><code>dd[, normk := (kk - min(kk))/(max(kk) - min(kk))]
+<pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots &lt;- c(.2, .4, .6, .8)
 
 fitlme_s &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site)  , data = dd) # 4
@@ -149,85 +173,78 @@ summary(fitlme_s)</code></pre>
 ## Formula: y ~ A + (ns(normk, knots = knots) - 1 | site)
 ##    Data: dd
 ## 
-## REML criterion at convergence: 121248.6
+## REML criterion at convergence: 120120.9
 ## 
 ## Scaled residuals: 
 ##     Min      1Q  Median      3Q     Max 
-## -4.1473 -0.6741  0.0059  0.6718  4.1520 
+## -4.0707 -0.6768  0.0080  0.6671  4.1554 
 ## 
 ## Random effects:
 ##  Groups   Name                      Variance Std.Dev. Corr                   
-##  site     ns(normk, knots = knots)1 41.67    6.455                           
-##           ns(normk, knots = knots)2 55.74    7.466    -0.01                  
-##           ns(normk, knots = knots)3 35.20    5.933     0.32 -0.46            
-##           ns(normk, knots = knots)4 65.15    8.072     0.07  0.53 -0.35      
-##           ns(normk, knots = knots)5 20.91    4.573     0.67  0.08  0.35 -0.09
-##  Residual                           48.20    6.943                           
+##  site     ns(normk, knots = knots)1 30.97    5.565                           
+##           ns(normk, knots = knots)2 59.08    7.686     0.33                  
+##           ns(normk, knots = knots)3 28.10    5.301     0.12 -0.10            
+##           ns(normk, knots = knots)4 75.10    8.666     0.16  0.55 -0.31      
+##           ns(normk, knots = knots)5 28.28    5.318     0.49  0.14  0.58 -0.28
+##  Residual                           45.25    6.727                           
 ## Number of obs: 18000, groups:  site, 24
 ## 
 ## Fixed effects:
 ##             Estimate Std. Error t value
-## (Intercept)  -1.9842     0.1868  -10.62
-## A             5.1262     0.3046   16.83
+## (Intercept)  -2.0677     0.1830  -11.30
+## A             5.0023     0.3052   16.39
 ## 
 ## Correlation of Fixed Effects:
 ##   (Intr)
-## A -0.094</code></pre>
+## A -0.088</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
-<pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(kk) - 1 + (1|site)  , data = dd)
-summary(fitlme_k)</code></pre>
-<pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
-## Formula: y ~ A + factor(kk) - 1 + (1 | site)
-##    Data: dd
+</div>
+<div id="gam-with-site-specific-smoother" class="section level4">
+<h4>GAM with site-specific smoother</h4>
+<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 10), data = dd)
+summary(gamfit)</code></pre>
+<pre><code>## 
+## Family: gaussian 
+## Link function: identity 
 ## 
-## REML criterion at convergence: 122676.6
+## Formula:
+## y ~ A + s(k, site, bs = &quot;fs&quot;, k = 10)
 ## 
-## Scaled residuals: 
-##     Min      1Q  Median      3Q     Max 
-## -4.3753 -0.6831  0.0021  0.6782  4.3469 
+## Parametric coefficients:
+##             Estimate Std. Error t value Pr(&gt;|t|)    
+## (Intercept)  -0.2515     0.6203  -0.405    0.685    
+## A             4.8612     0.4175  11.644   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## Random effects:
-##  Groups   Name        Variance Std.Dev.
-##  site     (Intercept)  8.656   2.942   
-##  Residual             53.071   7.285   
-## Number of obs: 18000, groups:  site, 24
+## Approximate significance of smooth terms:
+##             edf Ref.df     F p-value    
+## s(k,site) 223.8    239 38.41  &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## Fixed effects:
-##              Estimate Std. Error t value
-## A             5.44768    0.18771  29.022
-## factor(kk)0  -1.72745    0.65908  -2.621
-## factor(kk)1  -2.64486    0.65912  -4.013
-## factor(kk)2  -1.07202    0.65926  -1.626
-## factor(kk)3   0.85293    0.65949   1.293
-## factor(kk)4  -0.46121    0.65982  -0.699
-## factor(kk)5   0.23698    0.66024   0.359
-## factor(kk)6  -0.36443    0.66074  -0.552
-## factor(kk)7   0.01004    0.66135   0.015
-## factor(kk)8   0.11976    0.66204   0.181
-## factor(kk)9  -0.65182    0.66282  -0.983
-## factor(kk)10  0.37542    0.66370   0.566
-## factor(kk)11  0.39040    0.66467   0.587
-## factor(kk)12  0.26334    0.66573   0.396
-## factor(kk)13  1.48157    0.66687   2.222
-## factor(kk)14  0.32006    0.66811   0.479
-## factor(kk)15 -0.91115    0.66944  -1.361
-## factor(kk)16 -0.91487    0.67085  -1.364
-## factor(kk)17 -1.92077    0.67235  -2.857
-## factor(kk)18 -1.86880    0.67394  -2.773
-## factor(kk)19 -2.25838    0.67562  -3.343
-## factor(kk)20 -1.13609    0.67738  -1.677
-## factor(kk)21 -1.36548    0.67923  -2.010
-## factor(kk)22 -0.91023    0.68117  -1.336
-## factor(kk)23 -0.52221    0.68318  -0.764
-## factor(kk)24 -1.00048    0.68529  -1.460</code></pre>
+## R-sq.(adj) =  0.399   Deviance explained = 40.6%
+## GCV = 41.919  Scale est. = 41.393    n = 18000</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
 <pre class="r"><code>dres[, .(lmek = mean(est.lmek), lmes = mean(est.lmes), gam = mean(est.gam))]</code></pre>
-<pre><code>##       lmek     lmes      gam
-## 1: 5.35507 5.260427 5.280913</code></pre>
+<pre><code>##        lmek     lmes      gam
+## 1: 4.905926 4.907276 4.986498</code></pre>
 <pre class="r"><code>dres[, .(lmek = mean(se.lmek), lmes = mean(se.lmes), gam = mean(se.gam))]</code></pre>
-<pre><code>##       lmek      lmes       gam
-## 1: 0.18741 0.3039803 0.3055636</code></pre>
+<pre><code>##         lmek      lmes       gam
+## 1: 0.1826432 0.3042101 0.4156805</code></pre>
 <pre class="r"><code>dres[, .(lmek = sd(est.lmek), lmes = sd(est.lmes), gam = sd(est.gam))]</code></pre>
 <pre><code>##         lmek      lmes       gam
-## 1: 0.7960888 0.8607204 0.8716813</code></pre>
+## 1: 0.9531896 0.6006919 0.6274533</code></pre>
+<pre class="r"><code>coverage &lt;- function(x, a, b) {
+  range &lt;- a + c(-1,1) * 1.96 * b
+  (range[1] &lt; x &amp; x &lt; range[2])
+}
+
+dres[, mean(mapply(&quot;coverage&quot;, 5, est.lmek, se.lmek))]</code></pre>
+<pre><code>## [1] 0.334</code></pre>
+<pre class="r"><code>dres[, mean(mapply(&quot;coverage&quot;, 5, est.lmes, se.lmes))]</code></pre>
+<pre><code>## [1] 0.667</code></pre>
+<pre class="r"><code>dres[, mean(mapply(&quot;coverage&quot;, 5, est.gam, se.gam))]</code></pre>
+<pre><code>## [1] 0.75</code></pre>
 </div>
 </div>
