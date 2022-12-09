@@ -1,4 +1,4 @@
-load("sw_smooth_10.8.rda")
+
 
 coverage <- function(x, a, b) {
   range <- a + c(-1,1) * 1.96 * b
@@ -17,9 +17,10 @@ performance <- function(true, est, se) {
               est.se = est.se, coverage = coverage))
 }
 
-
-load("sw_smooth_10.7.rda")
+load("sw_smooth_12.8.rda")
 res <- rbindlist(res[sapply(res, function(x) length(x) == 6)])
+
+res <- res[est.gam < 20]
 
 rbind(
 res[, performance(5, est.lmek, se.lmek)],

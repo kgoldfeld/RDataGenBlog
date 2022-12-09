@@ -26,7 +26,7 @@ s_generate <- function(list_of_defs) {
   ds <- genData(24, def, id = "site")
   ds <- addPeriods(ds, 25, "site", perName = "k")
   ds <- addCorGen(dtOld = ds, idvar = "site", 
-                  rho = 0.7, corstr = "ar1",
+                  rho = 0.8, corstr = "ar1",
                   dist = "normal", param1 = "mu_b", param2 = "s2_b", cnames = "b")
   ds <- trtStepWedge(ds, "site", nWaves = 24, lenWaves = 1, startPer = 1, 
                      grpName = "A", perName = "k")
@@ -49,7 +49,7 @@ s_model <- function(dd) {
   fitlme_s <- lmer(y ~ A + ( splines::ns(normk, knots = knots) - 1 | site ), data = dd) 
   res_fitlme_s <- summary(fitlme_s)$coefficients["A", c("Estimate", "Std. Error")]
   
-  fitgam <- gam(y ~ A + s(k, site, bs = "fs", k = 20), data = dd)  
+  fitgam <- gam(y ~ A + s(k, site, bs = "fs", k = 11), data = dd)  
   res_fitgam <- c(summary(fitgam)$p.coeff["A"], summary(fitgam)$se["A"])
 
   
@@ -76,7 +76,7 @@ job <- Slurm_lapply(
   tmp_path = "/gpfs/data/troxellab/ksg/scratch",
   overwrite = TRUE,
   job_name = "i_sw",
-  sbatch_opt = list(time = "03:00:00", partition = "cpu_short"),
+  sbatch_opt = list(time = "05:00:00", partition = "cpu_short"),
   export = c("s_generate", "s_model", "s_single_rep"),
   plan = "wait"
 )

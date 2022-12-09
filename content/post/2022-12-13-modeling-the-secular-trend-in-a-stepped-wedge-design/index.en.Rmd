@@ -151,7 +151,7 @@ Since there is only so much one can glean from a single data set, I've also cond
 
 #### Mixed effects model with fixed time-period effects
 
-Here's the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which grinded away for a half hour before I mercifully stopped it). THe model does include a site-specific random intercept.
+Here's the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which ground away for a half hour before I mercifully stopped it). The model does include a site-specific random intercept.
 
 ```{r, warning=FALSE, message=FALSE}
 fitlme_k <- lmer(y ~ A + factor(k) - 1 + (1|site), data = dd)
@@ -189,7 +189,7 @@ With the second model, also a mixed effects model, I've included a random cubic 
 dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots <- c(.2, .4, .6, .8)
 
-fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site), data = dd)
+fitlme_s <- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site ), data = dd)
 summary(fitlme_s)
 ```
 
@@ -214,16 +214,18 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
   ) 
 ```
 
-This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 57%. There is room for improvement.
+This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 56\%. There is room for improvement.
 
 #### GAM with site-specific smoother
 
-This last model is a GAM, and I use the `gam` function from the `mgcv` package. A key parameters in the smoothing function `s` is the *bs* argument for the type of basis spline. I've used "fs", which allows for "random factor smooth interactions," which is what we need here. In addition, the dimension of the basis (the argument *k*, not to be confused with the period *k*), was set by evaluating the selection criterion (GCV).
+This last model is a GAM (using the `gam` function from the `mgcv` package). A key parameter in the smoothing function `s` is the *bs* argument for the type of basis spline. I've used the option "fs" that allows for "random factor smooth interactions," which is what we need here. In addition, the dimension of the basis (the argument *k*, not to be confused with the period *k*), was set by evaluating the selection criterion (GCV) as well investigating the RMSE and the average estimated standard errors. A value between 10 and 15 seems to be ideal, I've settled on $k = 12$.
 
 ```{r}
-gamfit <- gam(y ~ A + s(k, site, bs = "fs", k = 20), data = dd)
+gamfit <- gam(y ~ A + s(k, site, bs = "fs", k = 12), data = dd)
 summary(gamfit)
 ```
+
+The predicted value plot highlights that this model has estimated site-specific secular functions that are a little more wriggly than the cubic splines. 
 
 ```{r, echo = FALSE, fig.width = 10, fig.height = 4}
 ddpred <- dd[, .SD[1,] , keyby = .(site, k)][, .(site, k, A)]
@@ -244,3 +246,6 @@ ggplot(data = ddpred, aes(x = k, y = y)) +
   ) 
 ```
 
+In spite of the less smooth curve, the GAM estimate is unbiased as well with a slightly lower RMSE (0.76) then the cubic spline model (0.78). Better yet, the estimated standard errors averaged 0.45, and the coverage is 76% (compared to 56\% from the cubic spline model). 
+
+In general, at least in this simulation setting, the GAM seems to be an improvement over the random cubic spline model, but it still underestimates the measure of uncertainty. There is more work to be done; perhaps it will be possible to bootstrap robust standard errors. To be continued ...

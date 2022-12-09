@@ -114,7 +114,7 @@ dd &lt;- addColumns(defOut, dd)</code></pre>
 <p>Since there is only so much one can glean from a single data set, I’ve also conducted an experiment using 5000+ replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. (Code for these replications can be found <a href="https://github.com/kgoldfeld/RDataGenBlog/blob/master/content/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/replications/reps_hpc.R" target="_blank">here</a>). These replications provide information about some operating characteristics of the model approaches (estimated bias, root mean squared error (RMSE), average estimated standard error, and coverage rate, i.e. proportion of 95% confidence intervals that include the true value 5).</p>
 <div id="mixed-effects-model-with-fixed-time-period-effects" class="section level4">
 <h4>Mixed effects model with fixed time-period effects</h4>
-<p>Here’s the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which grinded away for a half hour before I mercifully stopped it). THe model does include a site-specific random intercept.</p>
+<p>Here’s the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which ground away for a half hour before I mercifully stopped it). The model does include a site-specific random intercept.</p>
 <pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(k) - 1 + (1|site), data = dd)
 summary(fitlme_k)</code></pre>
 <pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
@@ -171,7 +171,7 @@ summary(fitlme_k)</code></pre>
 <pre class="r"><code>dd[, normk := (k - min(k))/(max(k) - min(k))]
 knots &lt;- c(.2, .4, .6, .8)
 
-fitlme_s &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site), data = dd)
+fitlme_s &lt;- lmer(y ~ A + ( ns(normk, knots = knots) - 1 | site ), data = dd)
 summary(fitlme_s)</code></pre>
 <pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
 ## Formula: y ~ A + (ns(normk, knots = knots) - 1 | site)
@@ -203,35 +203,38 @@ summary(fitlme_s)</code></pre>
 ## A -0.088</code></pre>
 <p>Now we can see that the model predictions reflect the site-specific time trends:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
-<p>This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 57%. There is room for improvement.</p>
+<p>This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 56%. There is room for improvement.</p>
 </div>
 <div id="gam-with-site-specific-smoother" class="section level4">
 <h4>GAM with site-specific smoother</h4>
-<p>This last model is a GAM, and I use the <code>gam</code> function from the <code>mgcv</code> package. A key parameters in the smoothing function <code>s</code> is the <em>bs</em> argument for the type of basis spline. I’ve used “fs”, which allows for “random factor smooth interactions,” which is what we need here. In addition, the dimension of the basis (the argument <em>k</em>, not to be confused with the period <em>k</em>), was set by evaluating the selection criterion (GCV).</p>
-<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 20), data = dd)
+<p>This last model is a GAM (using the <code>gam</code> function from the <code>mgcv</code> package). A key parameter in the smoothing function <code>s</code> is the <em>bs</em> argument for the type of basis spline. I’ve used the option “fs” that allows for “random factor smooth interactions,” which is what we need here. In addition, the dimension of the basis (the argument <em>k</em>, not to be confused with the period <em>k</em>), was set by evaluating the selection criterion (GCV) as well investigating the RMSE and the average estimated standard errors. A value between 10 and 15 seems to be ideal, I’ve settled on <span class="math inline">\(k = 12\)</span>.</p>
+<pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 12), data = dd)
 summary(gamfit)</code></pre>
 <pre><code>## 
 ## Family: gaussian 
 ## Link function: identity 
 ## 
 ## Formula:
-## y ~ A + s(k, site, bs = &quot;fs&quot;, k = 20)
+## y ~ A + s(k, site, bs = &quot;fs&quot;, k = 12)
 ## 
 ## Parametric coefficients:
 ##             Estimate Std. Error t value Pr(&gt;|t|)    
-## (Intercept)  -0.4669     0.7310  -0.639    0.523    
-## A             5.3006     0.5862   9.042   &lt;2e-16 ***
+## (Intercept)  -0.4595     0.7429  -0.619    0.536    
+## A             5.2864     0.4525  11.682   &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
 ## Approximate significance of smooth terms:
-##             edf Ref.df     F p-value    
-## s(k,site) 404.6    479 21.26  &lt;2e-16 ***
+##             edf Ref.df    F p-value    
+## s(k,site) 261.7    287 32.8  &lt;2e-16 ***
 ## ---
 ## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
 ## 
-## R-sq.(adj) =  0.418   Deviance explained = 43.1%
-## GCV = 40.985  Scale est. = 40.059    n = 18000</code></pre>
+## R-sq.(adj) =  0.403   Deviance explained = 41.2%
+## GCV = 41.693  Scale est. = 41.082    n = 18000</code></pre>
+<p>The predicted value plot highlights that this model has estimated site-specific secular functions that are a little more wriggly than the cubic splines.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
+<p>In spite of the less smooth curve, the GAM estimate is unbiased as well with a slightly lower RMSE (0.76) then the cubic spline model (0.78). Better yet, the estimated standard errors averaged 0.45, and the coverage is 76% (compared to 56% from the cubic spline model).</p>
+<p>In general, at least in this simulation setting, the GAM seems to be an improvement over the random cubic spline model, but it still underestimates the measure of uncertainty. There is more work to be done; perhaps it will be possible to bootstrap robust standard errors. To be continued …</p>
 </div>
 </div>
