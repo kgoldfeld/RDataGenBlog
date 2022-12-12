@@ -15,28 +15,28 @@ draft: true
 
 
 
-<p><a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/" target="_blank">Recently</a> I started a discussion about modeling secular trends using flexible models in the context of a cluster randomized trial. My explorations on this topic are motivated by a cluster randomized trial using a stepped-wedge study design that I am involved with. The first post focused on more standard parallel designs; here, I want to extend the discussion explicitly to stepped-wedge designs.</p>
+<p><a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/" target="_blank">Recently</a> I started a discussion about modeling secular trends using flexible models in the context of cluster randomized trials. I’ve been motivated by a trial I am involved with that is using a stepped-wedge study design. The initial post focused on more standard parallel designs; here, I want to extend the discussion explicitly to the stepped-wedge design.</p>
 <div id="the-stepped-wedge-design" class="section level3">
 <h3>The stepped-wedge design</h3>
-<p>Stepped-wedge designs are a special class of cluster randomized trial where each cluster is observed in both treatment arms (as opposed to the classic parallel design where only some of the clusters receive the treatment). This is a special case of a cross-over design, where the cross-over is only in one direction: control (or pre-intervention) to intervention. I’ve written about this in a number of different contexts (for example, with respect to <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/">power analysis</a>, <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">complicated ICC patterns</a>, <a href="https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/">using Bayesian models for estimation</a>, <a href="https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/">open cohorts</a>, and <a href="https://www.rdatagen.net/post/2021-12-07-exploring-design-effects-of-stepped-wedge-designs-with-baseline-measurements/">baseline measurements to improve efficiency</a>), and I won’t give too much background.</p>
-<p>In a typical stepped-wedge design (if there is such a thing), groups of sites (considered waves) is randomized to intervention starting times. For example, if there are 24 sites divided into 6 waves (so 4 sites per wave), there will be six starting times and 7 measurement periods (if we want to have at least one baseline/control period for each wave, and at least one intervention period per wave). Schematically, the design looks like this:</p>
+<p>Stepped-wedge designs are a special class of cluster randomized trial where each cluster is observed in both treatment arms (as opposed to the classic parallel design where only some of the clusters receive the treatment). In what is essentially a cross-over design, each cluster transitions in a single direction from control (or pre-intervention) to intervention. I’ve written about this in a number of different contexts (for example, with respect to <a href="https://www.rdatagen.net/post/alternatives-to-stepped-wedge-designs/">power analysis</a>, <a href="https://www.rdatagen.net/post/intra-cluster-correlations-over-time/">complicated ICC patterns</a>, <a href="https://www.rdatagen.net/post/bayes-model-to-estimate-stepped-wedge-trial-with-non-trivial-icc-structure/">using Bayesian models for estimation</a>, <a href="https://www.rdatagen.net/post/simulating-an-open-cohort-stepped-wedge-trial/">open cohorts</a>, and <a href="https://www.rdatagen.net/post/2021-12-07-exploring-design-effects-of-stepped-wedge-designs-with-baseline-measurements/">baseline measurements to improve efficiency</a>).</p>
+<p>In the classic stepped-wedge design, groups of sites (considered waves) are randomized to intervention starting times. For example, if there are 24 sites divided into 6 waves (so 4 sites per wave), there will be six starting times and 7 measurement periods (if we want to have at least one baseline/control period for each wave, and at least one intervention period per wave). Schematically, the design looks like this:</p>
 <p><img src="images/6_waves.png" style="width:75.0%" /></p>
 <p>We could use a linear mixed effects model to estimate the intervention effect <span class="math inline">\(\delta\)</span>, which might look like this:</p>
 <p><span class="math display">\[
   Y_{ijk} = a_{j} + \beta_{k} + \delta A_{jk} + e_{ijk}
 \]</span></p>
-<p>where <span class="math inline">\(Y_{ijk}\)</span> is the (continuous) outcome of individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(a_j\)</span> is the random intercept for site <span class="math inline">\(j\)</span>, and we assume that <span class="math inline">\(a_j \sim N(0, \sigma^2_a)\)</span>. <span class="math inline">\(A_{jk}\)</span> is the intervention indicator for site <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(\beta_k\)</span> is a period-specific effect. And <span class="math inline">\(e_{ijk}\)</span> is the individual level effect.</p>
-<p>In the study that is motivating all of this, the situation is different in a key way.The intervention can only be implemented at one site a time (so that the number of waves equals the number of sites), leading to this alternative schematic:</p>
+<p>where <span class="math inline">\(Y_{ijk}\)</span> is the (continuous) outcome of individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(a_j\)</span> is the random intercept for site <span class="math inline">\(j\)</span>, and we assume that <span class="math inline">\(a_j \sim N(0, \sigma^2_a)\)</span>. <span class="math inline">\(A_{jk}\)</span> is the intervention indicator for site <span class="math inline">\(j\)</span> during time period <span class="math inline">\(k\)</span>. <span class="math inline">\(\beta_k\)</span> is a period-specific effect. And <span class="math inline">\(e_{ijk}\)</span> is the individual level effect, <span class="math inline">\(e_{ijk} \sim N(0, \sigma^2_e)\)</span>.</p>
+<p>In the particular study motivating these posts, the situation is different in a key way: given its complexity, the intervention can only be implemented at one site a time, so that the number of waves equals the number of sites. This leads to this slightly more elaborate schematic:</p>
 <p><img src="images/24_waves.png" style="width:75.0%" /></p>
-<p>The challenge under this scenario, is that <span class="math inline">\(k\)</span> (the number of periods) is starting to get quite large, requiring us to estimate a large number of period specific effects <span class="math inline">\(\beta_k\)</span>. In addition, the periods are actually shorter, so we have less information available to estimate those period effects. An alternative approach, as you may have anticipated, is to smooth the secular trend, using a model that looks like this:</p>
+<p>The challenge under this scenario is that <span class="math inline">\(k\)</span> (the number of periods) is starting to get quite large, requiring us to estimate a large number of period specific effects <span class="math inline">\(\beta_k\)</span>. In addition, the periods are actually shorter, so we have less information available to estimate those period effects. An alternative approach, as you may have anticipated, is to smooth the secular trend, using a model that looks like this:</p>
 <p><span class="math display">\[
 Y_{ijk} = a_{j} + s(k) + \delta A_{jk} + e_{ijk}
 \]</span></p>
-<p>where <span class="math inline">\(s(.)\)</span> is a smooth function of time. And by using a smooth function, we can take this one step further and specify a site-specific smoothing function <span class="math inline">\(s_j(.)\)</span>:</p>
+<p>where <span class="math inline">\(s(.)\)</span> is a smooth function of time. And by using a smooth function, we can take this one step further and specify a <em>site-specific</em> smoothing function <span class="math inline">\(s_j(.)\)</span>:</p>
 <p><span class="math display">\[
 Y_{ijk} = a_{j} + s_j(k) + \delta A_{jk} + e_{ijk}
 \]</span></p>
-<p>So, we will use either splines or generalized additive models to estimate the curve, which will allow us to control for the period effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated that measurements further apart.</p>
+<p>So, we will use either cubic splines or generalized additive models (GAMs) to estimate the curve, which will allow us to control for the period effect while estimating the treatment effect. By smoothing the function, we are assuming that the measurements closer in time are more highly correlated than measurements further apart.</p>
 </div>
 <div id="data-generation-process" class="section level3">
 <h3>Data generation process</h3>
@@ -75,18 +75,20 @@ def &lt;- defData(def, varname = &quot;mu_b&quot;, formula = 0, dist = &quot;non
 def &lt;- defData(def, varname = &quot;s2_b&quot;, formula = 16, dist = &quot;nonrandom&quot;)
 
 defOut &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;a + b + 5 * A&quot;, variance = 40)</code></pre>
-<p>Now, we generate 24 sites, create 25 periods for each site, generate the period-specific effects (<span class="math inline">\(b_{jk}\)</span>) for each site, and assign the treatment status based on the stepped-wedge design:</p>
+<p>We (1) generate 24 sites with random intercepts, (2) create 25 periods for each site, (3) generate the period-specific effects (<span class="math inline">\(b_{jk}\)</span>) for each site, and (4) assign the treatment status based on the stepped-wedge design:</p>
 <pre class="r"><code>set.seed(1234)
 
-ds &lt;- genData(24, def, id = &quot;site&quot;)
-ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;k&quot;)
+ds &lt;- genData(24, def, id = &quot;site&quot;)                  #1
+ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;k&quot;)      #2
 
-ds &lt;- addCorGen(dtOld = ds, idvar = &quot;site&quot;, 
+ds &lt;- addCorGen(dtOld = ds, idvar = &quot;site&quot;,  
                 rho = 0.8, corstr = &quot;ar1&quot;,
-                dist = &quot;normal&quot;, param1 = &quot;mu_b&quot;, param2 = &quot;s2_b&quot;, cnames = &quot;b&quot;)
+                dist = &quot;normal&quot;, param1 = &quot;mu_b&quot;, 
+                param2 = &quot;s2_b&quot;, cnames = &quot;b&quot;)       #3
 
-ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 24, lenWaves = 1, startPer = 1, 
-                   grpName = &quot;A&quot;, perName = &quot;k&quot;)
+ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 24, 
+                   lenWaves = 1, startPer = 1, 
+                   grpName = &quot;A&quot;, perName = &quot;k&quot;)     #4
 
 ds$site &lt;- as.factor(ds$site)
 
@@ -103,18 +105,18 @@ ds</code></pre>
 ## 598:   24 22  1.378768    0   16    598  4.1179282       24 0
 ## 599:   24 23  1.378768    0   16    599  7.1421562       24 0
 ## 600:   24 24  1.378768    0   16    600  0.3645013       24 1</code></pre>
-<p>And finally, we generate 30 individuals per site per period. The figure shows the outcomes for all the sites overtime:</p>
+<p>In the last two steps, we create 30 individuals per site per period and generate each individual-level outcome. The figure shows the outcomes for all the sites over time:</p>
 <pre class="r"><code>dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 30, level1ID = &quot;id&quot;)
 dd &lt;- addColumns(defOut, dd)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="960" /></p>
 </div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
-<p>I am fitting three models to this simulated data set: (1) a mixed effects model with fixed time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each estimated model, I’m plotting the predicted values over the actual data points.</p>
-<p>Since there is only so much one can glean from a single data set, I’ve also conducted an experiment using 5000+ replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. (Code for these replications can be found <a href="https://github.com/kgoldfeld/RDataGenBlog/blob/master/content/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/replications/reps_hpc.R" target="_blank">here</a>). These replications provide information about some operating characteristics of the model approaches (estimated bias, root mean squared error (RMSE), average estimated standard error, and coverage rate, i.e. proportion of 95% confidence intervals that include the true value 5).</p>
+<p>I am fitting three models to this simulated data set: (1) a mixed effects model with fixed time period effects, (2), a mixed effects model with a random cubic spline for the period effect for each site, and (3) a generalized additive model with a site-specific smooth function for time. For each estimated model, I’ve overlaid the predicted values on top of the observed (generated) data points.</p>
+<p>I’ve also conducted an experiment using 5000+ replicated data sets to see how each model really performs with respect to the estimation of the treatment effect. (Code for these replications can be found <a href="https://github.com/kgoldfeld/RDataGenBlog/blob/master/content/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/replications/reps_hpc.R" target="_blank">here</a>). These replications provide information about some operating characteristics of the different models (estimated bias, root mean squared error (RMSE), average estimated standard error, and coverage rate, i.e. proportion of 95% confidence intervals that include the true value 5).</p>
 <div id="mixed-effects-model-with-fixed-time-period-effects" class="section level4">
 <h4>Mixed effects model with fixed time-period effects</h4>
-<p>Here’s the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate site-specific period random effects, but it proved too computationally intensive for my computer, which ground away for a half hour before I mercifully stopped it). The model does include a site-specific random intercept.</p>
+<p>Here’s the first model. Note that I am not estimating an intercept so that each period effect is directly estimated. (I did try to estimate the 600 site-specific period random effects, but it proved too computationally intensive for my computer, which ground away for a half hour before I mercifully stopped it). The model does include a site-specific random intercept.</p>
 <pre class="r"><code>fitlme_k &lt;- lmer(y ~ A + factor(k) - 1 + (1|site), data = dd)
 summary(fitlme_k)</code></pre>
 <pre><code>## Linear mixed model fit by REML [&#39;lmerMod&#39;]
@@ -163,7 +165,7 @@ summary(fitlme_k)</code></pre>
 ## factor(k)24 -1.31230    0.74417  -1.763</code></pre>
 <p>The predicted values indicate that the model does not pick up the site-specific variation over time:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="960" /></p>
-<p>We can see that the estimate from this single data of the treatment effect is 5.8 [95% CI: 5.5, 6.2]. Based on the replications, however, the treatment effect estimate from this model is actually <em>unbiased</em>. However, RMSE = 0.97 (which is equivalent to the true variation or standard error of the estimated treatment effect since there is no bias), but the average estimated standard error was only 0.18, and the coverage of the 95% CIs was only 29%. This model doesn’t seem all that promising.</p>
+<p>Although the estimate of the treatment effect from the single data set is 5.8 [95% CI: 5.5, 6.2], the treatment effect estimate from this model is actually <em>unbiased</em> (based on evaluating the results from the replications). However, RMSE = 0.97 (which is equivalent to the true standard error of the estimated treatment effect since there is no bias), but the average estimated standard error was only 0.18, and the coverage of the 95% CIs was only 29%. Indeed the estimated confidence interval from our single data set did not include the true value. Based on all of this, the model doesn’t seem all that promising, particularly with respect to measuring the uncertainty.</p>
 </div>
 <div id="mixed-effects-model-with-site-specific-natural-cubic-spline" class="section level4">
 <h4>Mixed effects model with site-specific natural cubic spline</h4>
@@ -201,13 +203,13 @@ summary(fitlme_s)</code></pre>
 ## Correlation of Fixed Effects:
 ##   (Intr)
 ## A -0.088</code></pre>
-<p>Now we can see that the model predictions reflect the site-specific time trends:</p>
+<p>This time we can see that the model predictions better reflect the site-specific time trends:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
-<p>This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 56%. There is room for improvement.</p>
+<p>This model also provides an unbiased estimate (in the case of the first data set, the estimate was spot on 5.0 [4.4, 5.6].) The RMSE was lower than the first model (0.78) and the average estimate of the standard error was slightly higher (0.31). The coverage was also higher, but still only 56%. There is still room for improvement.</p>
 </div>
 <div id="gam-with-site-specific-smoother" class="section level4">
 <h4>GAM with site-specific smoother</h4>
-<p>This last model is a GAM (using the <code>gam</code> function from the <code>mgcv</code> package). A key parameter in the smoothing function <code>s</code> is the <em>bs</em> argument for the type of basis spline. I’ve used the option “fs” that allows for “random factor smooth interactions,” which is what we need here. In addition, the dimension of the basis (the argument <em>k</em>, not to be confused with the period <em>k</em>), was set by evaluating the selection criterion (GCV) as well investigating the RMSE and the average estimated standard errors. A value between 10 and 15 seems to be ideal, I’ve settled on <span class="math inline">\(k = 12\)</span>.</p>
+<p>This last model is a GAM (using the <code>gam</code> function from the <code>mgcv</code> package). A key parameter in the smoothing function <code>s</code> is the <em>bs</em> argument for the type of basis spline. I’ve used the option “fs” that allows for “random factor smooth interactions,” which is what we need here. In addition, the dimension of the basis (the argument <em>k</em>, not to be confused with the period <em>k</em>), was set by evaluating the selection criterion (GCV) as well investigating the RMSE and the average estimated standard errors. A value of <em>k</em> between 10 and 15 seems to be ideal, I’ve settled on <span class="math inline">\(k = 12\)</span>.</p>
 <pre class="r"><code>gamfit &lt;- gam(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 12), data = dd)
 summary(gamfit)</code></pre>
 <pre><code>## 
@@ -235,6 +237,8 @@ summary(gamfit)</code></pre>
 <p>The predicted value plot highlights that this model has estimated site-specific secular functions that are a little more wriggly than the cubic splines.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
 <p>In spite of the less smooth curve, the GAM estimate is unbiased as well with a slightly lower RMSE (0.76) then the cubic spline model (0.78). Better yet, the estimated standard errors averaged 0.45, and the coverage is 76% (compared to 56% from the cubic spline model).</p>
-<p>In general, at least in this simulation setting, the GAM seems to be an improvement over the random cubic spline model, but it still underestimates the measure of uncertainty. There is more work to be done; perhaps it will be possible to bootstrap robust standard errors. To be continued …</p>
+<p>In general, at least in this simulation setting, the GAM seems to be an improvement over the random cubic spline model. However, this last model still underestimates the measure of uncertainty, suggesting there is more work to be done. Next, I will explore estimation of robust standard errors using bootstrap methods.</p>
+<p>To be continued …</p>
+<p> </p>
 </div>
 </div>
