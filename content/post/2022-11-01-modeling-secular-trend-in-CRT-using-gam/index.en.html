@@ -95,7 +95,7 @@ Y_{ijk} = \beta_0 + \gamma k + \delta A_j  + b_j + e_{ijk}
 <pre class="r"><code>linear &lt;- lmer(y ~ A + k + ( 1  | site) , data = dd)
 summary(linear)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
-##       6.23       0.85</code></pre>
+##      6.533      0.844</code></pre>
 <p>The linear model gets around the problem of a large number parameters, but it imposes a very strong assumption that the outcome <span class="math inline">\(Y\)</span> changes linearly over time (and in this case at the same rate for each cluster). This is unlikely to be the case. We could fit a quadratic model like</p>
 <p><span class="math display">\[
 Y_{ijk} = \beta_0  + \gamma_0 k + \gamma_1 k^2 + \delta A_j + b_j  + e_{ijk}
@@ -116,7 +116,7 @@ Y_{ijk} = \beta_0 + cs(k) + \delta A_j + b_j  + e_{ijk}
 <pre class="r"><code>fix_cs &lt;- lmer(y ~ A + bs(normk) + ( 1  | site) , data = dd)
 summary(fix_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
-##       6.23       0.85</code></pre>
+##      6.533      0.844</code></pre>
 </div>
 <div id="mixed-effects-model-with-random-cubic-spline" class="section level4">
 <h4>Mixed effects model with <em>random</em> cubic spline</h4>
@@ -125,10 +125,12 @@ summary(fix_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. E
 Y_{ijk} = \beta_0 + \delta A_j + b_j + cs_j(k) + e_{ijk}
 \]</span></p>
 <p>The only difference between the fixed cubic spline model estimation is that the <code>bs</code> function appears in random effect portion of the model. The effect size estimate is slightly more biased than the previous estimates but has slightly less uncertainty.</p>
-<pre class="r"><code>ran_cs &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)
-summary(ran_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
+<pre class="r"><code>ran_cs &lt;- lmer(y ~ A + ( bs(normk) | site) , data = dd)</code></pre>
+<pre><code>## Warning in checkConv(attr(opt, &quot;derivs&quot;), opt$par, ctrl = control$checkConv, :
+## Model failed to converge with max|grad| = 0.00672918 (tol = 0.002, component 1)</code></pre>
+<pre class="r"><code>summary(ran_cs)$coefficients[&quot;A&quot;, c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]</code></pre>
 <pre><code>##   Estimate Std. Error 
-##      6.546      0.799</code></pre>
+##       6.56       0.80</code></pre>
 </div>
 <div id="generalized-additive-model-with-site-specific-smoothing" class="section level4">
 <h4>Generalized additive model with site-specific smoothing</h4>
@@ -140,10 +142,12 @@ Y_{ijk} = \beta_0 + \delta A_j + f_j(k) + e_{ijk}
 <p>We estimate the model using the <code>gamm</code> function in the <code>mgcv</code> package. By setting the <code>bs</code> argument to “fs” in the smoothing function <code>s</code>, we will get estimated cluster-specific curves. “fs” refers to a special smooth factor interaction basis, where the interaction in this case is between site and time <span class="math inline">\(k\)</span>.</p>
 <pre class="r"><code>gam &lt;- gamm(y ~ A + s(k, site, bs = &quot;fs&quot;, k = 5), data = dd, method=&quot;REML&quot;)
 cbind(summary(gam$gam)$p.coeff, summary(gam$gam)$se)[2,]</code></pre>
-<pre><code>## [1] 6.204 0.863</code></pre>
+<pre><code>## [1] 6.504 0.832</code></pre>
 <p>The figure below shows the predicted site-specific curves for each of the estimated models. The rigidity of the linear and fixed cubic spline models is pretty clear. And in at least this particular case, the two flexible methods appear to generate quite similar predicted curves.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure2-1.png" width="960" /></p>
 <p>The next figure shows the individual-level outcomes and the predicted curves for a small number of sites. It is clear that the curves for the less flexible methods are biased. The similarity of the flexible models is particularly evident here.</p>
+<pre><code>## Warning: Using `size` aesthetic for lines was deprecated in ggplot2 3.4.0.
+## ℹ Please use `linewidth` instead.</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure3-1.png" width="864" /></p>
 </div>
 </div>
@@ -214,5 +218,5 @@ res[, .(lin = coverage(d.lin, se.lin), fcs = coverage(d.fcs, se.fcs),
         rcs = coverage(d.rcs, se.rcs), gam = coverage(d.gam, se.gam))]</code></pre>
 <pre><code>##      lin   fcs   rcs  gam
 ## 1: 0.944 0.944 0.924 0.94</code></pre>
-<p>It will be interesting to see how the bias-variance trade-off plays out in the context of a stepped wedge design, particularly if the outcomes are binary. Will the less flexible methods continue to perform as well as the GAM model, and will the cubic spline model continue to underestimate the standard errors? More to come.</p>
+<p>It will be interesting to see how the bias-variance trade-off plays out in the context of a stepped wedge design, particularly if the outcomes are binary. Will the less flexible methods continue to perform as well as the GAM model, and will the cubic spline model continue to underestimate the standard errors? More to come. (The next post is now <a href="https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/">available</a>.)</p>
 </div>
