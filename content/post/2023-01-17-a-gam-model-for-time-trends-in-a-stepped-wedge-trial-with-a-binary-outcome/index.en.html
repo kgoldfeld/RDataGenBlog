@@ -1,0 +1,178 @@
+---
+title: A GAM for time trends in a stepped-wedge trial with a binary outcome
+author: Package Build
+date: '2023-01-17'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+  - GAM
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>In a previous <a href="https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/" target="_blank">post</a>, I described some of my early efforts to analyze data from a stepped-wedge, cluster-randomized trial using a generalized additive model (a GAM), focusing on continuous outcomes. I have spent the past few weeks developing a similar model for a binary outcome, and have started to explore model comparison and methods to evaluate goodness-of-fit. I am putting it here so that I have a record of what I’ve done, and, more importantly, in case anyone might find this helpful.</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(data.table)
+library(mgcv)
+library(gratia)
+library(patchwork)
+library(mgcViz)
+library(DHARMa)
+library(itsadug)</code></pre>
+<pre class="r"><code>def &lt;- defData(varname = &quot;a&quot;, formula = 0, variance = .6)
+def &lt;- defData(def, varname = &quot;mu_b&quot;, formula = 0, dist = &quot;nonrandom&quot;)
+def &lt;- defData(def, varname = &quot;s2_b&quot;, formula = .10, dist = &quot;nonrandom&quot;)
+  
+defOut &lt;- defDataAdd(varname = &quot;y&quot;, 
+  formula = &quot;-1.5 + a + b + 0.65 * A&quot;, 
+  dist = &quot;binary&quot;, link=&quot;logit&quot;
+)</code></pre>
+<pre class="r"><code>set.seed(1913)
+
+ds &lt;- genData(24, def, id = &quot;site&quot;)
+ds &lt;- addPeriods(ds, 25, &quot;site&quot;, perName = &quot;k&quot;)
+ds &lt;- addCorGen(
+  dtOld = ds, idvar = &quot;site&quot;, 
+  rho = 0.95, corstr = &quot;ar1&quot;,
+  dist = &quot;normal&quot;, param1 = &quot;mu_b&quot;, param2 = &quot;s2_b&quot;, cnames = &quot;b&quot;
+)
+
+ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 24, 
+  lenWaves = 1, startPer = 1, 
+  grpName = &quot;A&quot;, perName = &quot;k&quot;
+)
+
+ds$site &lt;- as.factor(ds$site)
+  
+dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 100, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(defOut, dd)
+
+dd</code></pre>
+<pre><code>##        site  k     a mu_b s2_b timeID      b startTrt A    id y
+##     1:    1  0 0.142    0  0.1      1 -0.867        1 0     1 0
+##     2:    1  0 0.142    0  0.1      1 -0.867        1 0     2 0
+##     3:    1  0 0.142    0  0.1      1 -0.867        1 0     3 0
+##     4:    1  0 0.142    0  0.1      1 -0.867        1 0     4 0
+##     5:    1  0 0.142    0  0.1      1 -0.867        1 0     5 0
+##    ---                                                         
+## 59996:   24 24 0.879    0  0.1    600 -0.546       24 1 59996 0
+## 59997:   24 24 0.879    0  0.1    600 -0.546       24 1 59997 0
+## 59998:   24 24 0.879    0  0.1    600 -0.546       24 1 59998 0
+## 59999:   24 24 0.879    0  0.1    600 -0.546       24 1 59999 1
+## 60000:   24 24 0.879    0  0.1    600 -0.546       24 1 60000 0</code></pre>
+<pre class="r"><code>fit.A &lt;- bam(
+  y ~ A + s(k) + s(k, site, bs = &quot;fs&quot;), 
+  data = dd, 
+  method = &quot;fREML&quot;,
+  family = &quot;binomial&quot;
+)</code></pre>
+<pre class="r"><code>summary(fit.A)</code></pre>
+<pre><code>## 
+## Family: binomial 
+## Link function: logit 
+## 
+## Formula:
+## y ~ A + s(k) + s(k, site, bs = &quot;fs&quot;)
+## 
+## Parametric coefficients:
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)  -1.4804     0.1583   -9.35   &lt;2e-16 ***
+## A             0.6951     0.0529   13.15   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## Approximate significance of smooth terms:
+##             edf Ref.df  Chi.sq p-value    
+## s(k)       2.77   3.34    1.29    0.64    
+## s(k,site) 91.69 238.00 5640.97  &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## R-sq.(adj) =  0.122   Deviance explained = 10.6%
+## fREML =  85129  Scale est. = 1         n = 60000</code></pre>
+<pre class="r"><code>draw(fit.A) +
+  plot_annotation(&quot;&quot;) &amp;
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="672" /></p>
+<pre class="r"><code>sim &lt;- simulate.gam(fit.A, nsim = 1000)
+
+ls &lt;- split(sim, rep(1:ncol(sim), each = nrow(sim)))
+
+dq &lt;- lapply(ls, 
+  function(x) {
+    d &lt;- cbind(dd, sim = x)
+    d[, .(obs = mean(y), sim = mean(sim)), keyby = .(site, k)]
+  }
+)
+
+dl &lt;- rbindlist(dq, idcol = &quot;.id&quot;)
+df &lt;- dl[, .(obs = mean(obs), min = quantile(sim, p = 0.025), 
+             max = quantile(sim, 0.975)), keyby = .(site, k)]
+
+ggplot(data = df, aes(x= k, y = obs)) +
+  geom_ribbon(aes(x = k, ymin = min, ymax = max),
+              alpha = 0.2, fill = &quot;forestgreen&quot;) +
+  geom_point(color = &quot;forestgreen&quot;, size = 1) +
+  
+  facet_wrap( ~ site, ncol = 6) +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="672" /></p>
+<pre class="r"><code>simResp &lt;- matrix(dl$sim, nrow = 600)
+obsResp &lt;- dq[[1]]$obs
+
+DHARMaRes = createDHARMa(
+  simulatedResponse = simResp, 
+  observedResponse = obsResp, 
+  integerResponse = F
+)
+
+plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="480" /></p>
+<pre class="r"><code>plotResiduals(DHARMaRes, quantreg = T)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="480" /></p>
+<pre class="r"><code>fit.1curve &lt;- bam(
+  y ~ A + s(k, k = 4)  , 
+  data = dd, 
+  method = &quot;fREML&quot;,
+  family = &quot;binomial&quot;
+)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="480" /><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-2.png" width="480" /></p>
+<pre class="r"><code>fit.noA &lt;- bam(
+  y ~ s(k) + s(k, site, bs = &quot;fs&quot;), 
+  data = dd, 
+  method = &quot;fREML&quot;,
+  family = &quot;binomial&quot;
+)</code></pre>
+<pre class="r"><code>compareML(fit.A, fit.1curve)</code></pre>
+<pre><code>## fit.A: y ~ A + s(k) + s(k, site, bs = &quot;fs&quot;)
+## 
+## fit.1curve: y ~ A + s(k, k = 4)
+## 
+## Chi-square test of fREML scores
+## -----
+##        Model Score Edf Difference    Df   p.value Sig.
+## 1 fit.1curve 85146   4                                
+## 2      fit.A 85129   7     16.823 3.000 2.352e-07  ***
+## 
+## AIC difference: -6166.12, model fit.A has lower AIC.</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="480" /></p>
+<pre class="r"><code>compareML(fit.A, fit.noA)</code></pre>
+<pre><code>## fit.A: y ~ A + s(k) + s(k, site, bs = &quot;fs&quot;)
+## 
+## fit.noA: y ~ s(k) + s(k, site, bs = &quot;fs&quot;)
+## 
+## Model fit.noA preferred: lower fREML score (5.899), and lower df (1.000).
+## -----
+##     Model Score Edf Difference    Df
+## 1   fit.A 85129   7                 
+## 2 fit.noA 85123   6     -5.899 1.000
+## 
+## AIC difference: -81.59, model fit.A has lower AIC.</code></pre>

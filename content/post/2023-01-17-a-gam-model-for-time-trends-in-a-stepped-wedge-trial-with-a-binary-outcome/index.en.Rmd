@@ -1,0 +1,223 @@
+---
+title: A GAM for time trends in a stepped-wedge trial with a binary outcome
+author: Package Build
+date: '2023-01-17'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+  - GAM
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+In a previous [post](https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/){target="_blank"}, I described some of my early efforts to analyze data from a stepped-wedge, cluster-randomized trial using a generalized additive model (a GAM), focusing on continuous outcomes. I have spent the past few weeks developing a similar model for a binary outcome, and have started to explore model comparison and methods to evaluate goodness-of-fit. I am putting it here so that I have a record of what I've done, and, more importantly, in case anyone might find this helpful.
+
+```{r, echo=FALSE}
+options(digits = 3)
+```
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(ggplot2)
+library(data.table)
+library(mgcv)
+library(gratia)
+library(patchwork)
+library(mgcViz)
+library(DHARMa)
+library(itsadug)
+```
+
+```{r}
+
+def <- defData(varname = "a", formula = 0, variance = .6)
+def <- defData(def, varname = "mu_b", formula = 0, dist = "nonrandom")
+def <- defData(def, varname = "s2_b", formula = .10, dist = "nonrandom")
+  
+defOut <- defDataAdd(varname = "y", 
+  formula = "-1.5 + a + b + 0.65 * A", 
+  dist = "binary", link="logit"
+)
+```
+
+```{r}
+
+set.seed(1913)
+
+ds <- genData(24, def, id = "site")
+ds <- addPeriods(ds, 25, "site", perName = "k")
+ds <- addCorGen(
+  dtOld = ds, idvar = "site", 
+  rho = 0.95, corstr = "ar1",
+  dist = "normal", param1 = "mu_b", param2 = "s2_b", cnames = "b"
+)
+
+ds <- trtStepWedge(ds, "site", nWaves = 24, 
+  lenWaves = 1, startPer = 1, 
+  grpName = "A", perName = "k"
+)
+
+ds$site <- as.factor(ds$site)
+  
+dd <- genCluster(ds, "timeID", numIndsVar = 100, level1ID = "id")
+dd <- addColumns(defOut, dd)
+
+dd
+```
+
+```{r, warning=FALSE, message=FALSE}
+fit.A <- bam(
+  y ~ A + s(k) + s(k, site, bs = "fs"), 
+  data = dd, 
+  method = "fREML",
+  family = "binomial"
+)
+```
+
+```{r}
+summary(fit.A)
+```
+
+```{r, fig.height = 3, fig.width=7}
+draw(fit.A) +
+  plot_annotation("") &
+  theme(panel.grid = element_blank())
+```
+
+```{r}
+sim <- simulate.gam(fit.A, nsim = 1000)
+
+ls <- split(sim, rep(1:ncol(sim), each = nrow(sim)))
+
+dq <- lapply(ls, 
+  function(x) {
+    d <- cbind(dd, sim = x)
+    d[, .(obs = mean(y), sim = mean(sim)), keyby = .(site, k)]
+  }
+)
+
+dl <- rbindlist(dq, idcol = ".id")
+df <- dl[, .(obs = mean(obs), min = quantile(sim, p = 0.025), 
+             max = quantile(sim, 0.975)), keyby = .(site, k)]
+
+ggplot(data = df, aes(x= k, y = obs)) +
+  geom_ribbon(aes(x = k, ymin = min, ymax = max),
+              alpha = 0.2, fill = "forestgreen") +
+  geom_point(color = "forestgreen", size = 1) +
+  
+  facet_wrap( ~ site, ncol = 6) +
+  theme(panel.grid = element_blank())
+```
+
+```{r, fig.height = 4, fig.width = 5, warning=FALSE, message=FALSE}
+simResp <- matrix(dl$sim, nrow = 600)
+obsResp <- dq[[1]]$obs
+
+DHARMaRes = createDHARMa(
+  simulatedResponse = simResp, 
+  observedResponse = obsResp, 
+  integerResponse = F
+)
+
+plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
+```
+
+```{r, fig.height = 4, fig.width = 5}
+plotResiduals(DHARMaRes, quantreg = T)
+```
+
+```{r}
+fit.1curve <- bam(
+  y ~ A + s(k, k = 4)  , 
+  data = dd, 
+  method = "fREML",
+  family = "binomial"
+)
+```
+
+
+```{r, echo = FALSE}
+sim <- simulate.gam(fit.1curve, nsim = 1000)
+
+ls <- split(sim, rep(1:ncol(sim), each = nrow(sim)))
+
+dq <- lapply(ls, 
+  function(x) {
+    d <- cbind(dd, sim = x)
+    d[, .(obs = mean(y), sim = mean(sim)), keyby = .(site, k)]
+  }
+)
+
+dl <- rbindlist(dq, idcol = ".id")
+df <- dl[, .(obs = mean(obs), min = quantile(sim, p = 0.025), 
+             max = quantile(sim, 0.975)), keyby = .(site, k)]
+
+ggplot(data = df, aes(x= k, y = obs)) +
+  geom_ribbon(aes(x = k, ymin = min, ymax = max),
+              alpha = 0.2, fill = "forestgreen") +
+  geom_point(color = "forestgreen", size = 1) +
+  
+  facet_wrap( ~ site, ncol = 6) +
+  theme(panel.grid = element_blank())
+```
+
+```{r, echo=FALSE, fig.height=4, fig.width=5, warning=FALSE, message=FALSE}
+simResp <- matrix(dl$sim, nrow = 600)
+obsResp <- dq[[1]]$obs
+
+DHARMaRes = createDHARMa(
+  simulatedResponse = simResp, 
+  observedResponse = obsResp, 
+  integerResponse = F
+)
+
+plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
+plotResiduals(DHARMaRes, quantreg = T)
+```
+
+```{r, warning=FALSE, message=FALSE}
+fit.noA <- bam(
+  y ~ s(k) + s(k, site, bs = "fs"), 
+  data = dd, 
+  method = "fREML",
+  family = "binomial"
+)
+```
+
+```{r}
+compareML(fit.A, fit.1curve)
+```
+
+```{r, echo=FALSE, fig.height=4, fig.width=5, warning=FALSE, message=FALSE}
+sim <- simulate.gam(fit.noA, nsim = 1000)
+
+ls <- split(sim, rep(1:ncol(sim), each = nrow(sim)))
+
+dq <- lapply(ls, 
+  function(x) {
+    d <- cbind(dd, sim = x)
+    d[, .(obs = mean(y), sim = mean(sim)), keyby = .(site, k)]
+  }
+)
+
+dl <- rbindlist(dq, idcol = ".id")
+simResp <- matrix(dl$sim, nrow = 600)
+obsResp <- dq[[1]]$obs
+
+DHARMaRes = createDHARMa(
+  simulatedResponse = simResp, 
+  observedResponse = obsResp, 
+  integerResponse = F
+)
+
+plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
+```
+
+```{r}
+compareML(fit.A, fit.noA)
+```
+
