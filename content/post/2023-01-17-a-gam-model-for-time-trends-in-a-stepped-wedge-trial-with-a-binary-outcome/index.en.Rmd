@@ -20,6 +20,10 @@ In a previous [post](https://www.rdatagen.net/post/2022-12-13-modeling-the-secul
 options(digits = 3)
 ```
 
+### Data generation
+
+The data generation process used here follows along pretty closely with the [earlier post](https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/){target="_blank"}, except the outcome has changed from continuous to binary. And I've increased the correlation in period effects because it doesn't seem like things should change so fast from period to period, particularly if the time periods themselves are relatively short. The correlation still decays over time.
+
 ```{r, message=FALSE, warning=FALSE}
 library(simstudy)
 library(ggplot2)
@@ -32,19 +36,43 @@ library(DHARMa)
 library(itsadug)
 ```
 
+The data generation process is as follows, with 24 sites, 25 time periods, and 100 individuals per site per time period:
+
+$$
+y_{ijk} \sim Bin\left(p_{jk}\right)\\
+log\left( \frac{p_{ijk}}{1-p_{ijk}} \right) = -1.5 + a_j + b_{jk} + 0.65 A_{jk}
+$$
+
+where $y_{ijk} \in \{0,1\}$ is the outcome, and $p(y_{ijk} = 1) = p_{ijk}$. The log-odds ratio is a linear function of the site specific effect $a_{j}$, the site-specific period $k$ effect $b_{jk}$, and treatment status of site $j$ in period $k$, $A_{jk} \in \{ 0, 1\}$ depending the the stage of stepped wedge. The treatment effect in this case (an odds ratio) is $exp(0.65) = 1.9$. The $a_j \sim N(0, 0.6$. The vector of site-period effects $\mathbf{b_j} \sim N(0, \Sigma_b)$, where $\Sigma_b = DRD$ is a $25 \times 25$ covariance matrix based on a diagonal matrix $D$ and an auto-regressive correlation structure $R$:
+  
+$$
+D = \sqrt{0.1} * I_{25 \times 25}
+$$
+
+and 
+
+$$ 
+R =\begin{bmatrix}
+1 & \rho & \rho^2 & \dots & \rho^{24} \\
+\rho & 1 & \rho & \dots & \rho^{23} \\
+\rho^2 & \rho & 1 & \dots & \rho^{22} \\
+\vdots & \vdots & \vdots & \vdots & \vdots \\
+\rho^{24} & \rho^{23} & \rho^{22} & \dots & 1 \\
+\end{bmatrix}, \ \ \rho = 0.95
+$$
+
+Here is the implementation of this data generation process using `simstudy`:
+
 ```{r}
 
-def <- defData(varname = "a", formula = 0, variance = .6)
+def <- defData(varname = "a", formula = 0, variance = 0.6)
 def <- defData(def, varname = "mu_b", formula = 0, dist = "nonrandom")
-def <- defData(def, varname = "s2_b", formula = .10, dist = "nonrandom")
+def <- defData(def, varname = "s2_b", formula = 0.1, dist = "nonrandom")
   
 defOut <- defDataAdd(varname = "y", 
   formula = "-1.5 + a + b + 0.65 * A", 
   dist = "binary", link="logit"
 )
-```
-
-```{r}
 
 set.seed(1913)
 
@@ -69,6 +97,35 @@ dd <- addColumns(defOut, dd)
 dd
 ```
 
+Here is visualization of the observed proportions of a good outcome ($y = 1$) by site and period:
+
+```{r, echo = FALSE, fig.height = 4}
+dp <- dd[, .(.N, p = mean(y)), keyby = .(site, k, A)]
+
+ggplot(data = dp, aes(x = k, y = ppred)) +
+  geom_point(aes(x = k, y = p, 
+     color = factor(A, labels = c("Control", "Intervention"))), size = .75) +
+  scale_color_manual(values = c("#d07b7c", "#7ba7d0")) +
+  facet_wrap(~site, ncol = 8) +
+  facet_wrap(~site, ncol = 8) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank(),
+        axis.text.y = element_text(size = 7),
+        strip.text = element_text(size = 8),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank()
+  ) +
+  ylab("P(Y=1)")
+```
+
+### Model estimation using a GAM
+
+The first model will include a treatment effect and an overall smooth function of time, and then a site-specific smooth "effect". I am using the function `bam` in the `mgcv` package, though I could use the `gamm` function, the `gam` function, or even the `gamm4` function of the `gamm4` package. In this case, all provide quite similar estimates, but `bam` has the advantage of running faster with this large data set. Here is the model:
+
+$$
+\text{log-odds}\left[P(y_{ijk} = 1)\right] = \beta_0 + \beta_1 A_{jk} + s(k) + s_j(k)
+$$
+
 ```{r, warning=FALSE, message=FALSE}
 fit.A <- bam(
   y ~ A + s(k) + s(k, site, bs = "fs"), 
@@ -82,11 +139,19 @@ fit.A <- bam(
 summary(fit.A)
 ```
 
+The plot on the right shows the "average" smooth of time across all sites, and the one on the left shows the site-specific effects over time. The between-site variability is quite apparent.
+
 ```{r, fig.height = 3, fig.width=7}
 draw(fit.A) +
   plot_annotation("") &
   theme(panel.grid = element_blank())
 ```
+
+### Goodness of fit
+
+I am particularly interested in understanding if the model is a good fit for the data generation process. One way to do this is simulate data from the model repeatedly, and the visually assess whether the observed data fits into the range of simulations. I am using the `simulate.gam` function from the `mgcViz` package.
+
+In this case, I created 95% bands based on the simulated data, and it looks like observed data fits into the bands reasonably well. 
 
 ```{r}
 sim <- simulate.gam(fit.A, nsim = 1000)
@@ -113,6 +178,10 @@ ggplot(data = df, aes(x= k, y = obs)) +
   theme(panel.grid = element_blank())
 ```
 
+An alternative way to assess the goodness of fit is to generate a QQ-type plot that will alert us to any deviations. I am using the `DHARMa` package, which "uses a simulation-based approach to create readily interpretable scaled (quantile) residuals for fitted (generalized) linear mixed models." The QQ-plot is based on a scaled residual, which is defined as "the value of the empirical density function at the value of the observed data." The empirical density function comes from the same simulated data I just used to generated the 95% bands. It turns out that these residuals should be uniformly distributed if the model is a good fit. (See [here](https://cran.r-project.org/web/packages/DHARMa/vignettes/DHARMa.html){target="_blank"} for more details.)
+
+The QQ-plot indicates a good fit if all the residuals lie on the diagonal line, as they do here:
+
 ```{r, fig.height = 4, fig.width = 5, warning=FALSE, message=FALSE}
 simResp <- matrix(dl$sim, nrow = 600)
 obsResp <- dq[[1]]$obs
@@ -126,9 +195,15 @@ DHARMaRes = createDHARMa(
 plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
 ```
 
+And a plot of the residuals against the predicted values also indicates a uniform distribution:
+
 ```{r, fig.height = 4, fig.width = 5}
 plotResiduals(DHARMaRes, quantreg = T)
 ```
+
+#### A model with no site-specific period effects
+
+Now, it is clearly a bad idea to fit a model without site-specific time effects, since I generated the data under that very assumption. However, I wanted to make sure the goodness-of-fit tests perform adequately.
 
 ```{r}
 fit.1curve <- bam(
@@ -139,6 +214,7 @@ fit.1curve <- bam(
 )
 ```
 
+In this visual representation, the bands clearly are not capturing the site variability:
 
 ```{r, echo = FALSE}
 sim <- simulate.gam(fit.1curve, nsim = 1000)
@@ -165,6 +241,8 @@ ggplot(data = df, aes(x= k, y = obs)) +
   theme(panel.grid = element_blank())
 ```
 
+And both the QQ- and residual-plots are consistent with the visual plot: this second model is not at all a good fit:
+
 ```{r, echo=FALSE, fig.height=4, fig.width=5, warning=FALSE, message=FALSE}
 simResp <- matrix(dl$sim, nrow = 600)
 obsResp <- dq[[1]]$obs
@@ -179,6 +257,16 @@ plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
 plotResiduals(DHARMaRes, quantreg = T)
 ```
 
+We can formally compare the AIC from each model using function `compareML` from the package `itsadug`, which confirms that the model with the site-specific curve is an improvement:
+
+```{r}
+compareML(fit.A, fit.1curve)
+```
+
+#### A model with no treatment effect
+
+It is not obvious that including a treatment effect is necessary, since the smoothed curve can likely accommodate the shifts arising due to treatment. After all, treatment is confounded with time. So, I am fitting a third model.
+
 ```{r, warning=FALSE, message=FALSE}
 fit.noA <- bam(
   y ~ s(k) + s(k, site, bs = "fs"), 
@@ -188,9 +276,7 @@ fit.noA <- bam(
 )
 ```
 
-```{r}
-compareML(fit.A, fit.1curve)
-```
+The QQ-plot indicates that this model fits quite well, which is not entirely a surprise. (The 95% band plot as looks reasonable, but I haven't included here.)
 
 ```{r, echo=FALSE, fig.height=4, fig.width=5, warning=FALSE, message=FALSE}
 sim <- simulate.gam(fit.noA, nsim = 1000)
@@ -217,7 +303,11 @@ DHARMaRes = createDHARMa(
 plotQQunif(DHARMaRes, testDispersion = F, testOutliers = F)
 ```
 
+However, if we compare the two models using AIC, the model with the treatment effect does appear superior:
+
 ```{r}
 compareML(fit.A, fit.noA)
 ```
+
+
 
