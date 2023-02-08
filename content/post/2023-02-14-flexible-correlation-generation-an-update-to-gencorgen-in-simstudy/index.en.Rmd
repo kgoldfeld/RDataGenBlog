@@ -1,0 +1,223 @@
+---
+title: 'Flexible correlation generation: an update to genCorMat in simstudy'
+author: Package Build
+date: '2023-02-14'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+  - correlated data
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+I've been slowly working on some updates to `simstudy`, focusing mostly on the functionality to generate correlation matrices (which can be used to simulate correlated data). Here, I'm briefly describing the function `genCorMat`, which has been updated to facilitate the generation of correlation matrices in the for clusters of different sizes and potentially different correlation coefficients.
+
+I'll briefly describe what the existing function does, and then give an idea about what the enhancements can provide.
+
+### Simple correlation matrix generation
+
+In its original form, `genCorMat` could generate a single (square) correlation matrix of a specified dimension. This could a randomly generated (valid) correlation matrix, or a correlation matrix with a set of specified coefficients.
+
+Here is an example of the first, a randomly generated correlation matrix:
+
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+set.seed(3728)
+
+genCorMat(4)
+```
+
+And here is a matrix with a specified set of coefficients (and you well get an error message if it is not semi-positive definite!):
+
+```{r, message=FALSE}
+R <- genCorMat(4, cors = c(0.6, 0.4, 0.2, 0.5, 0.3, 0.4))
+R
+```
+
+This matrix can be used to generate data using functions `genCorData` or `genCorGen`:
+
+```{r}
+dd <- genCorGen(n = 1000, nvars = 4, corMatrix = R, params1 = c(3, 5, 8, 9), 
+  dist = "poisson", wide = TRUE)
+
+head(dd)
+```
+
+And the correlation from this data set is quite close to the specified matrix **R**.
+
+```{r}
+round(cor(as.matrix(dd[, -1])), 1)
+```
+
+### Specifying a structure
+
+Now it is possible to specify an exchangeable/compound symmetry or auto-regressive structure. Here is the compound symmetry structure:
+
+```{r}
+genCorMat(nvars = 4, rho = 0.6, corstr = "cs")
+```
+
+And here is a matrix with an auto-regressive or decaying structure:
+
+```{r}
+genCorMat(nvars = 4, rho = 0.6, corstr = "ar1")
+```
+
+### Cluster-specific correlation matrices
+
+The final major enhancement is the capability to generate a list of correlation matrices, each of which corresponds to a specific cluster. These matrices can be of different sizes (to accomodate different cluster sizes) and have different parameters (if not random). The only constraints are that the overall structure of matrices need to be the same (i.e. random, *cs*, or *ar1*), and it is not possible to use the `cors` argument.
+
+In this example, I am generating matrices with a *cs* structure for four clusters with sizes 2, 3, 4, and 3, respectively, that would reflect an overall block correlation matrix that looks like this:
+
+```{r, echo=FALSE}
+library(katex)
+matform <- "\\scriptsize{
+
+R = \\left ( \\begin{array}{c|c|c|c}
+
+\\begin{matrix} 
+1 & \\rho_1 \\\\
+\\rho_1 & 1
+\\end{matrix} &
+  
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 & 0 \\\\
+0 & 0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} \\\\
+
+\\hline
+
+\\begin{matrix} 
+0 & 0 \\\\
+0 & 0 \\\\
+0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+1 & \\rho_2 & \\rho_2  \\\\
+\\rho_2 & 1 & \\rho_2  \\\\
+\\rho_2 & \\rho_2 & 1
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 & 0 \\\\
+0 & 0 & 0 & 0 \\\\
+0 & 0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} \\\\
+
+\\hline
+
+\\begin{matrix} 
+0 & 0 \\\\
+0 & 0 \\\\
+0 & 0 \\\\
+0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+1 & \\rho_3 & \\rho_3 & \\rho_3 \\\\
+\\rho_3 & 1 & \\rho_3 & \\rho_3 \\\\
+\\rho_3 & \\rho_3 & 1 & \\rho_3 \\\\
+\\rho_3 & \\rho_3 & \\rho_3 & 1
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} \\\\
+
+\\hline
+
+\\begin{matrix} 
+0 & 0 \\\\
+0 & 0 \\\\
+0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 \\\\
+0 & 0 & 0 \\\\
+0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+0 & 0 & 0 & 0 \\\\
+0 & 0 & 0 & 0 \\\\
+0 & 0 & 0 & 0
+\\end{matrix} &
+
+\\begin{matrix} 
+1 & \\rho_4 & \\rho_4  \\\\
+\\rho_4 & 1 & \\rho_4  \\\\
+\\rho_4 & \\rho_4 & 1
+\\end{matrix} \\\\
+
+\\end{array} \\right ) }"
+
+katex_html(matform)
+```
+
+```{r}
+RM <- genCorMat(nvars = c(2, 3, 4, 3), rho = c(0.6, 0.7, 0.5, 0.4), 
+  corstr = "cs", nclusters = 4)
+
+RM
+```
+
+Here - we can generate some data using the correlation matrix **RM**:
+
+```{r}
+d1 <- defData(varname = "n", formula = "c(2, 3, 4, 3)", dist = "nonrandom")
+d1 <- defData(d1, varname = "lambda", formula = "c(6, 7, 9, 8)", dist = "nonrandom")
+
+ds <- genData(4, d1, id = "site")
+dc <- genCluster(dtClust = ds, cLevelVar = "site", numIndsVar = "n", "id")
+dd <- addCorGen(dc, idvar = "site", param1 = "lambda", corMatrix = RM,
+          dist = "poisson", cnames = "y", method = "copula")
+
+head(dd)
+```
+
+If we want to confirm that everything is being generated correctly, we can recover the overall correlation matrix:
+
+```{r}
+reps <- lapply(1:2500, function(x)
+ addCorGen(dc, idvar = "site", param1 = "lambda", corMatrix = RM,
+          dist = "poisson", cnames = "y", method = "copula")
+)
+
+drep <- data.table::rbindlist(reps, idcol = "rep")
+drep[, seq := 1:.N, keyby = rep]
+dmat <- as.matrix(dcast(drep, rep ~ seq, value.var = "y")[, -1])
+round(cor(dmat), 1) 
+```
