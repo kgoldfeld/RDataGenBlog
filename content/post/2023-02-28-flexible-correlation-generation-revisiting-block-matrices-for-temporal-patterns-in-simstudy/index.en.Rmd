@@ -331,12 +331,12 @@ replicate <- function(R, dx) {
   reps <- lapply(1:5000, function(x)
     addCorGen(dx, idvar = "site", corMatrix = R,
       dist = "poisson", param1 = "lambda", cnames = "y")
-)
+  )
 
-drep <- data.table::rbindlist(reps, idcol = "rep")
-drep[, seq := 1:.N, keyby = rep]
-dmat <- as.matrix(dcast(drep, rep ~ seq, value.var = "y")[, -1])
-round(cor(dmat), 1) 
+  drep <- data.table::rbindlist(reps, idcol = "rep")
+  drep[, seq := 1:.N, keyby = rep]
+  dmat <- as.matrix(dcast(drep, rep ~ seq, value.var = "y")[, -1])
+  round(cor(dmat), 1) 
 }
 
 replicate(R = R_XE, dx = dx)
@@ -389,3 +389,65 @@ Reference:
 Li, Fan, James P. Hughes, Karla Hemming, Monica Taljaard, Edward R. Melnick, and Patrick J. Heagerty. "Mixed-effects models for the design and analysis of stepped wedge cluster randomized trials: an overview." Statistical Methods in Medical Research 30, no. 2 (2021): 612-639.
 
 </font></small></p>
+
+<br>
+
+### Addendum
+
+I want to provide a slightly more elaborate example to show the true flexibility of the new functions. In the case of a cross-sectional design, the number of observations per period for a specific cluster does not need to remain constant (though in the case of data generation under a cohort design it does). We can vary the total number of observations as well as the correlation parameters by cluster.
+
+In this example, there are 10 clusters and three periods. The number of individuals per cluster per period ranges from two to four, and are randomly generated. The decay rate $r$ varies by cluster (generated using the *beta* distribution with shape parameters 6 and 2). The parameter $\rho_w$ is constant across all clusters and is 0.6
+
+```{r}
+defC <- defData(varname = "lambda", formula = "sample(5:10, 1)", dist = "nonrandom")
+defP <- defDataAdd(varname = "n", formula = "2;4", dist="uniformInt")
+
+dc <- genData(n = 10, dtDefs = defC, id = "site")
+dc <- addPeriods(dtName = dc, nPeriods = 3, 
+                 idvars = "site", perName = "period")
+dc <- addColumns(defP, dc)
+
+dd <- genCluster(dtClust = dc, cLevelVar = "timeID", 
+  numIndsVar = "n", level1ID = "id")
+
+```
+
+```{r}
+r <- round(rbeta(10, 6, 2), 2)
+N <- dd[, .N, keyby = .(site, period)][, N]
+
+R <- blockDecayMat(ninds = N , nperiods = 3, rho_w = 0.6, r = r, nclusters = 10)
+
+reps <- lapply(1:5000, 
+  function(x) addCorGen(dd, idvar = "site", corMatrix = R,
+    dist = "poisson", param1 = "lambda", cnames = "y")
+)
+
+drep <- data.table::rbindlist(reps, idcol = "rep")
+
+empir_corr <- function(cluster) {
+  dcrep <- drep[site == cluster, ]
+  dcrep[, seq := 1:.N, keyby = rep]
+  dmat <- as.matrix(dcast(dcrep, rep ~ seq, value.var = "y")[, -1])
+  
+  return(round(cor(dmat), 2))
+}
+```
+
+```{r}
+clust <- 1
+round(R[[clust]], 2)
+empir_corr(cluster = clust)
+```
+
+```{r}
+clust <- 3
+round(R[[clust]], 2)
+empir_corr(cluster = clust)
+```
+
+```{r}
+clust <- 7
+round(R[[clust]], 2)
+empir_corr(cluster = clust)
+```

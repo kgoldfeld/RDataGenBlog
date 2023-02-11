@@ -374,12 +374,12 @@ dd</code></pre>
   reps &lt;- lapply(1:5000, function(x)
     addCorGen(dx, idvar = &quot;site&quot;, corMatrix = R,
       dist = &quot;poisson&quot;, param1 = &quot;lambda&quot;, cnames = &quot;y&quot;)
-)
+  )
 
-drep &lt;- data.table::rbindlist(reps, idcol = &quot;rep&quot;)
-drep[, seq := 1:.N, keyby = rep]
-dmat &lt;- as.matrix(dcast(drep, rep ~ seq, value.var = &quot;y&quot;)[, -1])
-round(cor(dmat), 1) 
+  drep &lt;- data.table::rbindlist(reps, idcol = &quot;rep&quot;)
+  drep[, seq := 1:.N, keyby = rep]
+  dmat &lt;- as.matrix(dcast(drep, rep ~ seq, value.var = &quot;y&quot;)[, -1])
+  round(cor(dmat), 1) 
 }
 
 replicate(R = R_XE, dx = dx)</code></pre>
@@ -486,5 +486,115 @@ Reference:</p>
 <p>Li, Fan, James P. Hughes, Karla Hemming, Monica Taljaard, Edward R. Melnick, and Patrick J. Heagerty. “Mixed-effects models for the design and analysis of stepped wedge cluster randomized trials: an overview.” Statistical Methods in Medical Research 30, no. 2 (2021): 612-639.</p>
 </font></small>
 </p>
+<p><br></p>
 </div>
+</div>
+<div id="addendum" class="section level3">
+<h3>Addendum</h3>
+<p>I want to provide a slightly more elaborate example to show the true flexibility of the new functions. In the case of a cross-sectional design, the number of observations per period for a specific cluster does not need to remain constant (though in the case of data generation under a cohort design it does). We can vary the total number of observations as well as the correlation parameters by cluster.</p>
+<p>In this example, there are 10 clusters and three periods. The number of individuals per cluster per period ranges from two to four, and are randomly generated. The decay rate <span class="math inline">\(r\)</span> varies by cluster (generated using the <em>beta</em> distribution with shape parameters 6 and 2). The parameter <span class="math inline">\(\rho_w\)</span> is constant across all clusters and is 0.6</p>
+<pre class="r"><code>defC &lt;- defData(varname = &quot;lambda&quot;, formula = &quot;sample(5:10, 1)&quot;, dist = &quot;nonrandom&quot;)
+defP &lt;- defDataAdd(varname = &quot;n&quot;, formula = &quot;2;4&quot;, dist=&quot;uniformInt&quot;)
+
+dc &lt;- genData(n = 10, dtDefs = defC, id = &quot;site&quot;)
+dc &lt;- addPeriods(dtName = dc, nPeriods = 3, 
+                 idvars = &quot;site&quot;, perName = &quot;period&quot;)
+dc &lt;- addColumns(defP, dc)
+
+dd &lt;- genCluster(dtClust = dc, cLevelVar = &quot;timeID&quot;, 
+  numIndsVar = &quot;n&quot;, level1ID = &quot;id&quot;)</code></pre>
+<pre class="r"><code>r &lt;- round(rbeta(10, 6, 2), 2)
+N &lt;- dd[, .N, keyby = .(site, period)][, N]
+
+R &lt;- blockDecayMat(ninds = N , nperiods = 3, rho_w = 0.6, r = r, nclusters = 10)
+
+reps &lt;- lapply(1:5000, 
+  function(x) addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
+    dist = &quot;poisson&quot;, param1 = &quot;lambda&quot;, cnames = &quot;y&quot;)
+)
+
+drep &lt;- data.table::rbindlist(reps, idcol = &quot;rep&quot;)
+
+empir_corr &lt;- function(cluster) {
+  dcrep &lt;- drep[site == cluster, ]
+  dcrep[, seq := 1:.N, keyby = rep]
+  dmat &lt;- as.matrix(dcast(dcrep, rep ~ seq, value.var = &quot;y&quot;)[, -1])
+  
+  return(round(cor(dmat), 2))
+}</code></pre>
+<pre class="r"><code>clust &lt;- 1
+round(R[[clust]], 2)</code></pre>
+<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
+##  [1,] 1.00 0.60 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [2,] 0.60 1.00 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [3,] 0.60 0.60 1.00 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [4,] 0.60 0.60 0.60 1.00 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [5,] 0.49 0.49 0.49 0.49 1.00 0.60 0.60 0.60 0.49  0.49  0.49  0.49
+##  [6,] 0.49 0.49 0.49 0.49 0.60 1.00 0.60 0.60 0.49  0.49  0.49  0.49
+##  [7,] 0.49 0.49 0.49 0.49 0.60 0.60 1.00 0.60 0.49  0.49  0.49  0.49
+##  [8,] 0.49 0.49 0.49 0.49 0.60 0.60 0.60 1.00 0.49  0.49  0.49  0.49
+##  [9,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 1.00  0.60  0.60  0.60
+## [10,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  1.00  0.60  0.60
+## [11,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  1.00  0.60
+## [12,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  0.60  1.00</code></pre>
+<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre><code>##       1    2    3    4    5    6    7    8    9   10   11   12
+## 1  1.00 0.59 0.60 0.60 0.48 0.49 0.49 0.49 0.37 0.37 0.37 0.39
+## 2  0.59 1.00 0.59 0.59 0.50 0.49 0.49 0.50 0.38 0.37 0.39 0.39
+## 3  0.60 0.59 1.00 0.58 0.49 0.47 0.49 0.49 0.37 0.37 0.37 0.40
+## 4  0.60 0.59 0.58 1.00 0.50 0.48 0.48 0.49 0.39 0.39 0.39 0.41
+## 5  0.48 0.50 0.49 0.50 1.00 0.59 0.58 0.60 0.49 0.49 0.48 0.49
+## 6  0.49 0.49 0.47 0.48 0.59 1.00 0.59 0.60 0.47 0.47 0.46 0.49
+## 7  0.49 0.49 0.49 0.48 0.58 0.59 1.00 0.59 0.48 0.48 0.47 0.50
+## 8  0.49 0.50 0.49 0.49 0.60 0.60 0.59 1.00 0.48 0.47 0.47 0.49
+## 9  0.37 0.38 0.37 0.39 0.49 0.47 0.48 0.48 1.00 0.58 0.57 0.58
+## 10 0.37 0.37 0.37 0.39 0.49 0.47 0.48 0.47 0.58 1.00 0.59 0.58
+## 11 0.37 0.39 0.37 0.39 0.48 0.46 0.47 0.47 0.57 0.59 1.00 0.59
+## 12 0.39 0.39 0.40 0.41 0.49 0.49 0.50 0.49 0.58 0.58 0.59 1.00</code></pre>
+<pre class="r"><code>clust &lt;- 3
+round(R[[clust]], 2)</code></pre>
+<pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8]
+## [1,] 1.00 0.60 0.48 0.48 0.48 0.48 0.38 0.38
+## [2,] 0.60 1.00 0.48 0.48 0.48 0.48 0.38 0.38
+## [3,] 0.48 0.48 1.00 0.60 0.60 0.60 0.48 0.48
+## [4,] 0.48 0.48 0.60 1.00 0.60 0.60 0.48 0.48
+## [5,] 0.48 0.48 0.60 0.60 1.00 0.60 0.48 0.48
+## [6,] 0.48 0.48 0.60 0.60 0.60 1.00 0.48 0.48
+## [7,] 0.38 0.38 0.48 0.48 0.48 0.48 1.00 0.60
+## [8,] 0.38 0.38 0.48 0.48 0.48 0.48 0.60 1.00</code></pre>
+<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre><code>##      1    2    3    4    5    6    7    8
+## 1 1.00 0.59 0.47 0.46 0.48 0.47 0.38 0.39
+## 2 0.59 1.00 0.48 0.46 0.49 0.47 0.37 0.40
+## 3 0.47 0.48 1.00 0.60 0.61 0.60 0.48 0.49
+## 4 0.46 0.46 0.60 1.00 0.60 0.60 0.48 0.49
+## 5 0.48 0.49 0.61 0.60 1.00 0.60 0.49 0.49
+## 6 0.47 0.47 0.60 0.60 0.60 1.00 0.49 0.49
+## 7 0.38 0.37 0.48 0.48 0.49 0.49 1.00 0.59
+## 8 0.39 0.40 0.49 0.49 0.49 0.49 0.59 1.00</code></pre>
+<pre class="r"><code>clust &lt;- 7
+round(R[[clust]], 2)</code></pre>
+<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
+##  [1,] 1.00 0.60 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [2,] 0.60 1.00 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [3,] 0.60 0.60 1.00 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [4,] 0.60 0.60 0.60 1.00 0.56 0.56 0.56 0.56 0.52  0.52
+##  [5,] 0.56 0.56 0.56 0.56 1.00 0.60 0.60 0.60 0.56  0.56
+##  [6,] 0.56 0.56 0.56 0.56 0.60 1.00 0.60 0.60 0.56  0.56
+##  [7,] 0.56 0.56 0.56 0.56 0.60 0.60 1.00 0.60 0.56  0.56
+##  [8,] 0.56 0.56 0.56 0.56 0.60 0.60 0.60 1.00 0.56  0.56
+##  [9,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 1.00  0.60
+## [10,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 0.60  1.00</code></pre>
+<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre><code>##       1    2    3    4    5    6    7    8    9   10
+## 1  1.00 0.60 0.59 0.62 0.57 0.57 0.56 0.57 0.54 0.52
+## 2  0.60 1.00 0.59 0.60 0.56 0.56 0.55 0.55 0.51 0.51
+## 3  0.59 0.59 1.00 0.61 0.56 0.57 0.57 0.57 0.51 0.52
+## 4  0.62 0.60 0.61 1.00 0.56 0.57 0.57 0.57 0.51 0.53
+## 5  0.57 0.56 0.56 0.56 1.00 0.61 0.61 0.60 0.55 0.56
+## 6  0.57 0.56 0.57 0.57 0.61 1.00 0.61 0.60 0.56 0.56
+## 7  0.56 0.55 0.57 0.57 0.61 0.61 1.00 0.61 0.55 0.56
+## 8  0.57 0.55 0.57 0.57 0.60 0.60 0.61 1.00 0.55 0.57
+## 9  0.54 0.51 0.51 0.51 0.55 0.56 0.55 0.55 1.00 0.58
+## 10 0.52 0.51 0.52 0.53 0.56 0.56 0.56 0.57 0.58 1.00</code></pre>
 </div>
