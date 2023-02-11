@@ -220,15 +220,20 @@ dd
 If we want to confirm that everything is working as expected, we can recover the overall correlation matrix by generating a large number of data sets (in this case 5000):
 
 ```{r}
-reps <- lapply(1:5000, function(x)
- addCorGen(dc, idvar = "site", param1 = "lambda", corMatrix = RC,
-          dist = "poisson", cnames = "y", method = "copula")
+replicate <- function(R, dc) {
+  reps <- lapply(1:5000, function(x)
+  addCorGen(dc, idvar = "site", param1 = "lambda", corMatrix = R,
+    dist = "poisson", cnames = "y", method = "copula")
 )
 
 drep <- data.table::rbindlist(reps, idcol = "rep")
 drep[, seq := 1:.N, keyby = rep]
 dmat <- as.matrix(dcast(drep, rep ~ seq, value.var = "y")[, -1])
 round(cor(dmat), 1) 
+}
+
+replicate(R = RC, dc = dc)
+
 ```
 
 It seems to have worked quite well - this empirical matrix matches the hypothetical matrix above. In the next post, I'll describe how block matrices for different clusters over different time periods can also be flexibly generated for different groups.
