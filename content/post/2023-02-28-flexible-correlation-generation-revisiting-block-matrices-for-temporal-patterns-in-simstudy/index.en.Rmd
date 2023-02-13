@@ -295,20 +295,24 @@ katex_html(matform)
 
 ### Generating block matrices and simulating data
 
-We can put all of this into action with the help of two new functions `blockExchangeMat` and `blockDecayMat`. In the simulations that follow, I will start with a single cluster and three periods, just to keep it simple. In the addendum, I will provide a more elaborate example.
+We can put all of this into action with the help of two new functions `blockExchangeMat` and `blockDecayMat`. In the simulations that follow, I will start with two clusters and three periods, just to keep it simple. In the addendum, I will provide a more elaborate example.
 
 
 #### Cross-sectional data with exchangeable correlation
+
+In the first example, we specify $\rho_w = 0.5$ and $\rho_b = 0.3$, and there will be two individuals per cluster per period, so a total of six individuals per cluster. Since the assumptions are all the same for both clusters, it is only necessary to generate a single correlation matrix that will apply to each cluster (as opposed to a list of clusters, which I will generate in the more involved example at the end).
 
 ```{r}
 library(simstudy)
 library(data.table)
 
-R_XE <- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = .5,
-  rho_b = .3, pattern = "xsection")
+R_XE <- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = 0.5,
+  rho_b = 0.3, pattern = "xsection")
 
 R_XE
 ```
+
+The code block is generating two clusters (with different mean values for the outcome), and then 3 periods for each cluster, and finally 2 individuals per each period (per cluster). The correlated data are generated in the last step, using the correlation matrix that was just created.
 
 ```{r}
 defC <- defData(varname = "lambda", formula = "c(4, 7)", dist = "nonrandom")
@@ -325,6 +329,8 @@ dd <- addCorGen(dx, idvar = "site", corMatrix = R_XE,
 
 dd
 ```
+
+The next function generates 5000 data sets for these 12 individuals, so that we can estimate an empirical correlation matrix that we can compare with the true correlation matrix. In this case, it looks like things have worked out quite well.
 
 ```{r}
 replicate <- function(R, dx) {
@@ -345,12 +351,16 @@ replicate(R = R_XE, dx = dx)
 
 #### Cross-sectional data with correlation decay
 
+We repeat these steps, but now with a decay parameter $r = 0.8$ and no parameter $\rho_b$.
+
 ```{r}
-R_XD <- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = .5,
-  r = .8, pattern = "xsection")
+R_XD <- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = 0.5,
+  r = 0.8, pattern = "xsection")
 
 R_XD
 ```
+
+The empirical correlation matches the matrix $R_{XD}$:
 
 ```{r}
 replicate(R = R_XD, dx = dx)
@@ -358,12 +368,16 @@ replicate(R = R_XD, dx = dx)
 
 #### Cohort data with exchangeable correlation
 
+Since we have a cohort, we introduce $\rho_a$ = 0.4, and specify $pattern = \text{"cohort"}$:
+
 ```{r}
-R_CE <- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = .5, 
-  rho_b = .3, rho_a = .4, pattern = "cohort")
+R_CE <- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = 0.5, 
+  rho_b = 0.3, rho_a = 0.4, pattern = "cohort")
 
 R_CE
 ```
+
+And here is the empirical correlation matrix:
 
 ```{r}
 replicate(R = R_CE, dx = dx)
@@ -371,12 +385,16 @@ replicate(R = R_CE, dx = dx)
 
 #### Cohort data with correlation decay
 
+In the final case, the parameterization for decaying correlation with a cohort is the same as a decay in the case of a cross sectional design; the only difference that we set $pattern = \text{"cohort"}$:
+
 ```{r}
-R_CD <- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = .5, 
-  r = .8, pattern = "cohort")
+R_CD <- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = 0.5, 
+  r = 0.8, pattern = "cohort")
 
 R_CD
 ```
+
+And in this final case, the empirical data set does quite well as well:
 
 ```{r}
 replicate(R = R_CD, dx = dx)
@@ -412,12 +430,32 @@ dd <- genCluster(dtClust = dc, cLevelVar = "timeID",
 
 ```
 
+In this example, the 10 clusters will have varying numbers of observations per period. Here are the counts for three sites:
+
+```{r}
+dc[site %in% c(1, 3, 7), .(site, period, n)]
+```
+
+The sites will also have unique decay rates:
+
 ```{r}
 r <- round(rbeta(10, 6, 2), 2)
+r[c(1, 3, 7)]
+```
+
+Here are the correlation matrices for these three sites:
+
+```{r}
 N <- dd[, .N, keyby = .(site, period)][, N]
 
 R <- blockDecayMat(ninds = N , nperiods = 3, rho_w = 0.6, r = r, nclusters = 10)
 
+lapply(R, function(x) round(x,2))[c(1, 3, 7)]
+```
+
+And here are the empirical correlation matrices for the three sites:
+
+```{r}
 reps <- lapply(1:5000, 
   function(x) addCorGen(dd, idvar = "site", corMatrix = R,
     dist = "poisson", param1 = "lambda", cnames = "y")
@@ -435,19 +473,7 @@ empir_corr <- function(cluster) {
 ```
 
 ```{r}
-clust <- 1
-round(R[[clust]], 2)
-empir_corr(cluster = clust)
-```
-
-```{r}
-clust <- 3
-round(R[[clust]], 2)
-empir_corr(cluster = clust)
-```
-
-```{r}
-clust <- 7
-round(R[[clust]], 2)
-empir_corr(cluster = clust)
+empir_corr(cluster = 1)
+empir_corr(cluster = 3)
+empir_corr(cluster = 7)
 ```

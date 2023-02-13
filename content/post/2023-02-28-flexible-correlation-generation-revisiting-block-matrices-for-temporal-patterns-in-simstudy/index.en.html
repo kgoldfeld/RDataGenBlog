@@ -327,14 +327,15 @@ l0,-1344c-2,-159.3,-10,-310.7,-24,-454c-53.3,-528,-210,-949.7,
 </div>
 <div id="generating-block-matrices-and-simulating-data" class="section level3">
 <h3>Generating block matrices and simulating data</h3>
-<p>We can put all of this into action with the help of two new functions <code>blockExchangeMat</code> and <code>blockDecayMat</code>. In the simulations that follow, I will start with a single cluster and three periods, just to keep it simple. In the addendum, I will provide a more elaborate example.</p>
+<p>We can put all of this into action with the help of two new functions <code>blockExchangeMat</code> and <code>blockDecayMat</code>. In the simulations that follow, I will start with two clusters and three periods, just to keep it simple. In the addendum, I will provide a more elaborate example.</p>
 <div id="cross-sectional-data-with-exchangeable-correlation" class="section level4">
 <h4>Cross-sectional data with exchangeable correlation</h4>
+<p>In the first example, we specify <span class="math inline">\(\rho_w = 0.5\)</span> and <span class="math inline">\(\rho_b = 0.3\)</span>, and there will be two individuals per cluster per period, so a total of six individuals per cluster. Since the assumptions are all the same for both clusters, it is only necessary to generate a single correlation matrix that will apply to each cluster (as opposed to a list of clusters, which I will generate in the more involved example at the end).</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 
-R_XE &lt;- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = .5,
-  rho_b = .3, pattern = &quot;xsection&quot;)
+R_XE &lt;- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = 0.5,
+  rho_b = 0.3, pattern = &quot;xsection&quot;)
 
 R_XE</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
@@ -344,6 +345,7 @@ R_XE</code></pre>
 ## [4,]  0.3  0.3  0.5  1.0  0.3  0.3
 ## [5,]  0.3  0.3  0.3  0.3  1.0  0.5
 ## [6,]  0.3  0.3  0.3  0.3  0.5  1.0</code></pre>
+<p>The code block is generating two clusters (with different mean values for the outcome), and then 3 periods for each cluster, and finally 2 individuals per each period (per cluster). The correlated data are generated in the last step, using the correlation matrix that was just created.</p>
 <pre class="r"><code>defC &lt;- defData(varname = &quot;lambda&quot;, formula = &quot;c(4, 7)&quot;, dist = &quot;nonrandom&quot;)
 
 set.seed(1234)
@@ -370,6 +372,7 @@ dd</code></pre>
 ## 10:    2      1      7      5 10 4
 ## 11:    2      2      7      6 11 5
 ## 12:    2      2      7      6 12 5</code></pre>
+<p>The next function generates 5000 data sets for these 12 individuals, so that we can estimate an empirical correlation matrix that we can compare with the true correlation matrix. In this case, it looks like things have worked out quite well.</p>
 <pre class="r"><code>replicate &lt;- function(R, dx) {
   reps &lt;- lapply(1:5000, function(x)
     addCorGen(dx, idvar = &quot;site&quot;, corMatrix = R,
@@ -399,8 +402,9 @@ replicate(R = R_XE, dx = dx)</code></pre>
 </div>
 <div id="cross-sectional-data-with-correlation-decay" class="section level4">
 <h4>Cross-sectional data with correlation decay</h4>
-<pre class="r"><code>R_XD &lt;- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = .5,
-  r = .8, pattern = &quot;xsection&quot;)
+<p>We repeat these steps, but now with a decay parameter <span class="math inline">\(r = 0.8\)</span> and no parameter <span class="math inline">\(\rho_b\)</span>.</p>
+<pre class="r"><code>R_XD &lt;- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = 0.5,
+  r = 0.8, pattern = &quot;xsection&quot;)
 
 R_XD</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
@@ -410,6 +414,7 @@ R_XD</code></pre>
 ## [4,] 0.40 0.40  0.5  1.0 0.40 0.40
 ## [5,] 0.32 0.32  0.4  0.4 1.00 0.50
 ## [6,] 0.32 0.32  0.4  0.4 0.50 1.00</code></pre>
+<p>The empirical correlation matches the matrix <span class="math inline">\(R_{XD}\)</span>:</p>
 <pre class="r"><code>replicate(R = R_XD, dx = dx)</code></pre>
 <pre><code>##      1   2   3   4   5   6   7   8   9  10  11  12
 ## 1  1.0 0.5 0.4 0.4 0.3 0.3 0.0 0.0 0.0 0.0 0.0 0.0
@@ -427,8 +432,9 @@ R_XD</code></pre>
 </div>
 <div id="cohort-data-with-exchangeable-correlation" class="section level4">
 <h4>Cohort data with exchangeable correlation</h4>
-<pre class="r"><code>R_CE &lt;- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = .5, 
-  rho_b = .3, rho_a = .4, pattern = &quot;cohort&quot;)
+<p>Since we have a cohort, we introduce <span class="math inline">\(\rho_a\)</span> = 0.4, and specify <span class="math inline">\(pattern = \text{&quot;cohort&quot;}\)</span>:</p>
+<pre class="r"><code>R_CE &lt;- blockExchangeMat(ninds = 2 , nperiods = 3, rho_w = 0.5, 
+  rho_b = 0.3, rho_a = 0.4, pattern = &quot;cohort&quot;)
 
 R_CE</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
@@ -438,6 +444,7 @@ R_CE</code></pre>
 ## [4,]  0.3  0.4  0.5  1.0  0.3  0.4
 ## [5,]  0.4  0.3  0.4  0.3  1.0  0.5
 ## [6,]  0.3  0.4  0.3  0.4  0.5  1.0</code></pre>
+<p>And here is the empirical correlation matrix:</p>
 <pre class="r"><code>replicate(R = R_CE, dx = dx)</code></pre>
 <pre><code>##      1   2   3   4   5   6   7   8   9  10  11  12
 ## 1  1.0 0.5 0.4 0.3 0.4 0.3 0.0 0.0 0.0 0.0 0.0 0.0
@@ -455,8 +462,9 @@ R_CE</code></pre>
 </div>
 <div id="cohort-data-with-correlation-decay" class="section level4">
 <h4>Cohort data with correlation decay</h4>
-<pre class="r"><code>R_CD &lt;- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = .5, 
-  r = .8, pattern = &quot;cohort&quot;)
+<p>In the final case, the parameterization for decaying correlation with a cohort is the same as a decay in the case of a cross sectional design; the only difference that we set <span class="math inline">\(pattern = \text{&quot;cohort&quot;}\)</span>:</p>
+<pre class="r"><code>R_CD &lt;- blockDecayMat(ninds = 2 , nperiods = 3, rho_w = 0.5, 
+  r = 0.8, pattern = &quot;cohort&quot;)
 
 R_CD</code></pre>
 <pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6]
@@ -466,6 +474,7 @@ R_CD</code></pre>
 ## [4,] 0.40 0.80  0.5  1.0 0.40 0.80
 ## [5,] 0.64 0.32  0.8  0.4 1.00 0.50
 ## [6,] 0.32 0.64  0.4  0.8 0.50 1.00</code></pre>
+<p>And in this final case, the empirical data set does quite well as well:</p>
 <pre class="r"><code>replicate(R = R_CD, dx = dx)</code></pre>
 <pre><code>##      1   2   3   4   5   6   7   8   9  10  11  12
 ## 1  1.0 0.5 0.8 0.4 0.6 0.3 0.0 0.0 0.0 0.0 0.0 0.0
@@ -503,12 +512,68 @@ dc &lt;- addColumns(defP, dc)
 
 dd &lt;- genCluster(dtClust = dc, cLevelVar = &quot;timeID&quot;, 
   numIndsVar = &quot;n&quot;, level1ID = &quot;id&quot;)</code></pre>
+<p>In this example, the 10 clusters will have varying numbers of observations per period. Here are the counts for three sites:</p>
+<pre class="r"><code>dc[site %in% c(1, 3, 7), .(site, period, n)]</code></pre>
+<pre><code>##    site period n
+## 1:    1      0 4
+## 2:    1      1 4
+## 3:    1      2 4
+## 4:    3      0 2
+## 5:    3      1 4
+## 6:    3      2 2
+## 7:    7      0 4
+## 8:    7      1 4
+## 9:    7      2 2</code></pre>
+<p>The sites will also have unique decay rates:</p>
 <pre class="r"><code>r &lt;- round(rbeta(10, 6, 2), 2)
-N &lt;- dd[, .N, keyby = .(site, period)][, N]
+r[c(1, 3, 7)]</code></pre>
+<pre><code>## [1] 0.82 0.80 0.93</code></pre>
+<p>Here are the correlation matrices for these three sites:</p>
+<pre class="r"><code>N &lt;- dd[, .N, keyby = .(site, period)][, N]
 
 R &lt;- blockDecayMat(ninds = N , nperiods = 3, rho_w = 0.6, r = r, nclusters = 10)
 
-reps &lt;- lapply(1:5000, 
+lapply(R, function(x) round(x,2))[c(1, 3, 7)]</code></pre>
+<pre><code>## [[1]]
+##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
+##  [1,] 1.00 0.60 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [2,] 0.60 1.00 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [3,] 0.60 0.60 1.00 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [4,] 0.60 0.60 0.60 1.00 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
+##  [5,] 0.49 0.49 0.49 0.49 1.00 0.60 0.60 0.60 0.49  0.49  0.49  0.49
+##  [6,] 0.49 0.49 0.49 0.49 0.60 1.00 0.60 0.60 0.49  0.49  0.49  0.49
+##  [7,] 0.49 0.49 0.49 0.49 0.60 0.60 1.00 0.60 0.49  0.49  0.49  0.49
+##  [8,] 0.49 0.49 0.49 0.49 0.60 0.60 0.60 1.00 0.49  0.49  0.49  0.49
+##  [9,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 1.00  0.60  0.60  0.60
+## [10,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  1.00  0.60  0.60
+## [11,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  1.00  0.60
+## [12,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  0.60  1.00
+## 
+## [[2]]
+##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8]
+## [1,] 1.00 0.60 0.48 0.48 0.48 0.48 0.38 0.38
+## [2,] 0.60 1.00 0.48 0.48 0.48 0.48 0.38 0.38
+## [3,] 0.48 0.48 1.00 0.60 0.60 0.60 0.48 0.48
+## [4,] 0.48 0.48 0.60 1.00 0.60 0.60 0.48 0.48
+## [5,] 0.48 0.48 0.60 0.60 1.00 0.60 0.48 0.48
+## [6,] 0.48 0.48 0.60 0.60 0.60 1.00 0.48 0.48
+## [7,] 0.38 0.38 0.48 0.48 0.48 0.48 1.00 0.60
+## [8,] 0.38 0.38 0.48 0.48 0.48 0.48 0.60 1.00
+## 
+## [[3]]
+##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
+##  [1,] 1.00 0.60 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [2,] 0.60 1.00 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [3,] 0.60 0.60 1.00 0.60 0.56 0.56 0.56 0.56 0.52  0.52
+##  [4,] 0.60 0.60 0.60 1.00 0.56 0.56 0.56 0.56 0.52  0.52
+##  [5,] 0.56 0.56 0.56 0.56 1.00 0.60 0.60 0.60 0.56  0.56
+##  [6,] 0.56 0.56 0.56 0.56 0.60 1.00 0.60 0.60 0.56  0.56
+##  [7,] 0.56 0.56 0.56 0.56 0.60 0.60 1.00 0.60 0.56  0.56
+##  [8,] 0.56 0.56 0.56 0.56 0.60 0.60 0.60 1.00 0.56  0.56
+##  [9,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 1.00  0.60
+## [10,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 0.60  1.00</code></pre>
+<p>And here are the empirical correlation matrices for the three sites:</p>
+<pre class="r"><code>reps &lt;- lapply(1:5000, 
   function(x) addCorGen(dd, idvar = &quot;site&quot;, corMatrix = R,
     dist = &quot;poisson&quot;, param1 = &quot;lambda&quot;, cnames = &quot;y&quot;)
 )
@@ -522,22 +587,7 @@ empir_corr &lt;- function(cluster) {
   
   return(round(cor(dmat), 2))
 }</code></pre>
-<pre class="r"><code>clust &lt;- 1
-round(R[[clust]], 2)</code></pre>
-<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10] [,11] [,12]
-##  [1,] 1.00 0.60 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
-##  [2,] 0.60 1.00 0.60 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
-##  [3,] 0.60 0.60 1.00 0.60 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
-##  [4,] 0.60 0.60 0.60 1.00 0.49 0.49 0.49 0.49 0.40  0.40  0.40  0.40
-##  [5,] 0.49 0.49 0.49 0.49 1.00 0.60 0.60 0.60 0.49  0.49  0.49  0.49
-##  [6,] 0.49 0.49 0.49 0.49 0.60 1.00 0.60 0.60 0.49  0.49  0.49  0.49
-##  [7,] 0.49 0.49 0.49 0.49 0.60 0.60 1.00 0.60 0.49  0.49  0.49  0.49
-##  [8,] 0.49 0.49 0.49 0.49 0.60 0.60 0.60 1.00 0.49  0.49  0.49  0.49
-##  [9,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 1.00  0.60  0.60  0.60
-## [10,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  1.00  0.60  0.60
-## [11,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  1.00  0.60
-## [12,] 0.40 0.40 0.40 0.40 0.49 0.49 0.49 0.49 0.60  0.60  0.60  1.00</code></pre>
-<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre class="r"><code>empir_corr(cluster = 1)</code></pre>
 <pre><code>##       1    2    3    4    5    6    7    8    9   10   11   12
 ## 1  1.00 0.59 0.60 0.60 0.48 0.49 0.49 0.49 0.37 0.37 0.37 0.39
 ## 2  0.59 1.00 0.59 0.59 0.50 0.49 0.49 0.50 0.38 0.37 0.39 0.39
@@ -551,18 +601,7 @@ round(R[[clust]], 2)</code></pre>
 ## 10 0.37 0.37 0.37 0.39 0.49 0.47 0.48 0.47 0.58 1.00 0.59 0.58
 ## 11 0.37 0.39 0.37 0.39 0.48 0.46 0.47 0.47 0.57 0.59 1.00 0.59
 ## 12 0.39 0.39 0.40 0.41 0.49 0.49 0.50 0.49 0.58 0.58 0.59 1.00</code></pre>
-<pre class="r"><code>clust &lt;- 3
-round(R[[clust]], 2)</code></pre>
-<pre><code>##      [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8]
-## [1,] 1.00 0.60 0.48 0.48 0.48 0.48 0.38 0.38
-## [2,] 0.60 1.00 0.48 0.48 0.48 0.48 0.38 0.38
-## [3,] 0.48 0.48 1.00 0.60 0.60 0.60 0.48 0.48
-## [4,] 0.48 0.48 0.60 1.00 0.60 0.60 0.48 0.48
-## [5,] 0.48 0.48 0.60 0.60 1.00 0.60 0.48 0.48
-## [6,] 0.48 0.48 0.60 0.60 0.60 1.00 0.48 0.48
-## [7,] 0.38 0.38 0.48 0.48 0.48 0.48 1.00 0.60
-## [8,] 0.38 0.38 0.48 0.48 0.48 0.48 0.60 1.00</code></pre>
-<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre class="r"><code>empir_corr(cluster = 3)</code></pre>
 <pre><code>##      1    2    3    4    5    6    7    8
 ## 1 1.00 0.59 0.47 0.46 0.48 0.47 0.38 0.39
 ## 2 0.59 1.00 0.48 0.46 0.49 0.47 0.37 0.40
@@ -572,20 +611,7 @@ round(R[[clust]], 2)</code></pre>
 ## 6 0.47 0.47 0.60 0.60 0.60 1.00 0.49 0.49
 ## 7 0.38 0.37 0.48 0.48 0.49 0.49 1.00 0.59
 ## 8 0.39 0.40 0.49 0.49 0.49 0.49 0.59 1.00</code></pre>
-<pre class="r"><code>clust &lt;- 7
-round(R[[clust]], 2)</code></pre>
-<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8] [,9] [,10]
-##  [1,] 1.00 0.60 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
-##  [2,] 0.60 1.00 0.60 0.60 0.56 0.56 0.56 0.56 0.52  0.52
-##  [3,] 0.60 0.60 1.00 0.60 0.56 0.56 0.56 0.56 0.52  0.52
-##  [4,] 0.60 0.60 0.60 1.00 0.56 0.56 0.56 0.56 0.52  0.52
-##  [5,] 0.56 0.56 0.56 0.56 1.00 0.60 0.60 0.60 0.56  0.56
-##  [6,] 0.56 0.56 0.56 0.56 0.60 1.00 0.60 0.60 0.56  0.56
-##  [7,] 0.56 0.56 0.56 0.56 0.60 0.60 1.00 0.60 0.56  0.56
-##  [8,] 0.56 0.56 0.56 0.56 0.60 0.60 0.60 1.00 0.56  0.56
-##  [9,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 1.00  0.60
-## [10,] 0.52 0.52 0.52 0.52 0.56 0.56 0.56 0.56 0.60  1.00</code></pre>
-<pre class="r"><code>empir_corr(cluster = clust)</code></pre>
+<pre class="r"><code>empir_corr(cluster = 7)</code></pre>
 <pre><code>##       1    2    3    4    5    6    7    8    9   10
 ## 1  1.00 0.60 0.59 0.62 0.57 0.57 0.56 0.57 0.54 0.52
 ## 2  0.60 1.00 0.59 0.60 0.56 0.56 0.55 0.55 0.51 0.51
