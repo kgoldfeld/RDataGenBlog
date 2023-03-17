@@ -1,0 +1,221 @@
+---
+title: Implementing a one-step GEE algorithm for very large cluster sizes in R
+author: Package Build
+date: '2023-03-14'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be overburdensome.</p>
+<p>There is a solution to this problem that has been described in this <a href="https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552" target="_blank">paper</a> by <em>Lipsitz et al</em>. The supplemental materials include a <code>SAS</code> macro. When I searched fairly extensively for a version of the algorithm in <code>R</code>, I did not come across anything. So, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an <code>R</code> package, definitely let me know.) I will spare you the code for the estimating function, but you can access it <a href="" target="_blank">here</a> if you’d like to use it now.</p>
+<div id="the-one-step-gee-algorithm" class="section level3">
+<h3>The one-step GEE algorithm</h3>
+<p>Traditional GEE models (such as those fit with <code>R</code> packages <code>gee</code> and <code>geepack</code>) allow for flexibility in specifying the within-cluster correlation structure (we generally still assume that individuals in <em>different</em> clusters are uncorrelated). For example, one could assume that the correlation across individuals is constant within a cluster. We call this <em>exchangeable</em> or <em>compound symmetry</em> correlation, and the intra-cluster correlation (ICC) is the measure of that correlation. Alternatively, if measurements are collected over time, we might assume that measurement closer in term are more highly correlated; this is called auto-regressive correlation.</p>
+<p>The proposed algorithm that is implemented here is called the one-step GEE, and is operating under the assumption of exchangeable correlation. To provide a little more detail on the algorithm, but to keep it simple, let me quote directly from the paper’s abstract:</p>
+<blockquote>
+<p>We propose a one-step GEE estimator that (1) matches the asymptotic efficiency of the fully iterated GEE; (2) uses a simpler formula to estimate the [intra-cluster correlation] ICC that avoids summing over all pairs; and (3) completely avoids matrix multiplications and inversions. These three features make the proposed estimator much less computationally intensive, especially with large cluster sizes. A unique contribution of this article is that it expresses the GEE estimating equations incorporating the ICC as a simple sum of vectors and scalars.</p>
+</blockquote>
+<p>The rest of the way, I will simulate data a fit different models with computation time to provide a basis of comparison.</p>
+</div>
+<div id="example-1-comparing-geepackgeese-with-gee1step" class="section level3">
+<h3>Example 1: comparing geepack::geese with gee1step</h3>
+<p>To start, I am simulating a simple data set with 100 clusters that average around 100 individuals per cluster.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(geepack)</code></pre>
+<p>First, the definitions used in the data generation:</p>
+<pre class="r"><code>d1 &lt;- defData(varname = &quot;n&quot;, formula = 100, dist = &quot;noZeroPoisson&quot;)
+
+d2 &lt;- defDataAdd(varname = &quot;x1&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;x2&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;x3&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;p&quot;, formula = &quot;-0.7 + 0.7*x1 - 0.4*x2&quot;, 
+        dist = &quot;nonrandom&quot;, link=&quot;logit&quot;)</code></pre>
+<p>And then the data generation:</p>
+<pre class="r"><code>set.seed(1234)
+
+ds &lt;- genData(100, d1, id = &quot;site&quot;)
+dc &lt;- genCluster(dtClust = ds, cLevelVar = &quot;site&quot;, numIndsVar = &quot;n&quot;, level1ID = &quot;id&quot;)
+dc &lt;- addColumns(d2, dc)
+
+dd &lt;- addCorGen(dc, idvar = &quot;site&quot;, param1 = &quot;p&quot;,
+        rho = 0.15, corstr = &quot;cs&quot;, dist = &quot;binary&quot;, cnames = &quot;y&quot;, method = &quot;ep&quot;)</code></pre>
+<p>Here’s a few records from the data set, which has just under 10,000 observations across the 100 clusters:</p>
+<pre class="r"><code>dd</code></pre>
+<pre><code>##       site   n   id          x1          x2          x3         p y
+##    1:    1  88    1 -0.57111723  0.21022042 -0.31201547 0.2343570 0
+##    2:    1  88    2 -0.18406857  0.68915628 -0.72801775 0.2488957 0
+##    3:    1  88    3 -0.35066169 -0.10884256  0.28141278 0.2886548 0
+##    4:    1  88    4 -0.32095917 -0.03676544 -0.33847489 0.2870070 0
+##    5:    1  88    5 -0.05132678  0.07095837 -0.09308927 0.3177108 1
+##   ---                                                              
+## 9784:  100 106 9784 -0.26912777 -0.22893853  0.16303770 0.3107074 1
+## 9785:  100 106 9785  0.16399013  0.26200677 -0.03187061 0.3340309 0
+## 9786:  100 106 9786  0.14450843 -0.24399797 -0.28108422 0.3772482 1
+## 9787:  100 106 9787  0.29307929  0.03889844 -0.37495296 0.3750989 0
+## 9788:  100 106 9788 -0.06246070 -0.41041326  0.43236084 0.3590345 1</code></pre>
+<p>We can fit a regular GEE model here, since the cluster sizes are relatively small:</p>
+<pre class="r"><code>system.time(geefit &lt;- geese(y ~ x1 + x2 + x3, id = site, data = dd, 
+  family = binomial, corstr = &quot;exchangeable&quot;))</code></pre>
+<pre><code>##    user  system elapsed 
+##   2.294   0.100   1.945</code></pre>
+<pre class="r"><code>summary(geefit)</code></pre>
+<pre><code>## 
+## Call:
+## geese(formula = y ~ x1 + x2 + x3, id = site, data = dd, family = binomial, 
+##     corstr = &quot;exchangeable&quot;)
+## 
+## Mean Model:
+##  Mean Link:                 logit 
+##  Variance to Mean Relation: binomial 
+## 
+##  Coefficients:
+##               estimate     san.se        wald            p
+## (Intercept) -0.7275165 0.08459309  73.9632404 0.000000e+00
+## x1           0.7396758 0.06584516 126.1929384 0.000000e+00
+## x2          -0.3191633 0.06073004  27.6196887 1.476680e-07
+## x3          -0.0477172 0.06113708   0.6091727 4.350995e-01
+## 
+## Scale Model:
+##  Scale Link:                identity 
+## 
+##  Estimated Scale Parameters:
+##              estimate     san.se     wald p
+## (Intercept) 0.9954265 0.03464657 825.4633 0
+## 
+## Correlation Model:
+##  Correlation Structure:     exchangeable 
+##  Correlation Link:          identity 
+## 
+##  Estimated Correlation Parameters:
+##        estimate     san.se     wald            p
+## alpha 0.1441719 0.02168204 44.21411 2.943523e-11
+## 
+## Returned Error Value:    0 
+## Number of clusters:   100   Maximum cluster size: 125</code></pre>
+<p>The one-step GEE model (that I’ve called <code>gee1step</code>) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.</p>
+<pre class="r"><code>system.time(fit1 &lt;- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = &quot;site&quot;))</code></pre>
+<pre><code>##    user  system elapsed 
+##   0.143   0.021   0.090</code></pre>
+<pre class="r"><code>fit1</code></pre>
+<pre><code>## $estimates
+##                   est     se.err          z      p.value
+## Intercept -0.72743563 0.08549337 -8.5086793 8.796283e-18
+## x1         0.73943837 0.06704127 11.0296000 1.375430e-28
+## x2        -0.31903588 0.06136514 -5.1989760 1.001947e-07
+## x3        -0.04758544 0.06165700 -0.7717768 2.201233e-01
+## 
+## $rho
+## [1] 0.1440159
+## 
+## $clusters
+## $clusters$n_clusters
+## [1] 100
+## 
+## $clusters$avg_size
+## [1] 97.88
+## 
+## $clusters$min_size
+## [1] 77
+## 
+## $clusters$max_size
+## [1] 125
+## 
+## 
+## $outcome
+## [1] &quot;y&quot;
+## 
+## $model
+## y ~ x1 + x2 + x3
+## 
+## attr(,&quot;class&quot;)
+## [1] &quot;gee1step&quot;</code></pre>
+</div>
+<div id="example-2-gee1step-with-very-large-cluster-sizes" class="section level3">
+<h3>Example 2: gee1step with very large cluster sizes</h3>
+<p>Obviously, in the previous example, <code>gee1step</code> is not needed because <code>geese</code> handled the data set just fine, but in the next example with an average of 10,000 observations per cluster, <code>geese</code> will not run. But <code>gee1step</code> does just fine. I’m generating the data slightly differently here since <code>simstudy</code> doesn’t do well with extremely large correlation matrices. I’m using a random effect instead:</p>
+<pre class="r"><code>vicc &lt;- iccRE(0.15, dist = &quot;binary&quot;)
+
+d1 &lt;- defData(varname = &quot;n&quot;, formula = 10000, dist = &quot;noZeroPoisson&quot;)
+d1 &lt;- defData(d1, varname = &quot;b&quot;, formula = 0, variance = vicc)
+
+d2 &lt;- defDataAdd(varname = &quot;x1&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;x2&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;x3&quot;, formula = 0, variance = .1,  dist = &quot;normal&quot;)
+d2 &lt;- defDataAdd(d2, varname = &quot;y&quot;, formula = &quot;-0.7 + 0.7*x1 - 0.4*x2 + b&quot;, 
+        dist = &quot;binary&quot;, link=&quot;logit&quot;)
+
+### generate data
+
+set.seed(1234)
+
+ds &lt;- genData(100, d1, id = &quot;site&quot;)
+dc &lt;- genCluster(dtClust = ds, cLevelVar = &quot;site&quot;, numIndsVar = &quot;n&quot;, level1ID = &quot;id&quot;)
+dd &lt;- addColumns(d2, dc)</code></pre>
+<p>Now, we have almost one million observations:</p>
+<pre class="r"><code>dd</code></pre>
+<pre><code>##         site     n          b     id          x1            x2          x3 y
+##      1:    1  9879 -1.3761022      1 -0.11929302  0.4136057653 -0.16119383 1
+##      2:    1  9879 -1.3761022      2  0.03086998  0.3085905336  0.46055431 0
+##      3:    1  9879 -1.3761022      3  0.51821656  0.2047086274  0.16721059 0
+##      4:    1  9879 -1.3761022      4 -0.27688665  0.0030742246 -1.08113944 0
+##      5:    1  9879 -1.3761022      5  0.03850389 -0.0991678903 -0.09447011 0
+##     ---                                                                     
+## 997872:  100 10065  0.2648166 997872  0.46022770  0.1588510133 -0.11851768 0
+## 997873:  100 10065  0.2648166 997873  0.10696608  0.0002424567 -0.10632926 1
+## 997874:  100 10065  0.2648166 997874  0.32317258 -0.1626614787  0.37855380 1
+## 997875:  100 10065  0.2648166 997875 -0.17992641 -0.0333636043 -0.20060539 0
+## 997876:  100 10065  0.2648166 997876  0.65942651  0.1960137135 -0.05687481 1</code></pre>
+<p>Despite the large cluster sizes, the one-step algorithm still runs very fast. I have conducted experiments with repeated data sets to confirm that the coefficient estimates are unbiased and the standard error estimates are correct.</p>
+<pre class="r"><code>system.time(fit1 &lt;- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = &quot;site&quot;))</code></pre>
+<pre><code>##    user  system elapsed 
+##   2.170   0.358   1.628</code></pre>
+<pre class="r"><code>fit1</code></pre>
+<pre><code>## $estimates
+##                    est      se.err          z      p.value
+## Intercept -0.569908988 0.069360637  -8.216605 1.046722e-16
+## x1         0.615260991 0.010232501  60.128117 0.000000e+00
+## x2        -0.349871546 0.008694526 -40.240439 0.000000e+00
+## x3         0.008132196 0.006470784   1.256756 1.044210e-01
+## 
+## $rho
+## [1] 0.1016716
+## 
+## $clusters
+## $clusters$n_clusters
+## [1] 100
+## 
+## $clusters$avg_size
+## [1] 9978.76
+## 
+## $clusters$min_size
+## [1] 9766
+## 
+## $clusters$max_size
+## [1] 10242
+## 
+## 
+## $outcome
+## [1] &quot;y&quot;
+## 
+## $model
+## y ~ x1 + x2 + x3
+## 
+## attr(,&quot;class&quot;)
+## [1] &quot;gee1step&quot;</code></pre>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Lipsitz, Stuart, Garrett Fitzmaurice, Debajyoti Sinha, Nathanael Hevelone, Jim Hu, and Louis L. Nguyen. “One-step generalized estimating equations with large cluster sizes.” Journal of Computational and Graphical Statistics 26, no. 3 (2017): 734-737.</p>
+</font></small>
+</p>
+<p><br></p>
+</div>

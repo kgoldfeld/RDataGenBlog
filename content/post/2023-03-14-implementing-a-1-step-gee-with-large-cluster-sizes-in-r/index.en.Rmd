@@ -1,0 +1,312 @@
+---
+title: Implementing a one-step GEE algorithm for very large cluster sizes in R
+author: Package Build
+date: '2023-03-14'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be overburdensome. 
+
+There is a solution to this problem that has been described in this [paper](https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552){target="_blank"} by *Lipsitz et al*. The supplemental materials include a `SAS` macro. When I searched fairly extensively for a version of the algorithm in `R`, I did not come across anything. So, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an `R` package, definitely let me know.) I will spare you the code for the estimating function, but you can access it [here](){target="_blank"} if you'd like to use it now.
+
+```{r, echo=FALSE}
+gee1step <- function(formula, data, cluster) {
+  
+  ### Check arguments
+  
+  if ( class(formula) != "formula" ) {
+    stop("The argument `formula` is not properly specified")
+  }
+  
+  if  (! is.data.frame(data) ) {
+    stop("Data must be a data.frame or data.table")
+  }
+  
+  data <- data.table::as.data.table(data)
+  
+  if ( ! (all(all.vars(formula) %in% names(data))) ) {
+    stop("Variables in formula not all in data set")  
+  }
+  
+  if ( ! (cluster %in% names(data)) ) {
+    stop(paste("Cluster variable", cluster, "is not in data set"))  
+  }
+  
+  Y <- all.vars(formula)[1]
+  
+  X <- all.vars(formula, unique = FALSE)[-1]
+  .X <- paste0(".", X)
+  ..X <- paste0("..", X)
+  
+  if ( ! all(data[, get(Y)] %in% c(0, 1)) ) {
+    stop(paste("Outcome variable", Y, "must be binary!"))
+  }
+  
+  if (Y %in% X) {
+    stop(paste("Outcome variable", Y, "cannot also be a predictor"))
+  }
+  
+  ### 
+  
+  dx <- copy(data)
+  glmfit <- stats::glm(formula, data = dx, family = binomial)
+  
+  dx[, p := stats::predict.glm(glmfit, type = "response")]
+  dx[, intz := sqrt( p * (1-p) )]
+  
+  for (i in seq_along(.X)) {
+    dx[, .X[i] := get(X[i]) * intz]
+  }
+  
+  dx[, resid := (get(Y) - p) / sqrt( p * (1 -p) ) ]
+  
+  ### Estimate ICC
+  
+  drho <- dx[, 
+    .(.N, 
+      sum_r = sum(resid), 
+      uss_r = sum(resid^2)    
+    ), keyby = get(cluster)]
+  
+  drho[, wt_ij := ( N * (N-1) / 2)]
+  drho[, rho_ij := sum_r^2 - uss_r ]
+  rho <- drho[, (sum(rho_ij)/2) / sum(wt_ij)]
+  
+  ### Estimate betas
+  
+  getsum <- function(x, .dx) {
+    
+    .dd <- .dx[, .(sum(get(x))), keyby = cluster]
+    setnames(.dd, "V1", x)
+    .dd[]
+  }
+    
+  dsum <- dx[, .N, keyby = cluster]
+  
+  sumlist <- lapply(c("resid", "intz", .X), function(x) getsum(x, dx))
+  dz <- Reduce(function(dt1, dt2) merge(dt1, dt2, by = cluster), x = sumlist)
+  
+  dsum <- merge(dz, dsum)
+  
+  dm <- lapply(c("intz", .X), 
+    function(x) dsum[, get(x) * sqrt(rho / ( (1 - rho) + N * rho))] )
+  M <- do.call(cbind, dm)
+  
+  dvd_add <- t(M) %*% M
+  dsum[, resid := resid * rho / ( ( 1 - rho ) + N * rho ) ]
+  
+  du <- lapply(c("intz", .X), function(x) dsum[, get(x)*resid])
+  U <- do.call(cbind, du)
+  addU <- apply(U, 2, sum)
+  
+  beta <- coef(glmfit)
+  bvcov <- vcov(glmfit)
+  
+  dvd <- matrix(solve(bvcov) - dvd_add, dim(bvcov)[1], dim(bvcov)[2])
+  
+  beta2 <- beta - (solve(dvd) %*% matrix(addU))
+  
+  ### Estimate robust standard errors
+  
+  dr <- copy(data)
+  dvars <- as.matrix(cbind(1, dr[, cbind(mget(X))]))
+  
+  lodds <-  dvars %*% beta2
+  
+  dr[, p:= 1/(1 + exp(-lodds))]
+  dr[, resid := ( get(Y) - p) / sqrt( p * (1 - p) )]
+  dr[, intz := sqrt(p * ( 1 - p ))]
+  dr[, intz1 := get(Y) - p]
+  
+  for (i in seq_along(.X)) {
+    dr[, .X[i] := get(X[i]) * intz]
+  }
+  
+  for (i in seq_along(..X)) {
+    dr[, ..X[i] := get(X[i]) * intz1]
+  }
+  
+  dsum <- dx[, .N, keyby = cluster]
+  sumlist <- lapply(c("resid", "intz", "intz1", .X, ..X), function(x) getsum(x, dr))
+
+  dz <- Reduce(function(dt1, dt2) merge(dt1, dt2, by = cluster), x = sumlist)
+  dsum <- merge(dsum, dz)
+  
+  dv <- lapply(c("intz", .X), 
+    function(x) dsum[, get(x) * sqrt(rho / ( (1 - rho) + N * rho))] )
+  M <- do.call(cbind, dv)
+  
+  dvd_add <- t(M) %*% M
+  
+  dsum[, resid := resid * rho / ( ( 1 - rho ) + N * rho ) ]
+  
+  dr <- lapply(c("intz", .X), function(x) dsum[, get(x)*resid])
+  U <- do.call(cbind, dr)
+  addU <- apply(U, 2, sum)
+  
+  .D <- c("intz", .X)
+  .E <- c("intz1", ..X)
+  
+  for (i in seq_along(.D)) {
+    dsum[, .D[i] := get(.E[i]) - get(.D[i]) * resid ]
+  }
+  
+  dsum2 <- as.matrix(dsum[, (cbind(mget(.D)))])
+  
+  sumcols <- apply(dsum2, 2, sum)
+  
+  adjust <- sumcols %*% t(sumcols) / nrow(dsum2)
+  
+  uusq <- t(dsum2) %*% dsum2 - adjust
+  uusq <- uusq * nrow(dsum2) / ( nrow(dsum2) - 1)
+  
+  vb <- solve(dvd) %*% uusq %*% solve(dvd)
+  se.vb <- sqrt(diag(vb))
+  
+  beta2 <- as.vector(beta2)
+  z <- beta2/se.vb
+  p.value <- pnorm(-abs(z))
+  
+  estimates <- data.frame(est = beta2, se.err = se.vb, z = z, p.value = p.value)
+  rownames(estimates) <-  c("Intercept", labels(terms(formula)))
+
+  n_clusters <- nrow(drho)
+  avg_cluster_size <- drho[, mean(N)]
+  min_cluster_size <- drho[, min(N)]
+  max_cluster_size <- drho[, max(N)]
+  
+  result <- list(estimates = estimates, rho = rho, 
+                  clusters = list (n_clusters = n_clusters, 
+    avg_size = avg_cluster_size, min_size = min_cluster_size, max_size = max_cluster_size),
+    outcome = Y,
+    model = formula)
+
+  attr(result, "class") <- "gee1step"
+  
+  return(result)
+  
+}
+```
+
+### The one-step GEE algorithm
+
+Traditional GEE models (such as those fit with `R` packages `gee` and `geepack`) allow for flexibility in specifying the within-cluster correlation structure (we generally still assume that individuals in *different* clusters are uncorrelated). For example, one could assume that the correlation across individuals is constant within a cluster. We call this *exchangeable* or *compound symmetry* correlation, and the intra-cluster correlation (ICC) is the measure of that correlation. Alternatively, if measurements are collected over time, we might assume that measurement closer in term are more highly correlated; this is called auto-regressive correlation. 
+
+The proposed algorithm that is implemented here is called the one-step GEE, and is operating under the assumption of exchangeable correlation. To provide a little more detail on the algorithm, but to keep it simple, let me quote directly from the paper's abstract:
+
+> We propose a one-step GEE estimator that (1) matches the asymptotic efficiency of the fully iterated GEE; (2) uses a simpler formula to estimate the [intra-cluster correlation] ICC that avoids summing over all pairs; and (3) completely avoids matrix multiplications and inversions. These three features make the proposed estimator much less computationally intensive, especially with large cluster sizes. A unique contribution of this article is that it expresses the GEE estimating equations incorporating the ICC as a simple sum of vectors and scalars.
+
+The rest of the way, I will simulate data a fit different models with computation time to provide a basis of comparison.
+
+### Example 1: comparing geepack::geese with gee1step
+
+To start, I am simulating a simple data set with 100 clusters that average around 100 individuals per cluster.
+
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+library(geepack)
+```
+
+First, the definitions used in the data generation:
+
+```{r}
+d1 <- defData(varname = "n", formula = 100, dist = "noZeroPoisson")
+
+d2 <- defDataAdd(varname = "x1", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "x2", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "x3", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "p", formula = "-0.7 + 0.7*x1 - 0.4*x2", 
+        dist = "nonrandom", link="logit")
+```
+
+And then the data generation:
+
+```{r}
+set.seed(1234)
+
+ds <- genData(100, d1, id = "site")
+dc <- genCluster(dtClust = ds, cLevelVar = "site", numIndsVar = "n", level1ID = "id")
+dc <- addColumns(d2, dc)
+
+dd <- addCorGen(dc, idvar = "site", param1 = "p",
+        rho = 0.15, corstr = "cs", dist = "binary", cnames = "y", method = "ep")
+ 
+```
+
+Here's a few records from the data set, which has just under 10,000 observations across the 100 clusters:
+
+```{r}
+dd
+```
+
+We can fit a regular GEE model here, since the cluster sizes are relatively small:
+
+```{r}
+system.time(geefit <- geese(y ~ x1 + x2 + x3, id = site, data = dd, 
+  family = binomial, corstr = "exchangeable"))
+
+summary(geefit)
+```
+
+The one-step GEE model (that I've called `gee1step`) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.
+
+```{r}
+system.time(fit1 <- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = "site"))
+fit1
+```
+
+### Example 2: gee1step with very large cluster sizes
+
+Obviously, in the previous example, `gee1step` is not needed because `geese` handled the data set just fine, but in the next example with an average of 10,000 observations per cluster, `geese` will not run. But `gee1step` does just fine. I'm generating the data slightly differently here since `simstudy` doesn't do well with extremely large correlation matrices. I'm using a random effect instead:
+
+```{r}
+vicc <- iccRE(0.15, dist = "binary")
+
+d1 <- defData(varname = "n", formula = 10000, dist = "noZeroPoisson")
+d1 <- defData(d1, varname = "b", formula = 0, variance = vicc)
+
+d2 <- defDataAdd(varname = "x1", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "x2", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "x3", formula = 0, variance = .1,  dist = "normal")
+d2 <- defDataAdd(d2, varname = "y", formula = "-0.7 + 0.7*x1 - 0.4*x2 + b", 
+        dist = "binary", link="logit")
+
+### generate data
+
+set.seed(1234)
+
+ds <- genData(100, d1, id = "site")
+dc <- genCluster(dtClust = ds, cLevelVar = "site", numIndsVar = "n", level1ID = "id")
+dd <- addColumns(d2, dc)
+```
+
+Now, we have almost one million observations:
+
+```{r}
+dd
+```
+
+Despite the large cluster sizes, the one-step algorithm still runs very fast. I have conducted experiments with repeated data sets to confirm that the coefficient estimates are unbiased and the standard error estimates are correct.
+
+```{r}
+system.time(fit1 <- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = "site"))
+fit1
+```
+
+
+<p><small><font color="darkkhaki">
+Reference:
+
+Lipsitz, Stuart, Garrett Fitzmaurice, Debajyoti Sinha, Nathanael Hevelone, Jim Hu, and Louis L. Nguyen. "One-step generalized estimating equations with large cluster sizes." Journal of Computational and Graphical Statistics 26, no. 3 (2017): 734-737.
+
+</font></small></p>
+
+<br>
