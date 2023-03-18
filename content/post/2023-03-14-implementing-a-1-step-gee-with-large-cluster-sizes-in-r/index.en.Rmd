@@ -12,9 +12,9 @@ image: ''
 draft: TRUE
 ---
 
-Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be overburdensome. 
+Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be over burdensome. 
 
-There is a solution to this problem that has been described in this [paper](https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552){target="_blank"} by *Lipsitz et al*. The supplemental materials include a `SAS` macro. When I searched fairly extensively for a version of the algorithm in `R`, I did not come across anything. So, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an `R` package, definitely let me know.) I will spare you the code for the estimating function, but you can access it [here](){target="_blank"} if you'd like to use it now.
+A solution to this problem that has been described in a [paper](https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552){target="_blank"} by *Lipsitz et al*. The online supplemental materials for the paper include a `SAS` macro. Since a fairly extensively for a version of the algorithm in `R` did not identify anything, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an `R` package, definitely let me know.) I will spare you the code for the function, but you can access it [here](){target="_blank"} if you'd like to use it now.
 
 ```{r, echo=FALSE}
 gee1step <- function(formula, data, cluster) {
@@ -205,9 +205,9 @@ The proposed algorithm that is implemented here is called the one-step GEE, and 
 
 The rest of the way, I will simulate data a fit different models with computation time to provide a basis of comparison.
 
-### Example 1: comparing geepack::geese with gee1step
+### Comparing standard GEE with one-step GEE
 
-To start, I am simulating a simple data set with 100 clusters that average around 100 individuals per cluster.
+To start, I am simulating a simple data set with 100 clusters that average 100 individuals per cluster.
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -256,14 +256,14 @@ system.time(geefit <- geese(y ~ x1 + x2 + x3, id = site, data = dd,
 summary(geefit)
 ```
 
-The one-step GEE model (that I've called `gee1step`) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.
+The one-step GEE function (which I've called `gee1step`) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.
 
 ```{r}
 system.time(fit1 <- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = "site"))
 fit1
 ```
 
-### Example 2: gee1step with very large cluster sizes
+### The one-step algorithm with very large cluster sizes
 
 Obviously, in the previous example, `gee1step` is not needed because `geese` handled the data set just fine, but in the next example with an average of 10,000 observations per cluster, `geese` will not run. But `gee1step` does just fine. I'm generating the data slightly differently here since `simstudy` doesn't do well with extremely large correlation matrices. I'm using a random effect instead:
 
@@ -301,6 +301,7 @@ system.time(fit1 <- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = "site"))
 fit1
 ```
 
+If anyone thinks it would be valuable for me to create a package for this, I would certainly consider it. Let me know what you think.
 
 <p><small><font color="darkkhaki">
 Reference:

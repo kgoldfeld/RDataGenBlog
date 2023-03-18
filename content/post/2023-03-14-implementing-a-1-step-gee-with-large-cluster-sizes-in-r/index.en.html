@@ -14,8 +14,8 @@ draft: TRUE
 
 
 
-<p>Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be overburdensome.</p>
-<p>There is a solution to this problem that has been described in this <a href="https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552" target="_blank">paper</a> by <em>Lipsitz et al</em>. The supplemental materials include a <code>SAS</code> macro. When I searched fairly extensively for a version of the algorithm in <code>R</code>, I did not come across anything. So, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an <code>R</code> package, definitely let me know.) I will spare you the code for the estimating function, but you can access it <a href="" target="_blank">here</a> if you’d like to use it now.</p>
+<p>Very large data sets can present estimation problems for some statistical models, particularly ones that cannot avoid doing matrix inversion. For example, generalized estimating equations (GEE) models that are used to estimate regression parameters when individual observations are correlated within groups can be impossible to use when the cluster sizes get too large, say on the order of thousands. GEE is often used when repeated measures for an individual are collected over time; the individual is considered a cluster in this analysis, and estimation is not really an issue. However, if individuals are correlated in large clusters - in a cluster-randomized trial, for example - we might also need to account for that correlation in the model. However, if the cluster sizes are too large, GEE estimation may not be feasible, because the computation requirements can be over burdensome.</p>
+<p>A solution to this problem that has been described in a <a href="https://www.tandfonline.com/doi/full/10.1080/10618600.2017.1321552" target="_blank">paper</a> by <em>Lipsitz et al</em>. The online supplemental materials for the paper include a <code>SAS</code> macro. Since a fairly extensively for a version of the algorithm in <code>R</code> did not identify anything, I went ahead and implemented it myself. I am trying to decide if I should create a little package, but in the meantime, I thought I would demonstrate it here. (If it does already exist in an <code>R</code> package, definitely let me know.) I will spare you the code for the function, but you can access it <a href="" target="_blank">here</a> if you’d like to use it now.</p>
 <div id="the-one-step-gee-algorithm" class="section level3">
 <h3>The one-step GEE algorithm</h3>
 <p>Traditional GEE models (such as those fit with <code>R</code> packages <code>gee</code> and <code>geepack</code>) allow for flexibility in specifying the within-cluster correlation structure (we generally still assume that individuals in <em>different</em> clusters are uncorrelated). For example, one could assume that the correlation across individuals is constant within a cluster. We call this <em>exchangeable</em> or <em>compound symmetry</em> correlation, and the intra-cluster correlation (ICC) is the measure of that correlation. Alternatively, if measurements are collected over time, we might assume that measurement closer in term are more highly correlated; this is called auto-regressive correlation.</p>
@@ -25,9 +25,9 @@ draft: TRUE
 </blockquote>
 <p>The rest of the way, I will simulate data a fit different models with computation time to provide a basis of comparison.</p>
 </div>
-<div id="example-1-comparing-geepackgeese-with-gee1step" class="section level3">
-<h3>Example 1: comparing geepack::geese with gee1step</h3>
-<p>To start, I am simulating a simple data set with 100 clusters that average around 100 individuals per cluster.</p>
+<div id="comparing-standard-gee-with-one-step-gee" class="section level3">
+<h3>Comparing standard GEE with one-step GEE</h3>
+<p>To start, I am simulating a simple data set with 100 clusters that average 100 individuals per cluster.</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(geepack)</code></pre>
@@ -66,7 +66,7 @@ dd &lt;- addCorGen(dc, idvar = &quot;site&quot;, param1 = &quot;p&quot;,
 <pre class="r"><code>system.time(geefit &lt;- geese(y ~ x1 + x2 + x3, id = site, data = dd, 
   family = binomial, corstr = &quot;exchangeable&quot;))</code></pre>
 <pre><code>##    user  system elapsed 
-##   2.294   0.100   1.945</code></pre>
+##   2.315   0.099   1.946</code></pre>
 <pre class="r"><code>summary(geefit)</code></pre>
 <pre><code>## 
 ## Call:
@@ -101,10 +101,10 @@ dd &lt;- addCorGen(dc, idvar = &quot;site&quot;, param1 = &quot;p&quot;,
 ## 
 ## Returned Error Value:    0 
 ## Number of clusters:   100   Maximum cluster size: 125</code></pre>
-<p>The one-step GEE model (that I’ve called <code>gee1step</code>) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.</p>
+<p>The one-step GEE function (which I’ve called <code>gee1step</code>) runs quite a bit faster than the standard GEE model (more than 10 times faster), but the results are virtually identical.</p>
 <pre class="r"><code>system.time(fit1 &lt;- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = &quot;site&quot;))</code></pre>
 <pre><code>##    user  system elapsed 
-##   0.143   0.021   0.090</code></pre>
+##   0.147   0.019   0.091</code></pre>
 <pre class="r"><code>fit1</code></pre>
 <pre><code>## $estimates
 ##                   est     se.err          z      p.value
@@ -139,8 +139,8 @@ dd &lt;- addCorGen(dc, idvar = &quot;site&quot;, param1 = &quot;p&quot;,
 ## attr(,&quot;class&quot;)
 ## [1] &quot;gee1step&quot;</code></pre>
 </div>
-<div id="example-2-gee1step-with-very-large-cluster-sizes" class="section level3">
-<h3>Example 2: gee1step with very large cluster sizes</h3>
+<div id="the-one-step-algorithm-with-very-large-cluster-sizes" class="section level3">
+<h3>The one-step algorithm with very large cluster sizes</h3>
 <p>Obviously, in the previous example, <code>gee1step</code> is not needed because <code>geese</code> handled the data set just fine, but in the next example with an average of 10,000 observations per cluster, <code>geese</code> will not run. But <code>gee1step</code> does just fine. I’m generating the data slightly differently here since <code>simstudy</code> doesn’t do well with extremely large correlation matrices. I’m using a random effect instead:</p>
 <pre class="r"><code>vicc &lt;- iccRE(0.15, dist = &quot;binary&quot;)
 
@@ -177,7 +177,7 @@ dd &lt;- addColumns(d2, dc)</code></pre>
 <p>Despite the large cluster sizes, the one-step algorithm still runs very fast. I have conducted experiments with repeated data sets to confirm that the coefficient estimates are unbiased and the standard error estimates are correct.</p>
 <pre class="r"><code>system.time(fit1 &lt;- gee1step(y ~ x1 + x2 + x3, data = dd, cluster = &quot;site&quot;))</code></pre>
 <pre><code>##    user  system elapsed 
-##   2.170   0.358   1.628</code></pre>
+##   2.173   0.352   1.724</code></pre>
 <pre class="r"><code>fit1</code></pre>
 <pre><code>## $estimates
 ##                    est      se.err          z      p.value
@@ -211,6 +211,7 @@ dd &lt;- addColumns(d2, dc)</code></pre>
 ## 
 ## attr(,&quot;class&quot;)
 ## [1] &quot;gee1step&quot;</code></pre>
+<p>If anyone thinks it would be valuable for me to create a package for this, I would certainly consider it. Let me know what you think.</p>
 <p>
 <p><small><font color="darkkhaki">
 Reference:</p>
