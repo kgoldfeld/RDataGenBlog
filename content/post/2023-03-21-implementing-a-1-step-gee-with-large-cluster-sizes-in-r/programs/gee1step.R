@@ -153,7 +153,7 @@ gee1step <- function(formula, data, cluster) {
   
   beta2 <- as.vector(beta2)
   z <- beta2/se.vb
-  p.value <- pnorm(-abs(z))
+  p.value <- 2*pnorm(-abs(z))
   
   estimates <- data.frame(est = beta2, se.err = se.vb, z = z, p.value = p.value)
   rownames(estimates) <-  c("Intercept", labels(terms(formula)))
