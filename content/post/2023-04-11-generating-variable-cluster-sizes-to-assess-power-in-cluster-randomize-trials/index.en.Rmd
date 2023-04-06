@@ -1,0 +1,131 @@
+---
+title: Generating variable cluster sizes to assess power in cluster randomize trials
+author: Package Build
+date: '2023-04-11'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+```{r, echo=FALSE}
+options(digits = 3)
+```
+
+I recently got into a discussion about setting the sample size for a proposed cluster randomized trial, and the question of variable cluster sizes came up. Given a fixed overall sample size, it is generally better (in terms of statistical power) if the sample is uniformly distributed across the different clusters. In other words, highly variable cluster sizes increase the variability of effect size estimates and reduce the ability to determine if an intervention or treatment is effective.
+
+When I started prepare a quick simulation to demonstrate this, I realized that there was no easy way using `simstudy` (my simulation package of choice) to generate the desired variable cluster sizes while holding the total sample size constant. I thought about it for a bit and came up with a simple solution that is now implemented in the GitHub version that is available for download (using <font size="3">`devtools::install_github("kgoldfeld/simstudy")`</font>). My plan here is to describe the solution, and then show the results of the simulation that use the new functionality.
+
+### Quick recap on how to generate cluster data with simstudy
+
+There are two ways I would have typically simulated clustered data using a data generation process defined by a linear mixed-effects model. The first approach would be to assume perfectly balanced cluster sizes, and specify a non-random variable $n$ to have a constant value. 
+
+In the example, we will generate 10 clusters with 20 members each. In this case, I am generating the cluster-level random effect and treatment assignment. The individual-level outcome is a function of the treatment assignment and the cluster effect, as well as random individual-level variation. This is all specified in the data generation definitions:
+
+```{r}
+library(simstudy)
+
+d0 <- defData(varname = "n", formula = 20, dist = "nonrandom")
+d0 <- defData(d0, varname = "a", formula = 0, variance = 0.33)
+d0 <- defData(d0, varname = "rx", formula = "1;1", dist = "trtAssign")
+
+d1 <- defDataAdd(varname = "y", formula = "18 + 1.6 * rx + a", 
+          variance = 16, dist = "normal")
+```
+
+The data are generated in two steps. Frost the cluster-level data are generated:
+
+```{r}
+set.seed(2761)
+
+dc <- genData(10, d0, "site")
+dc
+```
+
+And then the individual level data are generated, $n = 20$ subjects for each site:
+
+```{r}
+dd <- genCluster(dc, "site", "n", "id")
+dd <- addColumns(d1, dd)
+dd
+```
+
+If we wanted variable cluster sizes, we could slightly modify the data definitions so that $n$ is no longer constant. (From here on out, I am just generating the $n$ and the cluster-level data without the random effects and treatment assignment, but I could have just as easily included it.) Here, I am using the Poisson distribution, but I could use the negative binomial distribution if I wanted more variation across clusters:
+
+```{r}
+d0 <- defData(varname = "n", formula = 20, dist = "poisson")
+genData(10, d0, "site")
+```
+
+This is great, but the only problem is that the total sample size is no longer fixed at 200 (here we have randomly generated 226 individuals). The total will vary from sample to sample. So, if we want to have both across-cluster variability *and* constant total sample size, we need a new approach.
+
+### New approach using simstudy
+
+There is a new "distribution" called "clusterSize", which takes on two parameters: the (fixed) total sample size (that is input into the *formula* field) and a (non-negative) dispersion measure that represents the variability across clusters (that is input into the *variance* field). (The idea behind the data generation is described in the <a href="#addendum">addendum</a>.) If the dispersion is set to $0$, then we will have constant cluster sizes:
+
+```{r}
+d0 <- defData(varname = "n", formula = 200, variance = 0, dist = "clusterSize")
+genData(10, d0, "site")
+```
+
+When we increase the dispersion, we start to introduce cluster-size variability but keep the overall sample size at 200:
+
+```{r}
+d0 <- defData(varname = "n", formula = 200, variance = 0.2, dist = "clusterSize")
+genData(10, d0, "site")
+```
+
+And we can have extreme variability with a very high dispersion value:
+
+```{r}
+d0 <- defData(varname = "n", formula = 200, variance = 5, dist = "clusterSize")
+genData(10, d0, "site")
+```
+
+### Effects of cluster-size variability
+
+```{r figure, echo=FALSE, fig.width = 5, fig.height = 4}
+library(ggplot2)
+load("data/plot.Rdata")
+
+ggplot(data = dp, aes(x = d, y = power, group = icc)) +
+  geom_line(aes(color = factor(icc)), linewidth = 1.2) +
+  theme(panel.grid.minor = element_blank(),
+        panel.grid.major.x = element_blank(),
+        axis.title = element_text(size = 10.5)) +
+  xlab("\ndispersion parameter (d) for cluster size variation") +
+  scale_color_manual(values = c("#c65b39","#a4c639","#39a4c6","#5b39c6"), name = "ICC")
+
+```
+
+<a name="addendum"></a>  
+
+\ 
+
+
+### Addendum - a simple trick to generate variation
+
+```{r}
+x <- dirmult::rdirichlet(1, alpha = rep(32, 10) )[1,]
+x
+sum(x)
+```
+
+```{r}
+s <- round(x*200, 0)
+s
+sd(s)
+sum(s)
+```
+
+```{r}
+x <- dirmult::rdirichlet(1, alpha = rep(4, 10) )[1,]
+s <- round(x*200, 0)
+s
+sd(s)
+```

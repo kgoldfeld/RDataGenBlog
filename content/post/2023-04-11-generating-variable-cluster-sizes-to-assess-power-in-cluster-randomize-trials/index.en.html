@@ -1,0 +1,151 @@
+---
+title: Generating variable cluster sizes to assess power in cluster randomize trials
+author: Package Build
+date: '2023-04-11'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>I recently got into a discussion about setting the sample size for a proposed cluster randomized trial, and the question of variable cluster sizes came up. Given a fixed overall sample size, it is generally better (in terms of statistical power) if the sample is uniformly distributed across the different clusters. In other words, highly variable cluster sizes increase the variability of effect size estimates and reduce the ability to determine if an intervention or treatment is effective.</p>
+<p>When I started prepare a quick simulation to demonstrate this, I realized that there was no easy way using <code>simstudy</code> (my simulation package of choice) to generate the desired variable cluster sizes while holding the total sample size constant. I thought about it for a bit and came up with a simple solution that is now implemented in the GitHub version that is available for download (using <font size="3"><code>devtools::install_github("kgoldfeld/simstudy")</code></font>). My plan here is to describe the solution, and then show the results of the simulation that use the new functionality.</p>
+<div id="quick-recap-on-how-to-generate-cluster-data-with-simstudy" class="section level3">
+<h3>Quick recap on how to generate cluster data with simstudy</h3>
+<p>There are two ways I would have typically simulated clustered data using a data generation process defined by a linear mixed-effects model. The first approach would be to assume perfectly balanced cluster sizes, and specify a non-random variable <span class="math inline">\(n\)</span> to have a constant value.</p>
+<p>In the example, we will generate 10 clusters with 20 members each. In this case, I am generating the cluster-level random effect and treatment assignment. The individual-level outcome is a function of the treatment assignment and the cluster effect, as well as random individual-level variation. This is all specified in the data generation definitions:</p>
+<pre class="r"><code>library(simstudy)
+
+d0 &lt;- defData(varname = &quot;n&quot;, formula = 20, dist = &quot;nonrandom&quot;)
+d0 &lt;- defData(d0, varname = &quot;a&quot;, formula = 0, variance = 0.33)
+d0 &lt;- defData(d0, varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+d1 &lt;- defDataAdd(varname = &quot;y&quot;, formula = &quot;18 + 1.6 * rx + a&quot;, 
+          variance = 16, dist = &quot;normal&quot;)</code></pre>
+<p>The data are generated in two steps. Frost the cluster-level data are generated:</p>
+<pre class="r"><code>set.seed(2761)
+
+dc &lt;- genData(10, d0, &quot;site&quot;)
+dc</code></pre>
+<pre><code>##     site  n       a rx
+##  1:    1 20 -0.3548  1
+##  2:    2 20 -1.1232  1
+##  3:    3 20 -0.5963  0
+##  4:    4 20 -0.0503  1
+##  5:    5 20  0.0894  0
+##  6:    6 20  0.5294  1
+##  7:    7 20  1.2302  0
+##  8:    8 20  0.9663  1
+##  9:    9 20  0.0993  0
+## 10:   10 20  0.6508  0</code></pre>
+<p>And then the individual level data are generated, <span class="math inline">\(n = 20\)</span> subjects for each site:</p>
+<pre class="r"><code>dd &lt;- genCluster(dc, &quot;site&quot;, &quot;n&quot;, &quot;id&quot;)
+dd &lt;- addColumns(d1, dd)
+dd</code></pre>
+<pre><code>##      site  n      a rx  id    y
+##   1:    1 20 -0.355  1   1 17.7
+##   2:    1 20 -0.355  1   2 16.2
+##   3:    1 20 -0.355  1   3 19.2
+##   4:    1 20 -0.355  1   4 20.6
+##   5:    1 20 -0.355  1   5 14.7
+##  ---                           
+## 196:   10 20  0.651  0 196 25.3
+## 197:   10 20  0.651  0 197 22.1
+## 198:   10 20  0.651  0 198 13.2
+## 199:   10 20  0.651  0 199 15.6
+## 200:   10 20  0.651  0 200 13.8</code></pre>
+<p>If we wanted variable cluster sizes, we could slightly modify the data definitions so that <span class="math inline">\(n\)</span> is no longer constant. (From here on out, I am just generating the <span class="math inline">\(n\)</span> and the cluster-level data without the random effects and treatment assignment, but I could have just as easily included it.) Here, I am using the Poisson distribution, but I could use the negative binomial distribution if I wanted more variation across clusters:</p>
+<pre class="r"><code>d0 &lt;- defData(varname = &quot;n&quot;, formula = 20, dist = &quot;poisson&quot;)
+genData(10, d0, &quot;site&quot;)</code></pre>
+<pre><code>##     site  n
+##  1:    1 13
+##  2:    2 18
+##  3:    3 21
+##  4:    4 26
+##  5:    5 25
+##  6:    6 27
+##  7:    7 23
+##  8:    8 30
+##  9:    9 23
+## 10:   10 20</code></pre>
+<p>This is great, but the only problem is that the total sample size is no longer fixed at 200 (here we have randomly generated 226 individuals). The total will vary from sample to sample. So, if we want to have both across-cluster variability <em>and</em> constant total sample size, we need a new approach.</p>
+</div>
+<div id="new-approach-using-simstudy" class="section level3">
+<h3>New approach using simstudy</h3>
+<p>There is a new “distribution” called “clusterSize”, which takes on two parameters: the (fixed) total sample size (that is input into the <em>formula</em> field) and a (non-negative) dispersion measure that represents the variability across clusters (that is input into the <em>variance</em> field). (The idea behind the data generation is described in the <a href="#addendum">addendum</a>.) If the dispersion is set to <span class="math inline">\(0\)</span>, then we will have constant cluster sizes:</p>
+<pre class="r"><code>d0 &lt;- defData(varname = &quot;n&quot;, formula = 200, variance = 0, dist = &quot;clusterSize&quot;)
+genData(10, d0, &quot;site&quot;)</code></pre>
+<pre><code>##     site  n
+##  1:    1 20
+##  2:    2 20
+##  3:    3 20
+##  4:    4 20
+##  5:    5 20
+##  6:    6 20
+##  7:    7 20
+##  8:    8 20
+##  9:    9 20
+## 10:   10 20</code></pre>
+<p>When we increase the dispersion, we start to introduce cluster-size variability but keep the overall sample size at 200:</p>
+<pre class="r"><code>d0 &lt;- defData(varname = &quot;n&quot;, formula = 200, variance = 0.2, dist = &quot;clusterSize&quot;)
+genData(10, d0, &quot;site&quot;)</code></pre>
+<pre><code>##     site  n
+##  1:    1 20
+##  2:    2 28
+##  3:    3 25
+##  4:    4 24
+##  5:    5 28
+##  6:    6 22
+##  7:    7  7
+##  8:    8 13
+##  9:    9 22
+## 10:   10 11</code></pre>
+<p>And we can have extreme variability with a very high dispersion value:</p>
+<pre class="r"><code>d0 &lt;- defData(varname = &quot;n&quot;, formula = 200, variance = 5, dist = &quot;clusterSize&quot;)
+genData(10, d0, &quot;site&quot;)</code></pre>
+<pre><code>##     site   n
+##  1:    1  10
+##  2:    2   2
+##  3:    3  17
+##  4:    4   2
+##  5:    5  49
+##  6:    6 110
+##  7:    7   1
+##  8:    8   4
+##  9:    9   1
+## 10:   10   4</code></pre>
+</div>
+<div id="effects-of-cluster-size-variability" class="section level3">
+<h3>Effects of cluster-size variability</h3>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/figure-1.png" width="480" /></p>
+<p><a name="addendum"></a></p>
+<p> </p>
+</div>
+<div id="addendum---a-simple-trick-to-generate-variation" class="section level3">
+<h3>Addendum - a simple trick to generate variation</h3>
+<pre class="r"><code>x &lt;- dirmult::rdirichlet(1, alpha = rep(32, 10) )[1,]
+x</code></pre>
+<pre><code>##  [1] 0.0907 0.0954 0.0767 0.1038 0.1058 0.1058 0.1278 0.0879 0.1233 0.0828</code></pre>
+<pre class="r"><code>sum(x)</code></pre>
+<pre><code>## [1] 1</code></pre>
+<pre class="r"><code>s &lt;- round(x*200, 0)
+s</code></pre>
+<pre><code>##  [1] 18 19 15 21 21 21 26 18 25 17</code></pre>
+<pre class="r"><code>sd(s)</code></pre>
+<pre><code>## [1] 3.45</code></pre>
+<pre class="r"><code>sum(s)</code></pre>
+<pre><code>## [1] 201</code></pre>
+<pre class="r"><code>x &lt;- dirmult::rdirichlet(1, alpha = rep(4, 10) )[1,]
+s &lt;- round(x*200, 0)
+s</code></pre>
+<pre><code>##  [1] 17 20 28 26  3 26 13 31 23 14</code></pre>
+<pre class="r"><code>sd(s)</code></pre>
+<pre><code>## [1] 8.49</code></pre>
+</div>
