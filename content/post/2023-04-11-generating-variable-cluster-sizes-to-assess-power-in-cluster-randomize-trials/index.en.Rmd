@@ -87,7 +87,21 @@ d0 <- defData(varname = "n", formula = 200, variance = 5, dist = "clusterSize")
 genData(10, d0, "site")
 ```
 
-### Effects of cluster-size variability
+### Application: cluster-size variability and statistical power
+
+I conducted simulations to assess the impact of the dispersion parameter on the estimated power for a cluster randomized trial with cluster-level effects. In the simulation (code is available [here](){target="_blank"}), I assumed 20 clusters (10 randomized to the experimental arm, 10 to the control arm) and a total of 500 participants (so on average 25 per arm).
+
+The model I used to generate the data was
+
+$$y_{ij} = 20 + 1.6 * A_{i} + a_{i} + e_{ij},$$
+
+where $y_{ij}$ is the continuous outcome for subject $j$ in cluster $i$. $A_i$ is the treatment indicator for cluster $i$, $A_i = 1$ if cluster $i$ has been randomized to the experimental arm, $A_i = 0$ otherwise. $a_i$ is the cluster-specific random effect, is normally distributed: $a_i \sim N(\mu = 0, \sigma_a^2)$. $e_{ij}$ is the (unmeasured) individual $j$ effect, and is also normally distributed: $e_{ij} \sim N(\mu =0, \sigma_e^2 = 16)$.
+
+Statistical Power is directly influenced by overall variability of the outcome, which in this case includes the cluster and individual level variation. Specifically, power is a function of the intra-class (or intra-cluster) correlation (ICC), which is defined as
+$$ICC = \frac{\sigma_a^2}{\sigma_a^2 + \sigma_e^2}.$$
+In the simulations, I used ICCs ranging from $0.1$ to $0.4$. And since $\sigma_e^2$ was fixed, the variance $\sigma^2_a$ was determined by the ICC.   
+
+The focus of these simulations is viewing the impact of cluster-size variability (with constant total sample size) on power. I used different *dispersion* assumptions, ranging from 0 to 0.5, to generate different data sets. For each of the 44 ICC/dispersion parameter combinations, I generated 10,000 data sets and estimated a linear mixed effect model. The power was calculated for each combination by looking at the proportion of the *p-values* that were less than 0.05. The figure below shows the results, and it appears that both higher ICCs and cluster size variability lead to reduced power:
 
 ```{r figure, echo=FALSE, fig.width = 5, fig.height = 4}
 library(ggplot2)
@@ -110,22 +124,36 @@ ggplot(data = dp, aes(x = d, y = power, group = icc)) +
 
 ### Addendum - a simple trick to generate variation
 
+Generating the variable cluster sizes is actually quite simple if you take advantage of the Dirichlet distribution, which is essentially a multivariate generalization of the beta distribtution. Values range from 0 to 1, and they sum to 1. It is very natural to use values generated from this distribution as probabilities or proportions, which is how the `simstudy` *clusterSize* distribution takes advantage of the Dirichlet. This is perhaps easiest to see in a simple example.
+
+Values from the Dirichlet distribution can be generated using the `rdirichlet` function in the the `dirmult` package. The key parameter, called the *concentration* parameter, is a vector of length *k*, where *k* is the number of values (e.g. clusters) we are interested in generating. In the first example, I am generating 10 values using a concentration parameter of 32. We can see that all values are between 0 and 1, and sum to 1:
+
 ```{r}
-x <- dirmult::rdirichlet(1, alpha = rep(32, 10) )[1,]
+x <- dirmult::rdirichlet(1, alpha = rep(32, 20) )[1,]
 x
 sum(x)
 ```
 
-```{r}
-s <- round(x*200, 0)
-s
-sd(s)
-sum(s)
-```
+From here, it is easy generate values between 0 and 400 if we have a total sample size of 400.
 
 ```{r}
-x <- dirmult::rdirichlet(1, alpha = rep(4, 10) )[1,]
-s <- round(x*200, 0)
-s
-sd(s)
+s1 <- floor(x*400)
+s1
+sum(s1)
+```
+
+The sum does not equal to 400 due to rounding, and in the `simstudy` function the rounding error is accounted for by allocating additional units to randomly selected clusters.
+
+If we use a lower *concentration parameter* (in this case 4), there should be more variability, and indeed there appears to be:
+
+```{r}
+x <- dirmult::rdirichlet(1, alpha = rep(4, 20) )[1,]
+s2 <- floor(x * 400)
+s2
+```
+
+It appears that the second sample is more variable than the first, and we can confirm this:
+
+```{r}
+c(sd1 = sd(s1), sd2 = sd(s2))
 ```
