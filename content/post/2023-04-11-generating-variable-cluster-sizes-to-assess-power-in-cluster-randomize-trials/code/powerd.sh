@@ -6,7 +6,7 @@
 #SBATCH --time=12:00:00                              # Time limit hrs:min:sec
 #SBATCH --output=powerd.out                            # Standard output and error log
 
-module load r/4.1.1
+module load r/4.2.2
 
 cd /gpfs/data/troxellab/ksg/r
 Rscript --vanilla powerd.R

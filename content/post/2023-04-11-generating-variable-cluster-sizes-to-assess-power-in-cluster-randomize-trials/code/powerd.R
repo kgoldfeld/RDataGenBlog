@@ -1,6 +1,7 @@
 library(simstudy)
 library(data.table)
 library(lmerTest)
+library(slurmR)
 
 s_define <- function() {
   
@@ -20,11 +21,12 @@ s_generate <- function(list_of_defs, argsvec) {
   list2env(as.list(argsvec), envir = environment())
   
   v <- iccRE(icc, "normal", varWithin = var.e)
-
+  
   dc <- genData(nclusters, d0, "site")
+
   dd <- genCluster(dc, "site", "n", "id")
   dd <- addColumns(d1, dd)
-
+  
   return(list(dc = dc, dd = dd))
 }
 
@@ -58,7 +60,7 @@ s_single_rep <- function(list_of_defs, argsvec) {
 s_replicate <- function(argsvec, nsim) {
   
   list_of_defs <- s_define()
-  
+
   model_results <- parallel::mclapply(
       X = 1 : nsim, 
       FUN = function(x) s_single_rep(list_of_defs, argsvec), 
@@ -86,7 +88,7 @@ N <- 500
 nclusters <- 20
 
 scenarios <- scenario_list(
-  B1 = B1, icc = icc, var.e = var.e, d = d, N = N
+  B1 = B1, icc = icc, var.e = var.e, d = d, N = N, nclusters = nclusters
 )
 
 #--- slurm ---#
@@ -94,7 +96,7 @@ scenarios <- scenario_list(
 job <- Slurm_lapply(
   X = scenarios, 
   FUN = s_replicate, 
-  nsim = 10,
+  nsim = 10000,
   njobs = length(scenarios), 
   mc.cores = 4,
   tmp_path = "/gpfs/data/troxellab/ksg/scratch",
@@ -116,8 +118,14 @@ getitems <- function(a) {
 }
 
 reslist <- lapply(est.list, function(a) getitems(a))
-res <- rbindlist(reslist)
+rm(est.list)
 
-save(res, file = "/gpfs/data/troxellab/ksg/data/powerbyd.rda")
+res <- rbindlist(reslist)
+rm(reslist)
+
+dp <- res[, .(est = mean(Estimate), se = sd(Estimate), power = mean(`Pr(>|t|)` < 0.05)),
+  keyby = .(icc, d)]
+
+save(dp, file = "/gpfs/data/troxellab/ksg/data/powerbyd.Rdata")
 
 
