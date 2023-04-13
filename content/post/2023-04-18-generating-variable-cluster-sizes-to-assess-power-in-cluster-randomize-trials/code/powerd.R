@@ -96,7 +96,7 @@ scenarios <- scenario_list(
 job <- Slurm_lapply(
   X = scenarios, 
   FUN = s_replicate, 
-  nsim = 10000,
+  nsim = 50000,
   njobs = length(scenarios), 
   mc.cores = 4,
   tmp_path = "/gpfs/data/troxellab/ksg/scratch",
