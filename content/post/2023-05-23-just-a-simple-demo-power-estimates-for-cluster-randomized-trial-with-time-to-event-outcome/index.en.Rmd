@@ -28,38 +28,11 @@ library(parallel)
 ```{r, fig.height=3.5, fig.width = 5.5}
 points <- list(c(30, 0.90), c(365, .50))
 r <- survGetParams(points)
-survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
-```
-
-```{r}
 r
 ```
 
 ```{r}
-defa <- defData(varname = "rx", formula = "1;1", dist = "trtAssign")
-defa <- defData(defa, varname = "start_day", formula = "1;182", dist = "uniformInt")
-defa <- defDataAdd(defa, varname = "censor", 
-  formula = "365 - start_day ", dist = "nonrandom")
-
-defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx", shape = r[2])
-
-set.seed(258)
-dd <- genData(600, defa)
-dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("ttc", "censor"), 
-  timeName = "time", censorName = "censor", keepEvents = TRUE)
-```
-
-```{r, fig.height=3.5, fig.width=5.5}
-fit <- survfit(Surv(time, event) ~ rx, data = dd)
-
-ggsurvplot(
-  fit, 
-  data = dd, 
-  legend.title = "", 
-  legend = c(.25, 0.25),
-  palette = "jco"
-)
+survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
 ```
 
 ### Evaluating cluster variation 
@@ -95,7 +68,7 @@ j$plot <- j$plot +
 j
 ```
 
-#### Visualizing less cluster variation
+#### Less cluster variation
 
 ```{r}
 defc <- defData(varname = "b", formula = 0, variance = 0.005)
@@ -118,7 +91,7 @@ j$plot <- j$plot + theme(legend.position = "none")
 j
 ```
 
-#### Variation of the probability of an event
+#### Variation of the probability of an event across clusters
 
 ```{r, warning=FALSE, fig.width=4, fig.height=3}
 defc <- defData(varname = "b", formula = 0, variance = 0.1)
@@ -129,8 +102,8 @@ defa <- defDataAdd(defa, varname = "censor",
 
 defs <- defSurv(varname = "ttc", formula = "r[1] + b", shape = r[2])
 
-dc <- genData(200, defc, id = "site")
-dd <- genCluster(dc, "site", numIndsVar = 200, "id")
+dc <- genData(1000, defc, id = "site")
+dd <- genCluster(dc, "site", numIndsVar = 500, "id")
 dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
 
@@ -161,7 +134,7 @@ s_generate <- function(nsite, ninds, s2) {
   dd[, .(p = mean(event)), keyby = site]
 }
 
-ds <- s_generate(200, 200, 0.005)
+ds <- s_generate(1000, 500, 0.005)
 
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
@@ -173,26 +146,56 @@ ggplot(data = ds, aes(x = p)) +
 ```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=4}
 replicate <- function(s2) {
   ds <- s_generate(1000, 500, s2)
-  data.table(s2 = s2, sd_p = sd(ds$p))
+  data.table(s2 = s2, min_p = quantile(ds$p, prob = 0.025), 
+             med_p = quantile(ds$p, prob = 0.5),
+             max_p = quantile(ds$p, prob = 0.975))
 }
 
 res <- parallel::mclapply(seq(0.005, 0.1, by = .005), function(a) replicate(a))
 dp <- rbindlist(res)
 
-ggplot(data = dp, aes(x = s2, y = sd_p)) +
-  geom_point() +
-  geom_smooth(se = FALSE, linewidth = .4) +
+ggplot(data = dp, aes(x = s2, y = med_p)) +
+  geom_point(size = .8) +
+  geom_errorbar(aes(ymin = min_p, ymax = max_p), width = .0, color = "grey65") +
   theme(panel.grid = element_blank()) +
   scale_x_continuous(
-    name = "variance of random effect in survival data generation",
+    name = "\nvariance of random effect in survival data generation",
     breaks = seq(0, .1, by = .01)
   ) +
   scale_y_continuous(
-    name = "sd of cluster probabilities",
-    limits = c(0.025, 0.125),
-    breaks = seq(0.025, 0.125, by = .025)
+    name = "probability of event",
+    limits = c(0.25, 0.75)
   )
   
+```
+
+### Evaluating the effect size
+
+```{r}
+defa <- defData(varname = "rx", formula = "1;1", dist = "trtAssign")
+defa <- defData(defa, varname = "start_day", formula = "1;182", dist = "uniformInt")
+defa <- defDataAdd(defa, varname = "censor", 
+  formula = "365 - start_day ", dist = "nonrandom")
+
+defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx", shape = r[2])
+
+set.seed(258)
+dd <- genData(600, defa)
+dd <- genSurv(dd, defs, digits = 0)
+dd <- addCompRisk(dd, events = c("ttc", "censor"), 
+  timeName = "time", censorName = "censor", keepEvents = TRUE)
+```
+
+```{r, fig.height=3.5, fig.width=5.5}
+fit <- survfit(Surv(time, event) ~ rx, data = dd)
+
+ggsurvplot(
+  fit, 
+  data = dd, 
+  legend.title = "", 
+  legend = c(.25, 0.25),
+  palette = "jco"
+)
 ```
 
 ### Complete data generation and model estimation
@@ -208,24 +211,33 @@ defa <- defDataAdd(defa, varname = "censor",
 defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx + b", shape = r[2])
 ```
 
-```{r}
+```{r, eval=FALSE}
 dc <- genData(1000, defc, id = "site")
 dd <- genCluster(dc, "site", numIndsVar = 500, "id")
 dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
 dd <- addCompRisk(dd, events = c("ttc", "censor"), 
   timeName = "time", censorName = "censor", keepEvents = TRUE)
-```
 
-```{r}
 fit_coxme <-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
 
 summary(fit_coxme)
 ```
 
+```{r, echo=FALSE}
+load("data/coxfit.rda")
+fit_coxme
+```
+
+<a name="addendum"></a>  
+
+\ 
+
 ### Power estimation
 
-```{r}
+Check out the <a href="#addendum">addendum</a> for code details.
+
+```{r, echo = FALSE}
 extract_coxme_table <- function (mod) {
   beta <- mod$coefficients 
   nvar <- length(beta)
@@ -246,7 +258,7 @@ s_def <- function() {
   defa <- defDataAdd(defa, varname = "censor", 
                      formula = "365 - start_day ", dist = "nonrandom")
   
-  defs <- defSurv(varname = "ttc", formula = "-6 + 0.4 * rx + b", shape = 1)
+  defs <- defSurv(varname = "ttc", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
   
   defa2 <- defDataAdd(varname = "event6", 
                       formula = "1*(ttc <= 182)", dist = "nonrandom")
@@ -303,7 +315,9 @@ s_scenarios <- function(argsvec, nreps) {
   )
   
 }
+```
 
+```{r}
 scenario_list <- function(...) {
   argmat <- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
@@ -317,5 +331,114 @@ scenarios <- scenario_list(nsites = nsites, ninds = ninds, s2 = s2)
 model.ests <- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 
 model.ests
+```
+
+```{r, echo = FALSE, fig.height = 2.75, fig.width = 8}
+load("data/ss.rda")
+
+resum[, `number of sites` := nsites]
+
+ggplot(data = resum, mapping = aes(x = s2, y = p_m)) +
+  geom_hline(yintercept = 0.8, color = "white", linewidth = 1.2) +
+  geom_line(aes(color = factor(ninds), group = ninds), linewidth = 0.9) +
+  facet_grid(. ~ `number of sites`, labeller = label_both) +
+  theme(
+    panel.grid = element_blank(),
+    axis.text = element_text(size = 8),
+    panel.spacing = unit(0.65, "lines")
+  ) +
+  scale_color_brewer(
+    name = "size", 
+    guide = guide_legend(reverse = TRUE), 
+    type = "div", 
+    palette = "Dark2"
+  ) +
+  ylab("estimated power") +
+  xlab("\nvariance of random effect")
+
+```
+
+
+
+## Addendum
+
+```{r, eval = FALSE}
+extract_coxme_table <- function (mod) {
+  beta <- mod$coefficients 
+  nvar <- length(beta)
+  nfrail <- nrow(mod$var) - nvar
+  se <- sqrt(diag(mod$var)[nfrail + 1:nvar])
+  z <- round(beta/se, 2)
+  p <- signif(1 - pchisq((beta/se)^2, 1), 2)
+  table=data.table(beta = beta, se = se, z = z, p = p)
+  return(table)
+}
+
+s_def <- function() {
+  
+  defc <- defData(varname = "b", formula = 0, variance = "..s2")
+  defc <- defData(defc, varname = "rx", formula = "1;1", dist = "trtAssign")
+  
+  defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt")
+  defa <- defDataAdd(defa, varname = "censor", 
+                     formula = "365 - start_day ", dist = "nonrandom")
+  
+  defs <- defSurv(varname = "ttc", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
+  
+  defa2 <- defDataAdd(varname = "event6", 
+                      formula = "1*(ttc <= 182)", dist = "nonrandom")
+  
+  return(list(defc = defc, defa = defa, defs = defs, defa2 = defa2))
+  
+}
+
+s_generate <- function(argsvec, list_of_defs) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  dc <- genData(nsites, defc, id = "site")
+  dd <- genCluster(dc, "site", ninds, "id")
+  dd <- addColumns(defa, dd)
+  dd <- genSurv(dd, defs, digits = 0)
+  dx <- addCompRisk(dd, events = c("ttc", "censor"), 
+                    timeName = "time", censorName = "censor", keepEvents = TRUE)
+  dx <- addColumns(defa2, dx)
+  
+  dx[]
+  
+}
+
+s_replicate <- function(argsvec, list_of_defs) {
+  
+  dx <- s_generate(argsvec, list_of_defs)
+  
+  coxfitm <-coxme(Surv(time, event) ~ rx + (1 | site), data = dx)
+  
+  list2env(as.list(argsvec), envir = environment())
+  
+  return(data.table(
+    nsites = nsites,
+    ninds = ninds,
+    s2 = s2,
+    est_s = fixef(coxfitm), 
+    re.var_s = VarCorr(coxfitm)$site,
+    p_s = extract_coxme_table(coxfitm)$p
+  ))
+  
+}
+
+s_scenarios <- function(argsvec, nreps) {
+  
+  list_of_defs <- s_def()
+  
+  rbindlist(
+    parallel::mclapply(
+      X = 1 : nreps, 
+      FUN = function(x) s_replicate(argsvec, list_of_defs), 
+      mc.cores = 4)
+  )
+  
+}
 ```
 

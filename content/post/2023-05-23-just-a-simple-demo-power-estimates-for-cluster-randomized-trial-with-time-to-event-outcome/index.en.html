@@ -26,32 +26,10 @@ library(parallel)</code></pre>
 <h3>Defining shape of survival curve</h3>
 <pre class="r"><code>points &lt;- list(c(30, 0.90), c(365, .50))
 r &lt;- survGetParams(points)
-survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="528" /></p>
-<pre class="r"><code>r</code></pre>
+r</code></pre>
 <pre><code>## [1] -4.814675  1.326369</code></pre>
-<pre class="r"><code>defa &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
-defa &lt;- defData(defa, varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
-defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
-  formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
-
-defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
-
-set.seed(258)
-dd &lt;- genData(600, defa)
-dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
-  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
-<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ rx, data = dd)
-
-ggsurvplot(
-  fit, 
-  data = dd, 
-  legend.title = &quot;&quot;, 
-  legend = c(.25, 0.25),
-  palette = &quot;jco&quot;
-)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="528" /></p>
+<pre class="r"><code>survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
 </div>
 <div id="evaluating-cluster-variation" class="section level3">
 <h3>Evaluating cluster variation</h3>
@@ -77,15 +55,15 @@ j$plot &lt;- j$plot +
   theme(legend.position = &quot;none&quot;)
 
 j</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="528" /></p>
+</div>
+<div id="less-cluster-variation" class="section level4">
+<h4>Less cluster variation</h4>
+<pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.005)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="528" /></p>
 </div>
-<div id="visualizing-less-cluster-variation" class="section level4">
-<h4>Visualizing less cluster variation</h4>
-<pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.005)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="528" /></p>
-</div>
-<div id="variation-of-the-probability-of-an-event" class="section level4">
-<h4>Variation of the probability of an event</h4>
+<div id="variation-of-the-probability-of-an-event-across-clusters" class="section level4">
+<h4>Variation of the probability of an event across clusters</h4>
 <pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.1)
 
 defa &lt;- defDataAdd(varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
@@ -94,8 +72,8 @@ defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;,
 
 defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
 
-dc &lt;- genData(200, defc, id = &quot;site&quot;)
-dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 200, &quot;id&quot;)
+dc &lt;- genData(1000, defc, id = &quot;site&quot;)
+dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 500, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
 
@@ -108,10 +86,35 @@ ggplot(data = ds, aes(x = p)) +
   scale_x_continuous(limits = c(0, 1)) +
   scale_y_continuous(limits = c(0, 100)) +
   theme(panel.grid = element_blank())</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="384" /></p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="384" /></p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="576" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="384" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="384" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
 </div>
+</div>
+<div id="evaluating-the-effect-size" class="section level3">
+<h3>Evaluating the effect size</h3>
+<pre class="r"><code>defa &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+defa &lt;- defData(defa, varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
+defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
+  formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
+
+defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
+
+set.seed(258)
+dd &lt;- genData(600, defa)
+dd &lt;- genSurv(dd, defs, digits = 0)
+dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
+  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
+<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ rx, data = dd)
+
+ggsurvplot(
+  fit, 
+  data = dd, 
+  legend.title = &quot;&quot;, 
+  legend = c(.25, 0.25),
+  palette = &quot;jco&quot;
+)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="528" /></p>
 </div>
 <div id="complete-data-generation-and-model-estimation" class="section level3">
 <h3>Complete data generation and model estimation</h3>
@@ -128,32 +131,76 @@ dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 500, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
 dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
-  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
-<pre class="r"><code>fit_coxme &lt;-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
+  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)
+
+fit_coxme &lt;-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
 
 summary(fit_coxme)</code></pre>
 <pre><code>## Cox mixed-effects model fit by maximum likelihood
 ##   Data: dd
-##   events, n = 247652, 5e+05
+##   events, n = 247347, 5e+05
 ##   Iterations= 23 96 
 ##                    NULL Integrated   Fitted
-## Log-likelihood -3152986   -3142654 -3140884
+## Log-likelihood -3149149   -3139265 -3137501
 ## 
 ##                      Chisq     df p      AIC      BIC
-## Integrated loglik 20663.50   2.00 0 20659.50 20638.66
-##  Penalized loglik 24203.51 925.68 0 22352.15 12706.73
+## Integrated loglik 19769.05   2.00 0 19765.05 19744.21
+##  Penalized loglik 23296.25 924.84 0 21446.56 11811.03
 ## 
 ## Model:  Surv(time, event) ~ rx + (1 | site) 
 ## Fixed coefficients
 ##         coef exp(coef)   se(coef)     z p
-## rx 0.4211752  1.523751 0.01482083 28.42 0
+## rx 0.4039245  1.497691 0.01476242 27.36 0
 ## 
 ## Random effects
-##  Group Variable  Std Dev    Variance  
-##  site  Intercept 0.22864160 0.05227698</code></pre>
+##  Group Variable  Std Dev   Variance 
+##  site  Intercept 0.2272272 0.0516322</code></pre>
+<p><a name="addendum"></a></p>
+<p> </p>
 </div>
 <div id="power-estimation" class="section level3">
 <h3>Power estimation</h3>
+<p>Check out the <a href="#addendum">addendum</a> for code details.</p>
+<pre class="r"><code>scenario_list &lt;- function(...) {
+  argmat &lt;- expand.grid(...)
+  return(asplit(argmat, MARGIN = 1))
+}
+
+nsites &lt;- c(20, 30)
+ninds &lt;- c(15)
+s2 &lt;- c(0.03, 0.04)
+
+scenarios &lt;- scenario_list(nsites = nsites, ninds = ninds, s2 = s2)
+model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
+
+model.ests</code></pre>
+<pre><code>## [[1]]
+##    nsites ninds   s2     est_s     re.var_s    p_s
+## 1:     20    15 0.03 0.4206975 8.204975e-05 0.0091
+## 2:     20    15 0.03 0.1023435 3.430323e-02 0.5900
+## 3:     20    15 0.03 0.4472983 3.898589e-02 0.0110
+## 
+## [[2]]
+##    nsites ninds   s2     est_s     re.var_s    p_s
+## 1:     30    15 0.03 0.3175695 0.0725043132 0.0550
+## 2:     30    15 0.03 0.5182526 0.0694226028 0.0021
+## 3:     30    15 0.03 0.3698889 0.0003995483 0.0074
+## 
+## [[3]]
+##    nsites ninds   s2     est_s   re.var_s   p_s
+## 1:     20    15 0.04 0.5033874 0.09028845 0.017
+## 2:     20    15 0.04 0.3267158 0.02216258 0.062
+## 3:     20    15 0.04 0.3446178 0.03518498 0.055
+## 
+## [[4]]
+##    nsites ninds   s2     est_s     re.var_s    p_s
+## 1:     30    15 0.04 0.4506164 8.337081e-05 0.0011
+## 2:     30    15 0.04 0.5720621 9.923807e-02 0.0016
+## 3:     30    15 0.04 0.4439685 1.490294e-02 0.0027</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-19-1.png" width="768" /></p>
+</div>
+<div id="addendum" class="section level2">
+<h2>Addendum</h2>
 <pre class="r"><code>extract_coxme_table &lt;- function (mod) {
   beta &lt;- mod$coefficients 
   nvar &lt;- length(beta)
@@ -174,7 +221,7 @@ s_def &lt;- function() {
   defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
                      formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
   
-  defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;-6 + 0.4 * rx + b&quot;, shape = 1)
+  defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;-4.815 + 0.4 * rx + b&quot;, shape = 1.326)
   
   defa2 &lt;- defDataAdd(varname = &quot;event6&quot;, 
                       formula = &quot;1*(ttc &lt;= 182)&quot;, dist = &quot;nonrandom&quot;)
@@ -230,42 +277,5 @@ s_scenarios &lt;- function(argsvec, nreps) {
       mc.cores = 4)
   )
   
-}
-
-scenario_list &lt;- function(...) {
-  argmat &lt;- expand.grid(...)
-  return(asplit(argmat, MARGIN = 1))
-}
-
-nsites &lt;- c(20, 30)
-ninds &lt;- c(15)
-s2 &lt;- c(0.03, 0.04)
-
-scenarios &lt;- scenario_list(nsites = nsites, ninds = ninds, s2 = s2)
-model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
-
-model.ests</code></pre>
-<pre><code>## [[1]]
-##    nsites ninds   s2     est_s     re.var_s     p_s
-## 1:     20    15 0.03 0.4534387 4.001341e-04 0.00480
-## 2:     20    15 0.03 0.5912145 7.951476e-03 0.00023
-## 3:     20    15 0.03 0.5350008 1.666883e-05 0.00070
-## 
-## [[2]]
-##    nsites ninds   s2     est_s   re.var_s     p_s
-## 1:     30    15 0.03 0.5556873 0.06027074 0.00045
-## 2:     30    15 0.03 0.3877899 0.03728373 0.00790
-## 3:     30    15 0.03 0.6058345 0.06676862 0.00015
-## 
-## [[3]]
-##    nsites ninds   s2     est_s     re.var_s   p_s
-## 1:     20    15 0.04 0.1139050 0.0003994154 0.480
-## 2:     20    15 0.04 0.4050435 0.1232980291 0.063
-## 3:     20    15 0.04 0.2152001 0.0003999307 0.170
-## 
-## [[4]]
-##    nsites ninds   s2     est_s   re.var_s    p_s
-## 1:     30    15 0.04 0.3069994 0.02227951 0.0270
-## 2:     30    15 0.04 0.4710309 0.13924234 0.0130
-## 3:     30    15 0.04 0.5085014 0.08169511 0.0028</code></pre>
+}</code></pre>
 </div>
