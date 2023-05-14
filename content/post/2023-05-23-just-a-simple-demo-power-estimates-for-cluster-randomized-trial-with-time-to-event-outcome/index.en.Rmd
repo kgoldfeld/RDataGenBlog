@@ -14,6 +14,10 @@ image: ''
 draft: TRUE
 ---
 
+```{r, echo=FALSE}
+options(digits = 2)
+```
+
 ```{r, message=FALSE}
 library(simstudy)
 library(data.table)
@@ -25,13 +29,13 @@ library(parallel)
 
 ### Defining shape of survival curve
 
-```{r, fig.height=3.5, fig.width = 5.5}
+```{r}
 points <- list(c(30, 0.90), c(365, .50))
 r <- survGetParams(points)
 r
 ```
 
-```{r}
+```{r survparam, fig.height=3.5, fig.width = 5.5}
 survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
 ```
 
@@ -50,6 +54,8 @@ defs <- defSurv(varname = "ttc", formula = "r[1] + b", shape = r[2])
 ```
 
 ```{r}
+set.seed(589823)
+
 dc <- genData(20, defc, id = "site")
 dd <- genCluster(dc, "site", numIndsVar = 200, "id")
 dd <- addColumns(defa, dd)
@@ -61,20 +67,17 @@ dd <- addCompRisk(dd, events = c("ttc", "censor"),
 ```{r, fig.height=3.5, fig.width = 5.5}
 fit <- survfit(Surv(time, event) ~ site, data = dd)
 
-j <- ggsurvplot(fit, data = dd)
-j$plot <- j$plot + 
-  theme(legend.position = "none")
-
-j
+j1 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.100")
+j1$plot <- j1$plot + theme(legend.position = "none",
+                           plot.title = element_text(size = 11, face = "bold"))
 ```
 
-#### Less cluster variation
 
-```{r}
+```{r variation, echo = FALSE, fig.height=4, fig.width = 10}
+library(ggpubr)
+
 defc <- defData(varname = "b", formula = 0, variance = 0.005)
-```
 
-```{r, echo = FALSE, fig.height=3.5, fig.width = 5.5}
 dc <- genData(20, defc, id = "site")
 dd <- genCluster(dc, "site", numIndsVar = 200, "id")
 dd <- addColumns(defa, dd)
@@ -84,16 +87,17 @@ dd <- addCompRisk(dd, events = c("ttc", "censor"),
 
 fit <- survfit(Surv(time, event) ~ site, data = dd)
 
-j <- ggsurvplot(fit, data = dd)
+j2 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.005")
 
-j$plot <- j$plot + theme(legend.position = "none")
+j2$plot <- j2$plot + theme(legend.position = "none",
+                           plot.title = element_text(size = 11, face = "bold"))
 
-j
+ggarrange(j1$plot, j2$plot, ncol = 2, nrow = 1)
 ```
 
 #### Variation of the probability of an event across clusters
 
-```{r, warning=FALSE, fig.width=4, fig.height=3}
+```{r histprob, warning=FALSE, fig.width=4, fig.height=3}
 defc <- defData(varname = "b", formula = 0, variance = 0.1)
 
 defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt")
@@ -114,12 +118,15 @@ ds <- dd[, .(p = mean(event)), keyby = site]
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
   scale_x_continuous(limits = c(0, 1)) +
-  scale_y_continuous(limits = c(0, 100)) +
-  theme(panel.grid = element_blank())
+  scale_y_continuous(limits = c(0, 200)) +
+  ggtitle("Cluster variance = 0.100") +
+  xlab("observed proportion of events") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 11, face = "bold")) 
 ```
 
 
-```{r, warning=FALSE, fig.width=4, fig.height=3, echo=FALSE}
+```{r varprob, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=4}
 s_generate <- function(nsite, ninds, s2) {
   
   defc <- defData(varname = "b", formula = 0, variance = s2)
@@ -134,16 +141,6 @@ s_generate <- function(nsite, ninds, s2) {
   dd[, .(p = mean(event)), keyby = site]
 }
 
-ds <- s_generate(1000, 500, 0.005)
-
-ggplot(data = ds, aes(x = p)) +
-  geom_histogram(binwidth = .05) +
-  scale_x_continuous(limits = c(0, 1)) +
-  scale_y_continuous(limits = c(0, 100)) +
-  theme(panel.grid = element_blank())
-```
-
-```{r, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=4}
 replicate <- function(s2) {
   ds <- s_generate(1000, 500, s2)
   data.table(s2 = s2, min_p = quantile(ds$p, prob = 0.025), 
@@ -166,7 +163,6 @@ ggplot(data = dp, aes(x = s2, y = med_p)) +
     name = "probability of event",
     limits = c(0.25, 0.75)
   )
-  
 ```
 
 ### Evaluating the effect size
@@ -179,14 +175,14 @@ defa <- defDataAdd(defa, varname = "censor",
 
 defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx", shape = r[2])
 
-set.seed(258)
 dd <- genData(600, defa)
 dd <- genSurv(dd, defs, digits = 0)
 dd <- addCompRisk(dd, events = c("ttc", "censor"), 
   timeName = "time", censorName = "censor", keepEvents = TRUE)
 ```
 
-```{r, fig.height=3.5, fig.width=5.5}
+
+```{r effect, fig.height=3.5, fig.width=5.5}
 fit <- survfit(Surv(time, event) ~ rx, data = dd)
 
 ggsurvplot(
@@ -197,6 +193,14 @@ ggsurvplot(
   palette = "jco"
 )
 ```
+
+
+```{r}
+dd[, event := 1 * (ttc <= 365)]
+dd[, .(p = mean(event)), keyby = rx]
+```
+
+This is an odds ratio of 1.80, risk ratio of 1.26, and risk difference of 14 percentage points.
 
 ### Complete data generation and model estimation
 
@@ -228,10 +232,6 @@ summary(fit_coxme)
 load("data/coxfit.rda")
 fit_coxme
 ```
-
-<a name="addendum"></a>  
-
-\ 
 
 ### Power estimation
 
@@ -333,7 +333,7 @@ model.ests <- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 model.ests
 ```
 
-```{r, echo = FALSE, fig.height = 2.75, fig.width = 8}
+```{r power, echo = FALSE, fig.height = 2.75, fig.width = 8}
 load("data/ss.rda")
 
 resum[, `number of sites` := nsites]
@@ -358,7 +358,9 @@ ggplot(data = resum, mapping = aes(x = s2, y = p_m)) +
 
 ```
 
+<a name="addendum"></a>  
 
+\ 
 
 ## Addendum
 

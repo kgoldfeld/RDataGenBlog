@@ -27,9 +27,9 @@ library(parallel)</code></pre>
 <pre class="r"><code>points &lt;- list(c(30, 0.90), c(365, .50))
 r &lt;- survGetParams(points)
 r</code></pre>
-<pre><code>## [1] -4.814675  1.326369</code></pre>
+<pre><code>## [1] -4.8  1.3</code></pre>
 <pre class="r"><code>survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/survparam-1.png" width="528" /></p>
 </div>
 <div id="evaluating-cluster-variation" class="section level3">
 <h3>Evaluating cluster variation</h3>
@@ -42,7 +42,9 @@ defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;,
   formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
 defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])</code></pre>
-<pre class="r"><code>dc &lt;- genData(20, defc, id = &quot;site&quot;)
+<pre class="r"><code>set.seed(589823)
+
+dc &lt;- genData(20, defc, id = &quot;site&quot;)
 dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 200, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
@@ -50,17 +52,10 @@ dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;),
   timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
 <pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ site, data = dd)
 
-j &lt;- ggsurvplot(fit, data = dd)
-j$plot &lt;- j$plot + 
-  theme(legend.position = &quot;none&quot;)
-
-j</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="528" /></p>
-</div>
-<div id="less-cluster-variation" class="section level4">
-<h4>Less cluster variation</h4>
-<pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.005)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-8-1.png" width="528" /></p>
+j1 &lt;- ggsurvplot(fit, data = dd, title = &quot;Cluster variance = 0.100&quot;)
+j1$plot &lt;- j1$plot + theme(legend.position = &quot;none&quot;,
+                           plot.title = element_text(size = 11, face = &quot;bold&quot;))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/variation-1.png" width="960" /></p>
 </div>
 <div id="variation-of-the-probability-of-an-event-across-clusters" class="section level4">
 <h4>Variation of the probability of an event across clusters</h4>
@@ -84,11 +79,13 @@ ds &lt;- dd[, .(p = mean(event)), keyby = site]
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
   scale_x_continuous(limits = c(0, 1)) +
-  scale_y_continuous(limits = c(0, 100)) +
-  theme(panel.grid = element_blank())</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="384" /></p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="384" /></p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="576" /></p>
+  scale_y_continuous(limits = c(0, 200)) +
+  ggtitle(&quot;Cluster variance = 0.100&quot;) +
+  xlab(&quot;observed proportion of events&quot;) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 11, face = &quot;bold&quot;)) </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/histprob-1.png" width="384" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/varprob-1.png" width="576" /></p>
 </div>
 </div>
 <div id="evaluating-the-effect-size" class="section level3">
@@ -100,7 +97,6 @@ defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;,
 
 defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
 
-set.seed(258)
 dd &lt;- genData(600, defa)
 dd &lt;- genSurv(dd, defs, digits = 0)
 dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
@@ -114,7 +110,13 @@ ggsurvplot(
   legend = c(.25, 0.25),
   palette = &quot;jco&quot;
 )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="528" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/effect-1.png" width="528" /></p>
+<pre class="r"><code>dd[, event := 1 * (ttc &lt;= 365)]
+dd[, .(p = mean(event)), keyby = rx]</code></pre>
+<pre><code>##    rx    p
+## 1:  0 0.53
+## 2:  1 0.67</code></pre>
+<p>This is an odds ratio of 1.80, risk ratio of 1.26, and risk difference of 14 percentage points.</p>
 </div>
 <div id="complete-data-generation-and-model-estimation" class="section level3">
 <h3>Complete data generation and model estimation</h3>
@@ -143,20 +145,18 @@ summary(fit_coxme)</code></pre>
 ##                    NULL Integrated   Fitted
 ## Log-likelihood -3149149   -3139265 -3137501
 ## 
-##                      Chisq     df p      AIC      BIC
-## Integrated loglik 19769.05   2.00 0 19765.05 19744.21
-##  Penalized loglik 23296.25 924.84 0 21446.56 11811.03
+##                   Chisq  df p   AIC   BIC
+## Integrated loglik 19769   2 0 19765 19744
+##  Penalized loglik 23296 925 0 21447 11811
 ## 
 ## Model:  Surv(time, event) ~ rx + (1 | site) 
 ## Fixed coefficients
-##         coef exp(coef)   se(coef)     z p
-## rx 0.4039245  1.497691 0.01476242 27.36 0
+##    coef exp(coef) se(coef)  z p
+## rx  0.4       1.5    0.015 27 0
 ## 
 ## Random effects
-##  Group Variable  Std Dev   Variance 
-##  site  Intercept 0.2272272 0.0516322</code></pre>
-<p><a name="addendum"></a></p>
-<p> </p>
+##  Group Variable  Std Dev Variance
+##  site  Intercept 0.227   0.052</code></pre>
 </div>
 <div id="power-estimation" class="section level3">
 <h3>Power estimation</h3>
@@ -175,29 +175,31 @@ model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 
 model.ests</code></pre>
 <pre><code>## [[1]]
-##    nsites ninds   s2     est_s     re.var_s    p_s
-## 1:     20    15 0.03 0.4206975 8.204975e-05 0.0091
-## 2:     20    15 0.03 0.1023435 3.430323e-02 0.5900
-## 3:     20    15 0.03 0.4472983 3.898589e-02 0.0110
+##    nsites ninds   s2 est_s re.var_s   p_s
+## 1:     20    15 0.03  0.29  1.8e-01 0.240
+## 2:     20    15 0.03  0.35  8.3e-05 0.033
+## 3:     20    15 0.03  0.35  8.1e-05 0.042
 ## 
 ## [[2]]
-##    nsites ninds   s2     est_s     re.var_s    p_s
-## 1:     30    15 0.03 0.3175695 0.0725043132 0.0550
-## 2:     30    15 0.03 0.5182526 0.0694226028 0.0021
-## 3:     30    15 0.03 0.3698889 0.0003995483 0.0074
+##    nsites ninds   s2 est_s re.var_s     p_s
+## 1:     30    15 0.03  0.47  8.7e-03 8.8e-04
+## 2:     30    15 0.03  0.37  1.6e-02 8.1e-03
+## 3:     30    15 0.03  0.76  1.7e-05 5.7e-08
 ## 
 ## [[3]]
-##    nsites ninds   s2     est_s   re.var_s   p_s
-## 1:     20    15 0.04 0.5033874 0.09028845 0.017
-## 2:     20    15 0.04 0.3267158 0.02216258 0.062
-## 3:     20    15 0.04 0.3446178 0.03518498 0.055
+##    nsites ninds   s2 est_s re.var_s    p_s
+## 1:     20    15 0.04  0.36  4.0e-04 0.0240
+## 2:     20    15 0.04  0.45  8.3e-05 0.0038
+## 3:     20    15 0.04  0.61  1.3e-01 0.0079
 ## 
 ## [[4]]
-##    nsites ninds   s2     est_s     re.var_s    p_s
-## 1:     30    15 0.04 0.4506164 8.337081e-05 0.0011
-## 2:     30    15 0.04 0.5720621 9.923807e-02 0.0016
-## 3:     30    15 0.04 0.4439685 1.490294e-02 0.0027</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-19-1.png" width="768" /></p>
+##    nsites ninds   s2 est_s re.var_s    p_s
+## 1:     30    15 0.04  0.51    0.036 0.0012
+## 2:     30    15 0.04  0.29    0.019 0.0530
+## 3:     30    15 0.04  0.32    0.090 0.0700</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/power-1.png" width="768" /></p>
+<p><a name="addendum"></a></p>
+<p> </p>
 </div>
 <div id="addendum" class="section level2">
 <h2>Addendum</h2>
