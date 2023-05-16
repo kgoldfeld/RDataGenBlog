@@ -14,12 +14,20 @@ image: ''
 draft: TRUE
 ---
 
+<script src="{{< blogdown/postref >}}index.en_files/htmlwidgets/htmlwidgets.js"></script>
+<script src="{{< blogdown/postref >}}index.en_files/plotly-binding/plotly.js"></script>
+<script src="{{< blogdown/postref >}}index.en_files/typedarray/typedarray.min.js"></script>
+<script src="{{< blogdown/postref >}}index.en_files/jquery/jquery.min.js"></script>
+<link href="{{< blogdown/postref >}}index.en_files/crosstalk/css/crosstalk.min.css" rel="stylesheet" />
+<script src="{{< blogdown/postref >}}index.en_files/crosstalk/js/crosstalk.min.js"></script>
+<link href="{{< blogdown/postref >}}index.en_files/plotly-htmlwidgets-css/plotly-htmlwidgets.css" rel="stylesheet" />
+<script src="{{< blogdown/postref >}}index.en_files/plotly-main/plotly-latest.min.js"></script>
 
 
 <p>A colleague reached out for some help designing a cluster randomized trial to evaluate a clinical decision support tool for primary care physicians (PCPs), which aims to improve care for high-risk patients. The outcome will be a time-to-event measure, collected at the patient level. The unit of randomization will be the PCP, and one of the key design issues is settling on the number to randomize. &gt; At this stage in my career, I was pretty shocked to realize that I’d never been involved with a study that would require a clustered survival analysis. So, this particular sample size calculation is new for me, and that means that I’ve had some new simulations to conduct. (There are some analytic solutions to this problem, but there doesn’t seem to a consensus about the best approach to use.) I’m getting it all down here, because that’s what I do.</p>
 <div id="overview" class="section level3">
 <h3>Overview</h3>
-<p>In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions.</p>
+<p>In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions. The post is a bit long, but only because I’ve included so much code.</p>
 </div>
 <div id="defining-shape-of-survival-curve" class="section level3">
 <h3>Defining shape of survival curve</h3>
@@ -36,7 +44,7 @@ library(parallel)</code></pre>
 r &lt;- survGetParams(points)
 r</code></pre>
 <pre><code>## [1] -4.8  1.3</code></pre>
-<p>With the paramters in hand, we are ready for the first simulation. The time-to-event variable <em>tte</em> is defined using the parameters generating by <code>survGetParams</code>. The observed time is the minimum of one year and the time-to-event.</p>
+<p>With the parameters in hand, we are ready for the first simulation. The time-to-event variable <em>tte</em> is defined using the parameters generating by <code>survGetParams</code>. The observed time is the minimum of one year and the time-to-event.</p>
 <pre class="r"><code>defs &lt;- defSurv(varname = &quot;tte&quot;, formula = r[1], shape = r[2])
 
 defa &lt;- defDataAdd(varname = &quot;time&quot;, formula = &quot;min(365, tte)&quot;, dist = &quot;nonrandom&quot;)
@@ -66,7 +74,7 @@ dd</code></pre>
 
 fit &lt;- survfit(Surv(time, event) ~ 1, data = dd)
 
-j &lt;- ggsurv(fit, CI = FALSE, surv.col = &quot;red&quot;, size.est = 0.8) + 
+j &lt;- ggsurv(fit, CI = FALSE, surv.col = &quot;#ed7c67&quot;, size.est = 0.8) + 
   theme(panel.grid = element_blank(),
         axis.text = element_text(size = 7.5),
         axis.title = element_text(size = 8, face = &quot;bold&quot;),
@@ -82,7 +90,7 @@ ggarrange(splot, j, ncol = 2, nrow = 1)</code></pre>
 <p>Cluster variation in the context of survival curves implies that there is a cluster-specific survival curve. This variation is induced with a random effect in in the data generation process. In this case, I am assuming a normally distributed random effect with mean 0 and some variance (other distributions can be used). The variance assumption is a key one (which will ultimately impact the estimates of power), and I explore that a bit more in the second part of this section.</p>
 <div id="visualizing-cluster-variation" class="section level4">
 <h4>Visualizing cluster variation</h4>
-<p>The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. <em>tte</em> is now a function of the distribution parameters as well as the cluster random effect <em>b</em>. We are still using a single arm and assuming that everyone is followed for one year.</p>
+<p>The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. <em>tte</em> is now a function of the distribution parameters as well as the cluster random effect <em>b</em>. We are still using a single arm and assuming that everyone is followed for one year. In the first simulation, we set the random effect variance <span class="math inline">\(b = 0.1\)</span>.</p>
 <pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.1)
 
 defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
@@ -90,93 +98,108 @@ defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + b&quot;, sh
 defa &lt;- defDataAdd(varname = &quot;time&quot;, formula = &quot;min(365, tte)&quot;, dist = &quot;nonrandom&quot;)
 defa &lt;- defDataAdd(defa, &quot;event&quot;, &quot;1*(tte &lt;= 365)&quot;, dist = &quot;nonrandom&quot;)</code></pre>
 <pre class="r"><code>dc &lt;- genData(20, defc, id = &quot;pcp&quot;)
-dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 200, &quot;id&quot;)
+dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 1000, &quot;id&quot;)
 dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addColumns(defa, dd)
-dd</code></pre>
-<pre><code>##       pcp    b   id  tte time event
-##    1:   1 0.25    1  788  365     0
-##    2:   1 0.25    2   93   93     1
-##    3:   1 0.25    3  723  365     0
-##    4:   1 0.25    4  151  151     1
-##    5:   1 0.25    5 1367  365     0
-##   ---                              
-## 3996:  20 0.22 3996  274  274     1
-## 3997:  20 0.22 3997   43   43     1
-## 3998:  20 0.22 3998    3    3     1
-## 3999:  20 0.22 3999   98   98     1
-## 4000:  20 0.22 4000   69   69     1</code></pre>
-<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ pcp, data = dd)
-
-j1 &lt;- ggsurvplot(fit, data = dd, title = &quot;Cluster variance = 0.100&quot;)
-j1$plot &lt;- j1$plot +
-  theme(legend.position = &quot;none&quot;,
-        plot.title = element_text(size = 11, face = &quot;bold&quot;))</code></pre>
+dd.10 &lt;- addColumns(defa, dd)
+dd.10</code></pre>
+<pre><code>##        pcp    b    id  tte time event
+##     1:   1 0.25     1  788  365     0
+##     2:   1 0.25     2   93   93     1
+##     3:   1 0.25     3  723  365     0
+##     4:   1 0.25     4  151  151     1
+##     5:   1 0.25     5 1367  365     0
+##    ---                               
+## 19996:  20 0.22 19996  424  365     0
+## 19997:  20 0.22 19997  207  207     1
+## 19998:  20 0.22 19998   70   70     1
+## 19999:  20 0.22 19999  669  365     0
+## 20000:  20 0.22 20000  994  365     0</code></pre>
+<p>The following plot shows two sets of survival curves, each based on different levels of variation. Each curve represents a different cluster. By doing this, we get a direct visualization of how variance assumption of the random effect impacts the variation of the survival curves:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/variation-1.png" width="960" /></p>
 </div>
 <div id="variation-of-the-probability-of-an-event-across-clusters" class="section level4">
 <h4>Variation of the probability of an event across clusters</h4>
-<pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.1)
+<p>The plot of the survival curves is only one way to consider the impact on variation. Another option is to look at the binary event outcome under the assumption of no censoring. I like to evaluate the variation in the probability of an event across the clusters, particularly by looking at the range of probabilities, or considering the coefficient of variation, which is <span class="math inline">\(\sigma / \mu\)</span>.</p>
+<p>To show how this is done, I am generating a data set with a very large number of clusters (2000) and a large cluster size (500), and then calculating the probability of an event for each cluster:</p>
+<pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.100)
 
-defa &lt;- defDataAdd(varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
-defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
-  formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
-
-defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
-
-dc &lt;- genData(1000, defc, id = &quot;pcp&quot;)
+dc &lt;- genData(2000, defc, id = &quot;pcp&quot;)
 dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 500, &quot;id&quot;)
-dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
-
-dd[, event := 1 * (tte &lt;= 365)]
+dd &lt;- addColumns(defa, dd)
 
 ds &lt;- dd[, .(p = mean(event)), keyby = pcp]
-
-ggplot(data = ds, aes(x = p)) +
-  geom_histogram(binwidth = .05) +
-  scale_x_continuous(limits = c(0, 1)) +
-  scale_y_continuous(limits = c(0, 200)) +
-  ggtitle(&quot;Cluster variance = 0.100&quot;) +
-  xlab(&quot;observed proportion of events&quot;) +
-  theme(panel.grid = element_blank(),
-        plot.title = element_text(size = 11, face = &quot;bold&quot;)) </code></pre>
+ds</code></pre>
+<pre><code>##        pcp    p
+##    1:    1 0.41
+##    2:    2 0.43
+##    3:    3 0.36
+##    4:    4 0.51
+##    5:    5 0.50
+##   ---          
+## 1996: 1996 0.82
+## 1997: 1997 0.53
+## 1998: 1998 0.88
+## 1999: 1999 0.42
+## 2000: 2000 0.63</code></pre>
+<p>Here is a plot of the observed proportions within each cluster:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/histprob-1.png" width="384" /></p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/varprob-1.png" width="576" /></p>
+<p>Here are the mean probability, the standard deviation of probabilities, the coefficient of variation for the probabilities, and the 95% interval of the probabilities when the random effect variance in the survival generation process is 0.10:</p>
+<pre class="r"><code>ds[, .(mu = mean(p), s = sd(p), cv = sd(p)/mean(p))]</code></pre>
+<pre><code>##     mu    s   cv
+## 1: 0.5 0.11 0.22</code></pre>
+<pre class="r"><code>ds[, .(quantile(p, probs = c(0.025, .975)))]</code></pre>
+<pre><code>##      V1
+## 1: 0.31
+## 2: 0.72</code></pre>
+<p>To compare across a range variance assumptions, I’ve generated ten data sets and plotted the results below. If you hover over the points, you will get the CV estimate. This could be helpful in helping collaborators decide what levels of variance is appropriate to focus on in the final power estimation and sample size determination.</p>
+<center>
+<div class="plotly html-widget html-fill-item-overflow-hidden html-fill-item" id="htmlwidget-1" style="width:480px;height:384px;"></div>
+<script type="application/json" data-for="htmlwidget-1">{"x":{"data":[{"x":[0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1],"y":[0.5,0.5,0.502,0.5,0.5,0.5,0.502,0.5,0.496,0.498],"text":["Variance:  0.01 <br />95% interval:  0.42 - 0.58 <br />CV:  0.082","Variance:  0.02 <br />95% interval:  0.4 - 0.61 <br />CV:  0.107","Variance:  0.03 <br />95% interval:  0.38 - 0.63 <br />CV:  0.128","Variance:  0.04 <br />95% interval:  0.37 - 0.65 <br />CV:  0.146","Variance:  0.05 <br />95% interval:  0.35 - 0.66 <br />CV:  0.158","Variance:  0.06 <br />95% interval:  0.34 - 0.68 <br />CV:  0.174","Variance:  0.07 <br />95% interval:  0.34 - 0.69 <br />CV:  0.181","Variance:  0.08 <br />95% interval:  0.33 - 0.7 <br />CV:  0.194","Variance:  0.09 <br />95% interval:  0.32 - 0.71 <br />CV:  0.205","Variance:  0.1 <br />95% interval:  0.31 - 0.73 <br />CV:  0.216"],"type":"scatter","mode":"markers+lines","marker":{"autocolorscale":false,"color":"rgba(235,130,46,1)","opacity":1,"size":5.66929133858268,"symbol":"circle","line":{"width":1.88976377952756,"color":"rgba(235,130,46,1)"}},"hoveron":"points","showlegend":false,"xaxis":"x","yaxis":"y","hoverinfo":"text","opacity":1,"line":{"color":"transparent"},"error_y":{"array":[0.084,0.106,0.12405,0.154,0.162,0.176,0.192,0.20405,0.21405,0.232],"arrayminus":[0.078,0.104,0.124,0.134,0.146,0.15805,0.164,0.174,0.18005,0.19],"type":"data","width":0,"symmetric":false,"color":"rgba(166,166,166,1)"},"frame":null}],"layout":{"margin":{"t":25.1324200913242,"r":7.30593607305936,"b":39.0867579908676,"l":43.1050228310502},"plot_bgcolor":"rgba(235,235,235,1)","paper_bgcolor":"rgba(255,255,255,1)","font":{"color":"rgba(0,0,0,1)","family":"","size":14.6118721461187},"xaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[0.0055,0.1045],"tickmode":"array","ticktext":["0.01","0.02","0.03","0.04","0.05","0.06","0.07","0.08","0.09","0.10"],"tickvals":[0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.1],"categoryorder":"array","categoryarray":["0.01","0.02","0.03","0.04","0.05","0.06","0.07","0.08","0.09","0.10"],"nticks":null,"ticks":"outside","tickcolor":"rgba(51,51,51,1)","ticklen":3.65296803652968,"tickwidth":0.66417600664176,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":11.689497716895},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":false,"gridcolor":null,"gridwidth":0,"zeroline":false,"anchor":"y","title":{"text":"<br />variance of random effect in survival data generation","font":{"color":"rgba(0,0,0,1)","family":"","size":14.6118721461187}},"hoverformat":".2f"},"yaxis":{"domain":[0,1],"automargin":true,"type":"linear","autorange":false,"range":[0.225,0.775],"tickmode":"array","ticktext":["0.3","0.4","0.5","0.6","0.7"],"tickvals":[0.3,0.4,0.5,0.6,0.7],"categoryorder":"array","categoryarray":["0.3","0.4","0.5","0.6","0.7"],"nticks":null,"ticks":"outside","tickcolor":"rgba(51,51,51,1)","ticklen":3.65296803652968,"tickwidth":0.66417600664176,"showticklabels":true,"tickfont":{"color":"rgba(77,77,77,1)","family":"","size":11.689497716895},"tickangle":-0,"showline":false,"linecolor":null,"linewidth":0,"showgrid":false,"gridcolor":null,"gridwidth":0,"zeroline":false,"anchor":"x","title":{"text":"probability of event","font":{"color":"rgba(0,0,0,1)","family":"","size":14.6118721461187}},"hoverformat":".2f"},"shapes":[{"type":"rect","fillcolor":null,"line":{"color":null,"width":0,"linetype":[]},"yref":"paper","xref":"paper","x0":0,"x1":1,"y0":0,"y1":1}],"showlegend":false,"legend":{"bgcolor":"rgba(255,255,255,1)","bordercolor":"transparent","borderwidth":1.88976377952756,"font":{"color":"rgba(0,0,0,1)","family":"","size":11.689497716895}},"hovermode":"closest","barmode":"relative"},"config":{"doubleClick":"reset","modeBarButtonsToAdd":["hoverclosest","hovercompare"],"showSendToCloud":false,"displayModeBar":false},"source":"A","attrs":{"31843ebbb82a":{"x":{},"y":{},"text":{},"type":"scatter"},"31841637ed93":{"x":{},"y":{},"text":{},"ymin":{},"ymax":{}}},"cur_data":"31843ebbb82a","visdat":{"31843ebbb82a":["function (y) ","x"],"31841637ed93":["function (y) ","x"]},"highlight":{"on":"plotly_click","persistent":false,"dynamic":false,"selectize":false,"opacityDim":0.2,"selected":{"opacity":1},"debounce":0},"shinyEvents":["plotly_hover","plotly_click","plotly_selected","plotly_relayout","plotly_brushed","plotly_brushing","plotly_clickannotation","plotly_doubleclick","plotly_deselect","plotly_afterplot","plotly_sunburstclick"],"base_url":"https://plot.ly"},"evals":[],"jsHooks":[]}</script>
+</center>
 </div>
 </div>
 <div id="evaluating-the-effect-size" class="section level3">
 <h3>Evaluating the effect size</h3>
+<p>Next, we generate data that includes treatment assignment (but excludes cluster variability and censoring before one year). The treatment effect is expressed as a log hazard ratio, which in this case 0.4 (equal to a hazard ratio of just about 1.5). The data generation starts with treatment assignment, adds the time-to-event survival data, and then adds the one-year censoring data, as before:</p>
 <pre class="r"><code>defa &lt;- defData(varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
-defa &lt;- defData(defa, varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
-defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
-  formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
 defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
 
-dd &lt;- genData(600, defa)
-dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
-  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
-<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ rx, data = dd)
+defe &lt;- defDataAdd(varname = &quot;time&quot;, formula = &quot;min(365, tte)&quot;, dist = &quot;nonrandom&quot;)
+defe &lt;- defDataAdd(defe, &quot;event&quot;, &quot;1*(tte &lt;= 365)&quot;, dist = &quot;nonrandom&quot;)
 
-ggsurvplot(
-  fit, 
-  data = dd, 
-  legend.title = &quot;&quot;, 
-  legend = c(.25, 0.25),
-  palette = &quot;jco&quot;
-)</code></pre>
+dd &lt;- genData(1000, defa)
+dd &lt;- genSurv(dd, defs, digits = 0)
+dd &lt;- addColumns(defe, dd)
+
+dd</code></pre>
+<pre><code>##         id rx  tte time event
+##    1:    1  0 1902  365     0
+##    2:    2  0  286  286     1
+##    3:    3  0  480  365     0
+##    4:    4  0   32   32     1
+##    5:    5  1   12   12     1
+##   ---                        
+##  996:  996  0  663  365     0
+##  997:  997  1  962  365     0
+##  998:  998  1   19   19     1
+##  999:  999  1  502  365     0
+## 1000: 1000  0   85   85     1</code></pre>
+<p>The plot of the survival curves by treatment arms provides a nice visualization of the treatment effect:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/effect-1.png" width="528" /></p>
-<pre class="r"><code>dd[, event := 1 * (tte &lt;= 365)]
-dd[, .(p = mean(event)), keyby = rx]</code></pre>
-<pre><code>##    rx    p
-## 1:  0 0.50
-## 2:  1 0.65</code></pre>
-<p>This is an odds ratio of 1.80, risk ratio of 1.26, and risk difference of 14 percentage points.</p>
+<p>Again, since we have no censoring, we can estimate the probability of an event within 365 days for each arm:</p>
+<pre class="r"><code>dd[, .(p = mean(event)), keyby = rx]</code></pre>
+<pre><code>##         rx    p
+## 1: control 0.51
+## 2:      rx 0.63</code></pre>
+<p>So, an effect size of 0.4 on the log hazard scale, translates to an odds ratio of about 1.64, a risk ratio of 1.24, and risk difference of 12 percentage points. In the absence of any data on the potential effect size, all of this information, in conjunction with the variance assumptions, can help inform a (highly uncertain) sample size/power estimation.</p>
 </div>
 <div id="complete-data-generation-and-model-estimation" class="section level3">
 <h3>Complete data generation and model estimation</h3>
+<p>With all these pieces in place, we are ready to put it all together and add censoring to mix to finalize the full data generating process. And then it makes sense to fit a mixed-effects Cox proportional hazards model to see if we can recover the parameters that we have used to generate the data.</p>
+<p>We start in <em>defc</em> by defining the cluster-level random effect variation and treatment assignment design (in this case 1 to 1, treatment to control). We add a censoring process in <em>defa</em>. This assumes that we will be enrolling patients for six months (or 182 days), who will be spread out across the time period. The study will last exactly one year. Every patient will be followed for at least six months, and some will be followed for a full year (i.e., those who join the study on the first day).</p>
+<p>Finally, <em>defs</em> defines the data generation process for the survival outcome, which we’ve seen above, though now we have both a treatment effect and a random effect, in addition to the baseline parameters in the vector <em>r</em>.</p>
 <pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.05)
 defc &lt;- defData(defc, varname = &quot;rx&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
 
@@ -185,81 +208,123 @@ defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;,
   formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
 defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + 0.4 * rx + b&quot;, shape = r[2])</code></pre>
-<pre class="r"><code>dc &lt;- genData(1000, defc, id = &quot;site&quot;)
-dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 500, &quot;id&quot;)
+<p>The data generation is the same as we’ve seen above. The only addition is adding the censoring process to the data generation, which is done with the function <code>addCompRisk</code>:</p>
+<pre class="r"><code>dc &lt;- genData(500, defc, id = &quot;pcp&quot;)
+dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 200, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
 dd &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
   timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)
 
-fit_coxme &lt;-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
-
+dd</code></pre>
+<pre><code>##         pcp       b rx     id start_day censor  tte time event   type
+##      1:   1 -0.0158  1      1        65    300  307  300     0 censor
+##      2:   1 -0.0158  1      2       113    252  907  252     0 censor
+##      3:   1 -0.0158  1      3       121    244  110  110     1    tte
+##      4:   1 -0.0158  1      4        60    305  170  170     1    tte
+##      5:   1 -0.0158  1      5        95    270 2673  270     0 censor
+##     ---                                                              
+##  99996: 500 -0.0015  0  99996       160    205  291  205     0 censor
+##  99997: 500 -0.0015  0  99997        79    286  193  193     1    tte
+##  99998: 500 -0.0015  0  99998        64    301   28   28     1    tte
+##  99999: 500 -0.0015  0  99999       153    212  459  212     0 censor
+## 100000: 500 -0.0015  0 100000        19    346  298  298     1    tte</code></pre>
+<p>Since we have generated a rather large data set, we should be able to recover the parameters pretty closely if we are using the correct model. We are going to fit a mixed effects survival model (also known as a frailty model) to see how well we did.</p>
+<pre class="r"><code>fit_coxme &lt;- coxme(Surv(time, event) ~ rx + (1 | pcp), data = dd)
 summary(fit_coxme)</code></pre>
 <pre><code>## Cox mixed-effects model fit by maximum likelihood
 ##   Data: dd
-##   events, n = 247347, 5e+05
-##   Iterations= 23 96 
-##                    NULL Integrated   Fitted
-## Log-likelihood -3149149   -3139265 -3137501
+##   events, n = 49955, 1e+05
+##   Iterations= 11 48 
+##                   NULL Integrated  Fitted
+## Log-likelihood -555429    -553708 -553058
 ## 
-##                   Chisq  df p   AIC   BIC
-## Integrated loglik 19769   2 0 19765 19744
-##  Penalized loglik 23296 925 0 21447 11811
+##                   Chisq  df p  AIC  BIC
+## Integrated loglik  3442   2 0 3438 3421
+##  Penalized loglik  4743 414 0 3914  259
 ## 
-## Model:  Surv(time, event) ~ rx + (1 | site) 
+## Model:  Surv(time, event) ~ rx + (1 | pcp) 
 ## Fixed coefficients
 ##    coef exp(coef) se(coef)  z p
-## rx  0.4       1.5    0.015 27 0
+## rx 0.39       1.5    0.022 18 0
 ## 
 ## Random effects
 ##  Group Variable  Std Dev Variance
-##  site  Intercept 0.227   0.052</code></pre>
+##  pcp   Intercept 0.22    0.05</code></pre>
+<p>Pretty good! The estimated HR of 0.39 (95% CI: 0.35 - 0.43) is on target (we used 0.40 in the data generation process), and the estimated variance for the PCP random effect was 0.05, also on the mark. I’d say we are ready to proceed to the final step.</p>
 </div>
 <div id="power-estimation" class="section level3">
 <h3>Power estimation</h3>
-<p>Check out the <a href="#addendum">addendum</a> for code details.</p>
+<p>To conduct the power estimation, I’ve essentially wrapped the data generation and model estimation code in a collection of functions that can be called repeatedly to estimate the proportion of times we get a statistically significant result for a particular set of assumptions (this is, in fact, the estimate of power). I’ve provided the code below in the <a href="#addendum">addendum</a> in case you haven’t grown weary of all this detail. I described a general <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">framework</a> for using simulation to estimate sample size/power in a post a while back, and I am largely following that process here.</p>
+<p>I’ve written a little function <code>scenario_list</code> (which I’m now thinking I should add to <code>simstudy</code>) to create a list of parameter combinations that will define the power estimation. In this case, the parameters I am interested in are the number of PCPs that should be randomized and the variance assumption. The number of patients per PCP (cluster size) is also important to vary, but for illustration purposes here I am keeping it constant.</p>
+<p>Here is the simplified scenario list with four possible combinations:</p>
 <pre class="r"><code>scenario_list &lt;- function(...) {
   argmat &lt;- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
 }
 
-nsites &lt;- c(20, 30)
-ninds &lt;- c(15)
+npcps &lt;- c(20, 30)
+npats &lt;- c(15)
 s2 &lt;- c(0.03, 0.04)
 
-scenarios &lt;- scenario_list(nsites = nsites, ninds = ninds, s2 = s2)
-model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
+scenarios &lt;- scenario_list(npcps = npcps, npats = npats, s2 = s2)
+
+scenarios</code></pre>
+<pre><code>## [[1]]
+## npcps npats    s2 
+## 20.00 15.00  0.03 
+## 
+## [[2]]
+## npcps npats    s2 
+## 30.00 15.00  0.03 
+## 
+## [[3]]
+## npcps npats    s2 
+## 20.00 15.00  0.04 
+## 
+## [[4]]
+## npcps npats    s2 
+## 30.00 15.00  0.04</code></pre>
+<p>And I can use the <code>mclapply</code> function in the <code>parallel</code> package to generate three iterations for each scenario:</p>
+<pre class="r"><code>model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 
 model.ests</code></pre>
 <pre><code>## [[1]]
-##    nsites ninds   s2 est_s re.var_s   p_s
-## 1:     20    15 0.03  0.34  8.4e-02 0.110
-## 2:     20    15 0.03  0.52  4.0e-04 0.002
-## 3:     20    15 0.03 -0.11  8.3e-05 0.540
+##    npcps npats   s2 est_s re.var_s   p_s
+## 1:    20    15 0.03  0.36   0.0004 0.027
+## 2:    20    15 0.03  0.44   0.0220 0.010
+## 3:    20    15 0.03  0.41   0.1099 0.055
 ## 
 ## [[2]]
-##    nsites ninds   s2 est_s re.var_s     p_s
-## 1:     30    15 0.03  0.27  6.5e-02 0.10000
-## 2:     30    15 0.03  0.35  8.2e-05 0.00910
-## 3:     30    15 0.03  0.59  6.8e-02 0.00046
+##    npcps npats   s2 est_s re.var_s    p_s
+## 1:    30    15 0.03  0.30  8.3e-05 0.0220
+## 2:    30    15 0.03  0.44  3.3e-02 0.0033
+## 3:    30    15 0.03  0.35  9.8e-02 0.0460
 ## 
 ## [[3]]
-##    nsites ninds   s2 est_s re.var_s     p_s
-## 1:     20    15 0.04  0.44  1.8e-02 0.01500
-## 2:     20    15 0.04  0.61  8.5e-05 0.00018
-## 3:     20    15 0.04  0.27  5.4e-02 0.15000
+##    npcps npats   s2 est_s re.var_s   p_s
+## 1:    20    15 0.04  0.29    0.050 0.130
+## 2:    20    15 0.04  0.11    0.073 0.590
+## 3:    20    15 0.04  0.48    0.050 0.013
 ## 
 ## [[4]]
-##    nsites ninds   s2 est_s re.var_s     p_s
-## 1:     30    15 0.04  0.18  8.2e-05 1.8e-01
-## 2:     30    15 0.04  0.75  6.2e-02 8.9e-06
-## 3:     30    15 0.04  0.17  1.9e-02 2.5e-01</code></pre>
+##    npcps npats   s2 est_s re.var_s     p_s
+## 1:    30    15 0.04  0.23    0.052 0.16000
+## 2:    30    15 0.04  0.65    0.026 0.00003
+## 3:    30    15 0.04  0.27    0.025 0.07200</code></pre>
+<p>In the actual power calculations, which are reported below, I used 60 scenarios defined by these data generation parameters:</p>
+<pre class="r"><code>npcps &lt;- c(18, 24, 30, 36)
+npats &lt;- c(15, 18, 21)
+s2 &lt;- c(0.01, 0.02, 0.03, 0.04, 0.05)</code></pre>
+<p>For each of these scenarios, I generated 5000 data sets and estimated models for each of them (i.e., a total of 300,000 data sets and model fits). For each of the 60 scenarios, I estimated the proportion of the 5000 model fits that yielded a p-value &lt; 0.05 for the estimated log hazard ratio. I did have the benefit of using a high performance computer, because running this on my laptop would have taken well over 10 hours (only about 10 minutes on the HPC).</p>
+<p>In the end, we are left with a plot of “power curves” that show estimated power for each of the scnerios. If we assume that we can expect at least 18 patients per PCP and that the between PCP variance will be around 0,03 or 0.04, we could feel comfortable with 30 PCPs (15 in each arm), though it might more prudent to go with 36, just to be safe:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/power-1.png" width="768" /></p>
 <p><a name="addendum"></a></p>
 <p> </p>
 </div>
 <div id="addendum" class="section level2">
 <h2>Addendum</h2>
+<p>Here is the code I used to generate the data for the power curve plot. It is based on the <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">framework</a> I mentioned earlier. There is one extra function here, <code>extract_coxme_table</code>, which I pulled from <a href="https://stackoverflow.com/questions/43720260/how-to-extract-p-values-from-lmekin-objects-in-coxme-package" target="_blank">stackoverflow</a>, because there is no obvious way to extract data from the <code>coxme</code> model fit.</p>
 <pre class="r"><code>extract_coxme_table &lt;- function (mod) {
   beta &lt;- mod$coefficients 
   nvar &lt;- length(beta)
@@ -294,8 +359,8 @@ s_generate &lt;- function(argsvec, list_of_defs) {
   list2env(list_of_defs, envir = environment())
   list2env(as.list(argsvec), envir = environment())
   
-  dc &lt;- genData(nsites, defc, id = &quot;site&quot;)
-  dd &lt;- genCluster(dc, &quot;site&quot;, ninds, &quot;id&quot;)
+  dc &lt;- genData(npcps, defc, id = &quot;pcp&quot;)
+  dd &lt;- genCluster(dc, &quot;pcp&quot;, npats, &quot;id&quot;)
   dd &lt;- addColumns(defa, dd)
   dd &lt;- genSurv(dd, defs, digits = 0)
   dx &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
@@ -310,16 +375,16 @@ s_replicate &lt;- function(argsvec, list_of_defs) {
   
   dx &lt;- s_generate(argsvec, list_of_defs)
   
-  coxfitm &lt;-coxme(Surv(time, event) ~ rx + (1 | site), data = dx)
+  coxfitm &lt;-coxme(Surv(time, event) ~ rx + (1 | pcp), data = dx)
   
   list2env(as.list(argsvec), envir = environment())
   
   return(data.table(
-    nsites = nsites,
-    ninds = ninds,
+    npcps = npcps,
+    npats = npats,
     s2 = s2,
     est_s = fixef(coxfitm), 
-    re.var_s = VarCorr(coxfitm)$site,
+    re.var_s = VarCorr(coxfitm)$pcp,
     p_s = extract_coxme_table(coxfitm)$p
   ))
   

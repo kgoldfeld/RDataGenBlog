@@ -16,13 +16,33 @@ draft: TRUE
 
 ```{r, echo=FALSE}
 options(digits = 2)
+twentycolors = c("#cba4cf",
+"#7ee038",
+"#d565f5",
+"#83cc4e",
+"#ea66d7",
+"#d8cc2e",
+"#928def",
+"#75cf78",
+"#dc8ad6",
+"#c9b34b",
+"#8ea4e3",
+"#eb822e",
+"#69bedd",
+"#ed7c67",
+"#66cec5",
+"#ed75a2",
+"#71cfa0",
+"#dc9799",
+"#bbbc8b",
+"#cdb06e")
 ```
 
 A colleague reached out for some help designing a cluster randomized trial to evaluate a clinical decision support tool for primary care physicians (PCPs), which aims to improve care for high-risk patients. The outcome will be a time-to-event measure, collected at the patient level. The unit of randomization will be the PCP, and one of the key design issues is settling on the number to randomize. > At this stage in my career, I was pretty shocked to realize that I'd never been involved with a study that would require a clustered survival analysis. So, this particular sample size calculation is new for me, and that means that I've had some new simulations to conduct. (There are some analytic solutions to this problem, but there doesn't seem to a consensus about the best approach to use.) I'm getting it all down here, because that's what I do.
 
 ### Overview
 
-In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions.
+In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions. The post is a bit long, but only because I've included so much code.
 
 ### Defining shape of survival curve
 
@@ -46,7 +66,7 @@ r <- survGetParams(points)
 r
 ```
 
-With the paramters in hand, we are ready for the first simulation. The time-to-event variable *tte* is defined using the parameters generating by `survGetParams`. The observed time is the minimum of one year and the time-to-event.
+With the parameters in hand, we are ready for the first simulation. The time-to-event variable *tte* is defined using the parameters generating by `survGetParams`. The observed time is the minimum of one year and the time-to-event.
 
 ```{r}
 defs <- defSurv(varname = "tte", formula = r[1], shape = r[2])
@@ -74,7 +94,7 @@ splot <- survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365)
 
 fit <- survfit(Surv(time, event) ~ 1, data = dd)
 
-j <- ggsurv(fit, CI = FALSE, surv.col = "red", size.est = 0.8) + 
+j <- ggsurv(fit, CI = FALSE, surv.col = "#ed7c67", size.est = 0.8) + 
   theme(panel.grid = element_blank(),
         axis.text = element_text(size = 7.5),
         axis.title = element_text(size = 8, face = "bold"),
@@ -91,7 +111,7 @@ Cluster variation in the context of survival curves implies that there is a clus
 
 #### Visualizing cluster variation
 
-The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. *tte* is now a function of the distribution parameters as well as the cluster random effect *b*. We are still using a single arm and assuming that everyone is followed for one year.
+The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. *tte* is now a function of the distribution parameters as well as the cluster random effect *b*. We are still using a single arm and assuming that everyone is followed for one year. In the first simulation, we set the random effect variance $b = 0.1$.
 
 ```{r}
 defc <- defData(varname = "b", formula = 0, variance = 0.1)
@@ -104,101 +124,123 @@ defa <- defDataAdd(defa, "event", "1*(tte <= 365)", dist = "nonrandom")
 
 ```{r}
 dc <- genData(20, defc, id = "pcp")
-dd <- genCluster(dc, "pcp", numIndsVar = 200, "id")
+dd <- genCluster(dc, "pcp", numIndsVar = 1000, "id")
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addColumns(defa, dd)
-dd
+dd.10 <- addColumns(defa, dd)
+dd.10
 ```
 
-```{r, fig.height=3.5, fig.width = 5.5}
-fit <- survfit(Surv(time, event) ~ pcp, data = dd)
-
-j1 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.100")
-j1$plot <- j1$plot +
-  theme(legend.position = "none",
-        plot.title = element_text(size = 11, face = "bold"))
-```
-
+The following plot shows two sets of survival curves, each based on different levels of variation. Each curve represents a different cluster. By doing this, we get a direct visualization of how variance assumption of the random effect impacts the variation of the survival curves:
 
 ```{r variation, echo = FALSE, fig.height=4, fig.width = 10}
 library(ggpubr)
 
-defc <- defData(varname = "b", formula = 0, variance = 0.005)
+fit <- survfit(Surv(time, event) ~ pcp, data = dd.10)
+j.10 <- ggsurv(fit, main = "Cluster variance = 0.10", 
+          surv.col = twentycolors, cens.col = twentycolors) +
+  theme(legend.position = "none",
+    plot.title = element_text(size = 11, face = "bold"),
+    panel.grid = element_blank()
+  ) +
+  ylim(0, 1) 
+
+###
+
+defc <- defData(varname = "b", formula = 0, variance = 0.01)
 
 dc <- genData(20, defc, id = "pcp")
-dd <- genCluster(dc, "pcp", numIndsVar = 200, "id")
+dd <- genCluster(dc, "pcp", numIndsVar = 1000, "id")
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addColumns(defa, dd)
+dd.01 <- addColumns(defa, dd)
 
-fit <- survfit(Surv(time, event) ~ pcp, data = dd)
-
-j2 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.005")
-
-j2$plot <- j2$plot + 
+fit <- survfit(Surv(time, event) ~ pcp, data = dd.01)
+j.01 <- ggsurv(fit, main = "Cluster variance = 0.01", 
+          surv.col = twentycolors, cens.col = twentycolors) +
   theme(legend.position = "none",
-        plot.title = element_text(size = 11, face = "bold"))
+    plot.title = element_text(size = 11, face = "bold"),
+    panel.grid = element_blank()
+  ) +
+  ylim(0, 1)
 
-ggarrange(j1$plot, j2$plot, ncol = 2, nrow = 1)
+ggarrange(j.10, j.01, ncol = 2, nrow = 1)
 ```
 
 #### Variation of the probability of an event across clusters
 
-```{r histprob, warning=FALSE, fig.width=4, fig.height=3}
-defc <- defData(varname = "b", formula = 0, variance = 0.1)
+The plot of the survival curves is only one way to consider the impact on variation. Another option is to look at the binary event outcome under the assumption of no censoring. I like to evaluate the variation in the probability of an event across the clusters, particularly by looking at the range of probabilities, or considering the coefficient of variation, which is $\sigma / \mu$.
 
-defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt")
-defa <- defDataAdd(defa, varname = "censor", 
-  formula = "365 - start_day ", dist = "nonrandom")
+To show how this is done, I am generating a data set with a very large number of clusters (2000) and a large cluster size (500), and then calculating the probability of an event for each cluster:
 
-defs <- defSurv(varname = "tte", formula = "r[1] + b", shape = r[2])
+```{r, warning=FALSE}
+defc <- defData(varname = "b", formula = 0, variance = 0.100)
 
-dc <- genData(1000, defc, id = "pcp")
+dc <- genData(2000, defc, id = "pcp")
 dd <- genCluster(dc, "pcp", numIndsVar = 500, "id")
-dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
-
-dd[, event := 1 * (tte <= 365)]
+dd <- addColumns(defa, dd)
 
 ds <- dd[, .(p = mean(event)), keyby = pcp]
+ds
+```
 
+Here is a plot of the observed proportions within each cluster:
+
+```{r histprob, warning=FALSE, fig.width=4, fig.height=3, echo=FALSE}
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
   scale_x_continuous(limits = c(0, 1)) +
-  scale_y_continuous(limits = c(0, 200)) +
+  scale_y_continuous(limits = c(0, 400)) +
   ggtitle("Cluster variance = 0.100") +
   xlab("observed proportion of events") +
   theme(panel.grid = element_blank(),
         plot.title = element_text(size = 11, face = "bold")) 
 ```
 
+Here are the mean probability, the standard deviation of probabilities, the coefficient of variation for the probabilities, and the 95\% interval of the probabilities when the random effect variance in the survival generation process is 0.10:
 
-```{r varprob, echo=FALSE, warning=FALSE, message=FALSE, fig.width=6, fig.height=4}
+```{r, fig.width=4, fig.height=3}
+ds[, .(mu = mean(p), s = sd(p), cv = sd(p)/mean(p))]
+ds[, .(quantile(p, probs = c(0.025, .975)))]
+```
+
+To compare across a range variance assumptions, I've generated ten data sets and plotted the results below. If you hover over the points, you will get the CV estimate. This could be helpful in helping collaborators decide what levels of variance is appropriate to focus on in the final power estimation and sample size determination.
+
+<center>
+
+```{r varprob, echo=FALSE, warning=FALSE, message=FALSE, fig.width=5, fig.height=4}
+
+library(plotly)
+
 s_generate <- function(nsite, ninds, s2) {
   
   defc <- defData(varname = "b", formula = 0, variance = s2)
 
-  dc <- genData(nsite, defc, id = "site")
-  dd <- genCluster(dc, "site", numIndsVar = ninds, "id")
-  dd <- addColumns(defa, dd)
+  dc <- genData(nsite, defc, id = "pcp")
+  dd <- genCluster(dc, "pcp", numIndsVar = ninds, "id")
   dd <- genSurv(dd, defs, digits = 0)
+  dd <- addColumns(defa, dd)
 
-  dd[, event := 1 * (tte <= 365)]
-
-  dd[, .(p = mean(event)), keyby = site]
+  dd[, .(p = mean(event)), keyby = pcp]
 }
 
 replicate <- function(s2) {
-  ds <- s_generate(1000, 500, s2)
+  ds <- s_generate(2000, 500, s2)
   data.table(s2 = s2, min_p = quantile(ds$p, prob = 0.025), 
              med_p = quantile(ds$p, prob = 0.5),
-             max_p = quantile(ds$p, prob = 0.975))
+             max_p = quantile(ds$p, prob = 0.975),
+             cv = ds[, sd(p)/mean(p)])
 }
 
-res <- parallel::mclapply(seq(0.005, 0.1, by = .005), function(a) replicate(a))
+res <- parallel::mclapply(seq(0.01, 0.1, by = .01), function(a) replicate(a))
 dp <- rbindlist(res)
 
-ggplot(data = dp, aes(x = s2, y = med_p)) +
-  geom_point(size = .8) +
+p <- ggplot(data = dp, aes(x = s2, y = med_p, 
+    text = paste(
+      "Variance: ", s2,
+      "\n95% interval: ", round(min_p,2) , "-", round(max_p,2), 
+      "\nCV: ", round(cv, 3)
+    ))) +
+  geom_point(size = 1.5, color = "#eb822e") +
   geom_errorbar(aes(ymin = min_p, ymax = max_p), width = .0, color = "grey65") +
   theme(panel.grid = element_blank()) +
   scale_x_continuous(
@@ -209,46 +251,61 @@ ggplot(data = dp, aes(x = s2, y = med_p)) +
     name = "probability of event",
     limits = c(0.25, 0.75)
   )
+
+ggplotly(p, tooltip = "text") %>% config(displayModeBar = FALSE)
 ```
+
+</center>
 
 ### Evaluating the effect size
 
+Next, we generate data that includes treatment assignment (but excludes cluster variability and censoring before one year). The treatment effect is expressed as a log hazard ratio, which in this case 0.4 (equal to a hazard ratio of just about 1.5). The data generation starts with treatment assignment, adds the time-to-event survival data, and then adds the one-year censoring data, as before:
+
 ```{r}
 defa <- defData(varname = "rx", formula = "1;1", dist = "trtAssign")
-defa <- defData(defa, varname = "start_day", formula = "1;182", dist = "uniformInt")
-defa <- defDataAdd(defa, varname = "censor", 
-  formula = "365 - start_day ", dist = "nonrandom")
 
 defs <- defSurv(varname = "tte", formula = "r[1] + 0.4 * rx", shape = r[2])
 
-dd <- genData(600, defa)
+defe <- defDataAdd(varname = "time", formula = "min(365, tte)", dist = "nonrandom")
+defe <- defDataAdd(defe, "event", "1*(tte <= 365)", dist = "nonrandom")
+
+dd <- genData(1000, defa)
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("tte", "censor"), 
-  timeName = "time", censorName = "censor", keepEvents = TRUE)
+dd <- addColumns(defe, dd)
+
+dd
 ```
 
+The plot of the survival curves by treatment arms provides a nice visualization of the treatment effect:
 
-```{r effect, fig.height=3.5, fig.width=5.5}
+```{r effect, fig.height=3.5, fig.width=5.5, echo = FALSE}
+dd[, rx := factor(rx, labels = c("control", "rx"))]
 fit <- survfit(Surv(time, event) ~ rx, data = dd)
 
-ggsurvplot(
-  fit, 
-  data = dd, 
-  legend.title = "", 
-  legend = c(.25, 0.25),
-  palette = "jco"
-)
+ggsurv(fit, surv.col = twentycolors[c(11, 18)],  cens.col = twentycolors[c(11, 18)], 
+       size.est = 1) + 
+  theme(legend.title = element_blank(), 
+        legend.position = c(.125, 0.25),
+        panel.grid = element_blank()
+  ) +
+  ylim(0, 1)
 ```
 
+Again, since we have no censoring, we can estimate the probability of an event within 365 days for each arm:
 
 ```{r}
-dd[, event := 1 * (tte <= 365)]
 dd[, .(p = mean(event)), keyby = rx]
 ```
 
-This is an odds ratio of 1.80, risk ratio of 1.26, and risk difference of 14 percentage points.
+So, an effect size of 0.4 on the log hazard scale, translates to an odds ratio of about 1.64, a risk ratio of 1.24, and risk difference of 12 percentage points. In the absence of any data on the potential effect size, all of this information, in conjunction with the variance assumptions, can help inform a (highly uncertain) sample size/power estimation.
 
 ### Complete data generation and model estimation
+
+With all these pieces in place, we are ready to put it all together and add censoring to mix to finalize the full data generating process. And then it makes sense to fit a mixed-effects Cox proportional hazards model to see if we can recover the parameters that we have used to generate the data.
+
+We start in *defc* by defining the cluster-level random effect variation and treatment assignment design (in this case 1 to 1, treatment to control).  We add a censoring process in *defa*. This assumes that we will be enrolling patients for six months (or 182 days), who will be spread out across the time period. The study will last exactly one year. Every patient will be followed for at least six months, and some will be followed for a full year (i.e., those who join the study on the first day).
+
+Finally, *defs* defines the data generation process for the survival outcome, which we've seen above, though now we have both a treatment effect and a random effect, in addition to the baseline parameters in the vector *r*.
 
 ```{r}
 defc <- defData(varname = "b", formula = 0, variance = 0.05)
@@ -261,27 +318,31 @@ defa <- defDataAdd(defa, varname = "censor",
 defs <- defSurv(varname = "tte", formula = "r[1] + 0.4 * rx + b", shape = r[2])
 ```
 
-```{r, eval=FALSE}
-dc <- genData(1000, defc, id = "site")
-dd <- genCluster(dc, "site", numIndsVar = 500, "id")
+The data generation is the same as we've seen above. The only addition is adding the censoring process to the data generation, which is done with the function `addCompRisk`:
+
+```{r, eval=TRUE}
+dc <- genData(500, defc, id = "pcp")
+dd <- genCluster(dc, "pcp", numIndsVar = 200, "id")
 dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
 dd <- addCompRisk(dd, events = c("tte", "censor"), 
   timeName = "time", censorName = "censor", keepEvents = TRUE)
 
-fit_coxme <-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
+dd
+```
 
+Since we have generated a rather large data set, we should be able to recover the parameters pretty closely if we are using the correct model. We are going to fit a mixed effects survival model (also known as a frailty model) to see how well we did.
+
+```{r eval = TRUE}
+fit_coxme <- coxme(Surv(time, event) ~ rx + (1 | pcp), data = dd)
 summary(fit_coxme)
 ```
 
-```{r, echo=FALSE}
-load("data/coxfit.rda")
-fit_coxme
-```
+Pretty good! The estimated HR of 0.39 (95% CI: 0.35 - 0.43) is on target (we used 0.40 in the data generation process), and the estimated variance for the PCP random effect was 0.05, also on the mark. I'd say we are ready to proceed to the final step.
 
 ### Power estimation
 
-Check out the <a href="#addendum">addendum</a> for code details.
+To conduct the power estimation, I've essentially wrapped the data generation and model estimation code in a collection of functions that can be called repeatedly to estimate the proportion of times we get a statistically significant result for a particular set of assumptions (this is, in fact, the estimate of power). I've provided the code below in the <a href="#addendum">addendum</a> in case you haven't grown weary of all this detail. I described a general [framework](https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/){target="_blank"} for using simulation to estimate sample size/power in a post a while back, and I am largely following that process here.
 
 ```{r, echo = FALSE}
 extract_coxme_table <- function (mod) {
@@ -318,8 +379,8 @@ s_generate <- function(argsvec, list_of_defs) {
   list2env(list_of_defs, envir = environment())
   list2env(as.list(argsvec), envir = environment())
   
-  dc <- genData(nsites, defc, id = "site")
-  dd <- genCluster(dc, "site", ninds, "id")
+  dc <- genData(npcps, defc, id = "pcp")
+  dd <- genCluster(dc, "pcp", npats, "id")
   dd <- addColumns(defa, dd)
   dd <- genSurv(dd, defs, digits = 0)
   dx <- addCompRisk(dd, events = c("tte", "censor"), 
@@ -334,16 +395,16 @@ s_replicate <- function(argsvec, list_of_defs) {
   
   dx <- s_generate(argsvec, list_of_defs)
   
-  coxfitm <-coxme(Surv(time, event) ~ rx + (1 | site), data = dx)
+  coxfitm <-coxme(Surv(time, event) ~ rx + (1 | pcp), data = dx)
   
   list2env(as.list(argsvec), envir = environment())
   
   return(data.table(
-    nsites = nsites,
-    ninds = ninds,
+    npcps = npcps,
+    npats = npats,
     s2 = s2,
     est_s = fixef(coxfitm), 
-    re.var_s = VarCorr(coxfitm)$site,
+    re.var_s = VarCorr(coxfitm)$pcp,
     p_s = extract_coxme_table(coxfitm)$p
   ))
   
@@ -363,41 +424,63 @@ s_scenarios <- function(argsvec, nreps) {
 }
 ```
 
+I've written a little function `scenario_list` (which I'm now thinking I should add to `simstudy`) to create a list of parameter combinations that will define the power estimation. In this case, the parameters I am interested in are the number of PCPs that should be randomized and the variance assumption. The number of patients per PCP (cluster size) is also important to vary, but for illustration purposes here I am keeping it constant.
+
+Here is the simplified scenario list with four possible combinations:
+
 ```{r}
 scenario_list <- function(...) {
   argmat <- expand.grid(...)
   return(asplit(argmat, MARGIN = 1))
 }
 
-nsites <- c(20, 30)
-ninds <- c(15)
+npcps <- c(20, 30)
+npats <- c(15)
 s2 <- c(0.03, 0.04)
 
-scenarios <- scenario_list(nsites = nsites, ninds = ninds, s2 = s2)
+scenarios <- scenario_list(npcps = npcps, npats = npats, s2 = s2)
+
+scenarios
+```
+
+And I can use the `mclapply` function in the `parallel` package to generate three iterations for each scenario:
+
+```{r}
 model.ests <- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 
 model.ests
 ```
 
+In the actual power calculations, which are reported below, I used 60 scenarios defined by these data generation parameters:
+
+```{r, eval=FALSE}
+npcps <- c(18, 24, 30, 36)
+npats <- c(15, 18, 21)
+s2 <- c(0.01, 0.02, 0.03, 0.04, 0.05)
+```
+
+For each of these scenarios, I generated 5000 data sets and estimated models for each of them (i.e., a total of 300,000 data sets and model fits). For each of the 60 scenarios, I estimated the proportion of the 5000 model fits that yielded a p-value < 0.05 for the estimated log hazard ratio. I did have the benefit of using a high performance computer, because running this on my laptop would have taken well over 10 hours (only about 10 minutes on the HPC).
+
+In the end, we are left with a plot of "power curves" that show estimated power for each of the scnerios. If we assume that we can expect at least 18 patients per PCP and that the between PCP variance will be around 0,03 or 0.04, we could feel comfortable with 30 PCPs (15 in each arm), though it might more prudent to go with 36, just to be safe:
+
 ```{r power, echo = FALSE, fig.height = 2.75, fig.width = 8}
 load("data/ss.rda")
 
-resum[, `number of sites` := nsites]
+resum[, `number of pcps` := nsites]
 
 ggplot(data = resum, mapping = aes(x = s2, y = p_m)) +
   geom_hline(yintercept = 0.8, color = "white", linewidth = 1.2) +
   geom_line(aes(color = factor(ninds), group = ninds), linewidth = 0.9) +
-  facet_grid(. ~ `number of sites`, labeller = label_both) +
+  facet_grid(. ~ `number of pcps`, labeller = label_both) +
   theme(
     panel.grid = element_blank(),
     axis.text = element_text(size = 8),
     panel.spacing = unit(0.65, "lines")
   ) +
-  scale_color_brewer(
+  scale_color_manual(
     name = "size", 
-    guide = guide_legend(reverse = TRUE), 
-    type = "div", 
-    palette = "Dark2"
+    guide = guide_legend(reverse = TRUE),
+    values = twentycolors[c(4, 6, 11)]
   ) +
   ylab("estimated power") +
   xlab("\nvariance of random effect")
@@ -409,6 +492,8 @@ ggplot(data = resum, mapping = aes(x = s2, y = p_m)) +
 \ 
 
 ## Addendum
+
+Here is the code I used to generate the data for the power curve plot. It is based on the [framework](https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/){target="_blank"} I mentioned earlier. There is one extra function here, `extract_coxme_table`, which I pulled from [stackoverflow](https://stackoverflow.com/questions/43720260/how-to-extract-p-values-from-lmekin-objects-in-coxme-package){target="_blank"}, because there is no obvious way to extract data from the `coxme` model fit.
 
 ```{r, eval = FALSE}
 extract_coxme_table <- function (mod) {
@@ -445,8 +530,8 @@ s_generate <- function(argsvec, list_of_defs) {
   list2env(list_of_defs, envir = environment())
   list2env(as.list(argsvec), envir = environment())
   
-  dc <- genData(nsites, defc, id = "site")
-  dd <- genCluster(dc, "site", ninds, "id")
+  dc <- genData(npcps, defc, id = "pcp")
+  dd <- genCluster(dc, "pcp", npats, "id")
   dd <- addColumns(defa, dd)
   dd <- genSurv(dd, defs, digits = 0)
   dx <- addCompRisk(dd, events = c("tte", "censor"), 
@@ -461,16 +546,16 @@ s_replicate <- function(argsvec, list_of_defs) {
   
   dx <- s_generate(argsvec, list_of_defs)
   
-  coxfitm <-coxme(Surv(time, event) ~ rx + (1 | site), data = dx)
+  coxfitm <-coxme(Surv(time, event) ~ rx + (1 | pcp), data = dx)
   
   list2env(as.list(argsvec), envir = environment())
   
   return(data.table(
-    nsites = nsites,
-    ninds = ninds,
+    npcps = npcps,
+    npats = npats,
     s2 = s2,
     est_s = fixef(coxfitm), 
-    re.var_s = VarCorr(coxfitm)$site,
+    re.var_s = VarCorr(coxfitm)$pcp,
     p_s = extract_coxme_table(coxfitm)$p
   ))
   
