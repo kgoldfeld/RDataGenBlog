@@ -18,16 +18,27 @@ draft: TRUE
 options(digits = 2)
 ```
 
+A colleague reached out for some help designing a cluster randomized trial to evaluate a clinical decision support tool for primary care physicians (PCPs), which aims to improve care for high-risk patients. The outcome will be a time-to-event measure, collected at the patient level. The unit of randomization will be the PCP, and one of the key design issues is settling on the number to randomize. > At this stage in my career, I was pretty shocked to realize that I'd never been involved with a study that would require a clustered survival analysis. So, this particular sample size calculation is new for me, and that means that I've had some new simulations to conduct. (There are some analytic solutions to this problem, but there doesn't seem to a consensus about the best approach to use.) I'm getting it all down here, because that's what I do.
+
+### Overview
+
+In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions.
+
+### Defining shape of survival curve
+
+Defining the shape of the survival curve is made relatively easy using the function `survGetParams` in the `simstudy` package. All we need to do is specify a number of  coordinates along the curve and the function will return the parameters for the mean and shape of a Weibull function that best fit the points. In this case, the study's investigators provided me with a couple of points, indicating that approximately 10\% of the sample would have an event by day 30, and half would have an event at day 365. Since the study is following patients at most for 365 days, we will consider anything beyond that to be censored (more on censoring later). To get things started, here are the libraries needed for all the code that follows:
+
 ```{r, message=FALSE}
 library(simstudy)
 library(data.table)
 library(survival)
 library(survminer)
+library(GGally)
 library(coxme)
 library(parallel)
 ```
 
-### Defining shape of survival curve
+Now, we get the parameters that define the survival curve:
 
 ```{r}
 points <- list(c(30, 0.90), c(365, .50))
@@ -35,41 +46,77 @@ r <- survGetParams(points)
 r
 ```
 
-```{r survparam, fig.height=3.5, fig.width = 5.5}
-survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
-```
-
-### Evaluating cluster variation 
-
-#### Visualizing cluster variation
+With the paramters in hand, we are ready for the first simulation. The time-to-event variable *tte* is defined using the parameters generating by `survGetParams`. The observed time is the minimum of one year and the time-to-event.
 
 ```{r}
-defc <- defData(varname = "b", formula = 0, variance = 0.1)
+defs <- defSurv(varname = "tte", formula = r[1], shape = r[2])
 
-defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt")
-defa <- defDataAdd(defa, varname = "censor", 
-  formula = "365 - start_day ", dist = "nonrandom")
-
-defs <- defSurv(varname = "ttc", formula = "r[1] + b", shape = r[2])
+defa <- defDataAdd(varname = "time", formula = "min(365, tte)", dist = "nonrandom")
+defa <- defDataAdd(defa, "event", "1*(tte <= 365)", dist = "nonrandom")
 ```
+
+Generating the data is quite simple in this case:
 
 ```{r}
 set.seed(589823)
 
-dc <- genData(20, defc, id = "site")
-dd <- genCluster(dc, "site", numIndsVar = 200, "id")
-dd <- addColumns(defa, dd)
+dd <- genData(1000)
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("ttc", "censor"), 
-  timeName = "time", censorName = "censor", keepEvents = TRUE)
+dd <- addColumns(defa, dd)
+
+dd
+```
+
+The plots below show the source function determined by the parameters on the left and the actual data generated on the right. The generated data matches the data generation process:
+
+```{r survplots, fig.height=3.5, fig.width = 10}
+splot <- survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
+
+fit <- survfit(Surv(time, event) ~ 1, data = dd)
+
+j <- ggsurv(fit, CI = FALSE, surv.col = "red", size.est = 0.8) + 
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size = 7.5),
+        axis.title = element_text(size = 8, face = "bold"),
+        plot.title = element_blank()) +
+  ylim(0, 1) +
+  xlab("time") + ylab("probability of survival")
+
+ggarrange(splot, j, ncol = 2, nrow = 1)
+```
+
+### Evaluating cluster variation
+
+Cluster variation in the context of survival curves implies that there is a cluster-specific survival curve. This variation is induced with a random effect in in the data generation process. In this case, I am assuming a normally distributed random effect with mean 0 and some variance (other distributions can be used). The variance assumption is a key one (which will ultimately impact the estimates of power), and I explore that a bit more in the second part of this section.
+
+#### Visualizing cluster variation
+
+The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. *tte* is now a function of the distribution parameters as well as the cluster random effect *b*. We are still using a single arm and assuming that everyone is followed for one year.
+
+```{r}
+defc <- defData(varname = "b", formula = 0, variance = 0.1)
+
+defs <- defSurv(varname = "tte", formula = "r[1] + b", shape = r[2])
+
+defa <- defDataAdd(varname = "time", formula = "min(365, tte)", dist = "nonrandom")
+defa <- defDataAdd(defa, "event", "1*(tte <= 365)", dist = "nonrandom")
+```
+
+```{r}
+dc <- genData(20, defc, id = "pcp")
+dd <- genCluster(dc, "pcp", numIndsVar = 200, "id")
+dd <- genSurv(dd, defs, digits = 0)
+dd <- addColumns(defa, dd)
+dd
 ```
 
 ```{r, fig.height=3.5, fig.width = 5.5}
-fit <- survfit(Surv(time, event) ~ site, data = dd)
+fit <- survfit(Surv(time, event) ~ pcp, data = dd)
 
 j1 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.100")
-j1$plot <- j1$plot + theme(legend.position = "none",
-                           plot.title = element_text(size = 11, face = "bold"))
+j1$plot <- j1$plot +
+  theme(legend.position = "none",
+        plot.title = element_text(size = 11, face = "bold"))
 ```
 
 
@@ -78,19 +125,18 @@ library(ggpubr)
 
 defc <- defData(varname = "b", formula = 0, variance = 0.005)
 
-dc <- genData(20, defc, id = "site")
-dd <- genCluster(dc, "site", numIndsVar = 200, "id")
-dd <- addColumns(defa, dd)
+dc <- genData(20, defc, id = "pcp")
+dd <- genCluster(dc, "pcp", numIndsVar = 200, "id")
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("ttc", "censor"), 
-  timeName = "time", censorName = "censor", keepEvents = TRUE)
+dd <- addColumns(defa, dd)
 
-fit <- survfit(Surv(time, event) ~ site, data = dd)
+fit <- survfit(Surv(time, event) ~ pcp, data = dd)
 
 j2 <- ggsurvplot(fit, data = dd, title = "Cluster variance = 0.005")
 
-j2$plot <- j2$plot + theme(legend.position = "none",
-                           plot.title = element_text(size = 11, face = "bold"))
+j2$plot <- j2$plot + 
+  theme(legend.position = "none",
+        plot.title = element_text(size = 11, face = "bold"))
 
 ggarrange(j1$plot, j2$plot, ncol = 2, nrow = 1)
 ```
@@ -104,16 +150,16 @@ defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt"
 defa <- defDataAdd(defa, varname = "censor", 
   formula = "365 - start_day ", dist = "nonrandom")
 
-defs <- defSurv(varname = "ttc", formula = "r[1] + b", shape = r[2])
+defs <- defSurv(varname = "tte", formula = "r[1] + b", shape = r[2])
 
-dc <- genData(1000, defc, id = "site")
-dd <- genCluster(dc, "site", numIndsVar = 500, "id")
+dc <- genData(1000, defc, id = "pcp")
+dd <- genCluster(dc, "pcp", numIndsVar = 500, "id")
 dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
 
-dd[, event := 1 * (ttc <= 365)]
+dd[, event := 1 * (tte <= 365)]
 
-ds <- dd[, .(p = mean(event)), keyby = site]
+ds <- dd[, .(p = mean(event)), keyby = pcp]
 
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
@@ -136,7 +182,7 @@ s_generate <- function(nsite, ninds, s2) {
   dd <- addColumns(defa, dd)
   dd <- genSurv(dd, defs, digits = 0)
 
-  dd[, event := 1 * (ttc <= 365)]
+  dd[, event := 1 * (tte <= 365)]
 
   dd[, .(p = mean(event)), keyby = site]
 }
@@ -173,11 +219,11 @@ defa <- defData(defa, varname = "start_day", formula = "1;182", dist = "uniformI
 defa <- defDataAdd(defa, varname = "censor", 
   formula = "365 - start_day ", dist = "nonrandom")
 
-defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx", shape = r[2])
+defs <- defSurv(varname = "tte", formula = "r[1] + 0.4 * rx", shape = r[2])
 
 dd <- genData(600, defa)
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("ttc", "censor"), 
+dd <- addCompRisk(dd, events = c("tte", "censor"), 
   timeName = "time", censorName = "censor", keepEvents = TRUE)
 ```
 
@@ -196,7 +242,7 @@ ggsurvplot(
 
 
 ```{r}
-dd[, event := 1 * (ttc <= 365)]
+dd[, event := 1 * (tte <= 365)]
 dd[, .(p = mean(event)), keyby = rx]
 ```
 
@@ -212,7 +258,7 @@ defa <- defDataAdd(varname = "start_day", formula = "1;182", dist = "uniformInt"
 defa <- defDataAdd(defa, varname = "censor", 
   formula = "365 - start_day ", dist = "nonrandom")
 
-defs <- defSurv(varname = "ttc", formula = "r[1] + 0.4 * rx + b", shape = r[2])
+defs <- defSurv(varname = "tte", formula = "r[1] + 0.4 * rx + b", shape = r[2])
 ```
 
 ```{r, eval=FALSE}
@@ -220,7 +266,7 @@ dc <- genData(1000, defc, id = "site")
 dd <- genCluster(dc, "site", numIndsVar = 500, "id")
 dd <- addColumns(defa, dd)
 dd <- genSurv(dd, defs, digits = 0)
-dd <- addCompRisk(dd, events = c("ttc", "censor"), 
+dd <- addCompRisk(dd, events = c("tte", "censor"), 
   timeName = "time", censorName = "censor", keepEvents = TRUE)
 
 fit_coxme <-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
@@ -258,10 +304,10 @@ s_def <- function() {
   defa <- defDataAdd(defa, varname = "censor", 
                      formula = "365 - start_day ", dist = "nonrandom")
   
-  defs <- defSurv(varname = "ttc", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
+  defs <- defSurv(varname = "tte", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
   
   defa2 <- defDataAdd(varname = "event6", 
-                      formula = "1*(ttc <= 182)", dist = "nonrandom")
+                      formula = "1*(tte <= 182)", dist = "nonrandom")
   
   return(list(defc = defc, defa = defa, defs = defs, defa2 = defa2))
   
@@ -276,7 +322,7 @@ s_generate <- function(argsvec, list_of_defs) {
   dd <- genCluster(dc, "site", ninds, "id")
   dd <- addColumns(defa, dd)
   dd <- genSurv(dd, defs, digits = 0)
-  dx <- addCompRisk(dd, events = c("ttc", "censor"), 
+  dx <- addCompRisk(dd, events = c("tte", "censor"), 
                     timeName = "time", censorName = "censor", keepEvents = TRUE)
   dx <- addColumns(defa2, dx)
   
@@ -385,10 +431,10 @@ s_def <- function() {
   defa <- defDataAdd(defa, varname = "censor", 
                      formula = "365 - start_day ", dist = "nonrandom")
   
-  defs <- defSurv(varname = "ttc", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
+  defs <- defSurv(varname = "tte", formula = "-4.815 + 0.4 * rx + b", shape = 1.326)
   
   defa2 <- defDataAdd(varname = "event6", 
-                      formula = "1*(ttc <= 182)", dist = "nonrandom")
+                      formula = "1*(tte <= 182)", dist = "nonrandom")
   
   return(list(defc = defc, defa = defa, defs = defs, defa2 = defa2))
   
@@ -403,7 +449,7 @@ s_generate <- function(argsvec, list_of_defs) {
   dd <- genCluster(dc, "site", ninds, "id")
   dd <- addColumns(defa, dd)
   dd <- genSurv(dd, defs, digits = 0)
-  dx <- addCompRisk(dd, events = c("ttc", "censor"), 
+  dx <- addCompRisk(dd, events = c("tte", "censor"), 
                     timeName = "time", censorName = "censor", keepEvents = TRUE)
   dx <- addColumns(defa2, dx)
   

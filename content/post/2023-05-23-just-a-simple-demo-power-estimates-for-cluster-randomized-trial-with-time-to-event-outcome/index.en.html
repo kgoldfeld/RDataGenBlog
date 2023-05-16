@@ -16,45 +16,102 @@ draft: TRUE
 
 
 
+<p>A colleague reached out for some help designing a cluster randomized trial to evaluate a clinical decision support tool for primary care physicians (PCPs), which aims to improve care for high-risk patients. The outcome will be a time-to-event measure, collected at the patient level. The unit of randomization will be the PCP, and one of the key design issues is settling on the number to randomize. &gt; At this stage in my career, I was pretty shocked to realize that I’d never been involved with a study that would require a clustered survival analysis. So, this particular sample size calculation is new for me, and that means that I’ve had some new simulations to conduct. (There are some analytic solutions to this problem, but there doesn’t seem to a consensus about the best approach to use.) I’m getting it all down here, because that’s what I do.</p>
+<div id="overview" class="section level3">
+<h3>Overview</h3>
+<p>In tackling this problem, there were four key elements that I needed to work out before actually conducting the power simulations: (1) determine the hypothetical survival curve in the context of a single (control) arm and simulate data to confirm the parameters are correct, (2) generate cluster-level variation and assess the implications of variance of assumptions (still in a single-arm context), (3) generate two intervention arms (without any clustering) and assess effect size assumptions, and (4) generate a full data set that includes clustering and intervention arms to ensure that model fitting is appropriate. Once this was all done, I was confident that I could move on to generating estimates of power under a range of sample size and variability assumptions.</p>
+</div>
+<div id="defining-shape-of-survival-curve" class="section level3">
+<h3>Defining shape of survival curve</h3>
+<p>Defining the shape of the survival curve is made relatively easy using the function <code>survGetParams</code> in the <code>simstudy</code> package. All we need to do is specify a number of coordinates along the curve and the function will return the parameters for the mean and shape of a Weibull function that best fit the points. In this case, the study’s investigators provided me with a couple of points, indicating that approximately 10% of the sample would have an event by day 30, and half would have an event at day 365. Since the study is following patients at most for 365 days, we will consider anything beyond that to be censored (more on censoring later). To get things started, here are the libraries needed for all the code that follows:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(survival)
 library(survminer)
+library(GGally)
 library(coxme)
 library(parallel)</code></pre>
-<div id="defining-shape-of-survival-curve" class="section level3">
-<h3>Defining shape of survival curve</h3>
+<p>Now, we get the parameters that define the survival curve:</p>
 <pre class="r"><code>points &lt;- list(c(30, 0.90), c(365, .50))
 r &lt;- survGetParams(points)
 r</code></pre>
 <pre><code>## [1] -4.8  1.3</code></pre>
-<pre class="r"><code>survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/survparam-1.png" width="528" /></p>
+<p>With the paramters in hand, we are ready for the first simulation. The time-to-event variable <em>tte</em> is defined using the parameters generating by <code>survGetParams</code>. The observed time is the minimum of one year and the time-to-event.</p>
+<pre class="r"><code>defs &lt;- defSurv(varname = &quot;tte&quot;, formula = r[1], shape = r[2])
+
+defa &lt;- defDataAdd(varname = &quot;time&quot;, formula = &quot;min(365, tte)&quot;, dist = &quot;nonrandom&quot;)
+defa &lt;- defDataAdd(defa, &quot;event&quot;, &quot;1*(tte &lt;= 365)&quot;, dist = &quot;nonrandom&quot;)</code></pre>
+<p>Generating the data is quite simple in this case:</p>
+<pre class="r"><code>set.seed(589823)
+
+dd &lt;- genData(1000)
+dd &lt;- genSurv(dd, defs, digits = 0)
+dd &lt;- addColumns(defa, dd)
+
+dd</code></pre>
+<pre><code>##         id  tte time event
+##    1:    1  234  234     1
+##    2:    2 1190  365     0
+##    3:    3  395  365     0
+##    4:    4  178  178     1
+##    5:    5   72   72     1
+##   ---                     
+##  996:  996  818  365     0
+##  997:  997  446  365     0
+##  998:  998  118  118     1
+##  999:  999  232  232     1
+## 1000: 1000 5308  365     0</code></pre>
+<p>The plots below show the source function determined by the parameters on the left and the actual data generated on the right. The generated data matches the data generation process:</p>
+<pre class="r"><code>splot &lt;- survParamPlot(r[1], r[2], points = points, n = 1000, limits = c(0, 365) )
+
+fit &lt;- survfit(Surv(time, event) ~ 1, data = dd)
+
+j &lt;- ggsurv(fit, CI = FALSE, surv.col = &quot;red&quot;, size.est = 0.8) + 
+  theme(panel.grid = element_blank(),
+        axis.text = element_text(size = 7.5),
+        axis.title = element_text(size = 8, face = &quot;bold&quot;),
+        plot.title = element_blank()) +
+  ylim(0, 1) +
+  xlab(&quot;time&quot;) + ylab(&quot;probability of survival&quot;)
+
+ggarrange(splot, j, ncol = 2, nrow = 1)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/survplots-1.png" width="960" /></p>
 </div>
 <div id="evaluating-cluster-variation" class="section level3">
 <h3>Evaluating cluster variation</h3>
+<p>Cluster variation in the context of survival curves implies that there is a cluster-specific survival curve. This variation is induced with a random effect in in the data generation process. In this case, I am assuming a normally distributed random effect with mean 0 and some variance (other distributions can be used). The variance assumption is a key one (which will ultimately impact the estimates of power), and I explore that a bit more in the second part of this section.</p>
 <div id="visualizing-cluster-variation" class="section level4">
 <h4>Visualizing cluster variation</h4>
+<p>The data generation process is a tad more involved than above, though not much more. We need to generate clusters and their random effect first, before adding the individuals. <em>tte</em> is now a function of the distribution parameters as well as the cluster random effect <em>b</em>. We are still using a single arm and assuming that everyone is followed for one year.</p>
 <pre class="r"><code>defc &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = 0.1)
 
-defa &lt;- defDataAdd(varname = &quot;start_day&quot;, formula = &quot;1;182&quot;, dist = &quot;uniformInt&quot;)
-defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
-  formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
+defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
 
-defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])</code></pre>
-<pre class="r"><code>set.seed(589823)
-
-dc &lt;- genData(20, defc, id = &quot;site&quot;)
-dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 200, &quot;id&quot;)
-dd &lt;- addColumns(defa, dd)
+defa &lt;- defDataAdd(varname = &quot;time&quot;, formula = &quot;min(365, tte)&quot;, dist = &quot;nonrandom&quot;)
+defa &lt;- defDataAdd(defa, &quot;event&quot;, &quot;1*(tte &lt;= 365)&quot;, dist = &quot;nonrandom&quot;)</code></pre>
+<pre class="r"><code>dc &lt;- genData(20, defc, id = &quot;pcp&quot;)
+dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 200, &quot;id&quot;)
 dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
-  timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
-<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ site, data = dd)
+dd &lt;- addColumns(defa, dd)
+dd</code></pre>
+<pre><code>##       pcp    b   id  tte time event
+##    1:   1 0.25    1  788  365     0
+##    2:   1 0.25    2   93   93     1
+##    3:   1 0.25    3  723  365     0
+##    4:   1 0.25    4  151  151     1
+##    5:   1 0.25    5 1367  365     0
+##   ---                              
+## 3996:  20 0.22 3996  274  274     1
+## 3997:  20 0.22 3997   43   43     1
+## 3998:  20 0.22 3998    3    3     1
+## 3999:  20 0.22 3999   98   98     1
+## 4000:  20 0.22 4000   69   69     1</code></pre>
+<pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ pcp, data = dd)
 
 j1 &lt;- ggsurvplot(fit, data = dd, title = &quot;Cluster variance = 0.100&quot;)
-j1$plot &lt;- j1$plot + theme(legend.position = &quot;none&quot;,
-                           plot.title = element_text(size = 11, face = &quot;bold&quot;))</code></pre>
+j1$plot &lt;- j1$plot +
+  theme(legend.position = &quot;none&quot;,
+        plot.title = element_text(size = 11, face = &quot;bold&quot;))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/variation-1.png" width="960" /></p>
 </div>
 <div id="variation-of-the-probability-of-an-event-across-clusters" class="section level4">
@@ -65,16 +122,16 @@ defa &lt;- defDataAdd(varname = &quot;start_day&quot;, formula = &quot;1;182&quo
 defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
   formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
-defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
+defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + b&quot;, shape = r[2])
 
-dc &lt;- genData(1000, defc, id = &quot;site&quot;)
-dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 500, &quot;id&quot;)
+dc &lt;- genData(1000, defc, id = &quot;pcp&quot;)
+dd &lt;- genCluster(dc, &quot;pcp&quot;, numIndsVar = 500, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
 
-dd[, event := 1 * (ttc &lt;= 365)]
+dd[, event := 1 * (tte &lt;= 365)]
 
-ds &lt;- dd[, .(p = mean(event)), keyby = site]
+ds &lt;- dd[, .(p = mean(event)), keyby = pcp]
 
 ggplot(data = ds, aes(x = p)) +
   geom_histogram(binwidth = .05) +
@@ -95,11 +152,11 @@ defa &lt;- defData(defa, varname = &quot;start_day&quot;, formula = &quot;1;182&
 defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
   formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
-defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
+defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + 0.4 * rx&quot;, shape = r[2])
 
 dd &lt;- genData(600, defa)
 dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
+dd &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
   timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)</code></pre>
 <pre class="r"><code>fit &lt;- survfit(Surv(time, event) ~ rx, data = dd)
 
@@ -111,11 +168,11 @@ ggsurvplot(
   palette = &quot;jco&quot;
 )</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/effect-1.png" width="528" /></p>
-<pre class="r"><code>dd[, event := 1 * (ttc &lt;= 365)]
+<pre class="r"><code>dd[, event := 1 * (tte &lt;= 365)]
 dd[, .(p = mean(event)), keyby = rx]</code></pre>
 <pre><code>##    rx    p
-## 1:  0 0.53
-## 2:  1 0.67</code></pre>
+## 1:  0 0.50
+## 2:  1 0.65</code></pre>
 <p>This is an odds ratio of 1.80, risk ratio of 1.26, and risk difference of 14 percentage points.</p>
 </div>
 <div id="complete-data-generation-and-model-estimation" class="section level3">
@@ -127,12 +184,12 @@ defa &lt;- defDataAdd(varname = &quot;start_day&quot;, formula = &quot;1;182&quo
 defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
   formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
 
-defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;r[1] + 0.4 * rx + b&quot;, shape = r[2])</code></pre>
+defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;r[1] + 0.4 * rx + b&quot;, shape = r[2])</code></pre>
 <pre class="r"><code>dc &lt;- genData(1000, defc, id = &quot;site&quot;)
 dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 500, &quot;id&quot;)
 dd &lt;- addColumns(defa, dd)
 dd &lt;- genSurv(dd, defs, digits = 0)
-dd &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
+dd &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
   timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)
 
 fit_coxme &lt;-coxme(Surv(time, event) ~ rx + (1 | site), data = dd)
@@ -175,28 +232,28 @@ model.ests &lt;- mclapply(scenarios, function(a) s_scenarios(a, nrep = 3))
 
 model.ests</code></pre>
 <pre><code>## [[1]]
-##    nsites ninds   s2 est_s re.var_s     p_s
-## 1:     20    15 0.03  0.27   0.0878 0.19000
-## 2:     20    15 0.03  0.46   0.0153 0.00740
-## 3:     20    15 0.03  0.66   0.0004 0.00016
+##    nsites ninds   s2 est_s re.var_s   p_s
+## 1:     20    15 0.03  0.34  8.4e-02 0.110
+## 2:     20    15 0.03  0.52  4.0e-04 0.002
+## 3:     20    15 0.03 -0.11  8.3e-05 0.540
 ## 
 ## [[2]]
-##    nsites ninds   s2 est_s re.var_s    p_s
-## 1:     30    15 0.03  0.37    0.063 0.0230
-## 2:     30    15 0.03  0.24    0.108 0.1900
-## 3:     30    15 0.03  0.56    0.081 0.0011
+##    nsites ninds   s2 est_s re.var_s     p_s
+## 1:     30    15 0.03  0.27  6.5e-02 0.10000
+## 2:     30    15 0.03  0.35  8.2e-05 0.00910
+## 3:     30    15 0.03  0.59  6.8e-02 0.00046
 ## 
 ## [[3]]
-##    nsites ninds   s2 est_s re.var_s    p_s
-## 1:     20    15 0.04  0.51  8.3e-05 0.0024
-## 2:     20    15 0.04  0.29  2.4e-02 0.1100
-## 3:     20    15 0.04  0.16  2.0e-02 0.3700
+##    nsites ninds   s2 est_s re.var_s     p_s
+## 1:     20    15 0.04  0.44  1.8e-02 0.01500
+## 2:     20    15 0.04  0.61  8.5e-05 0.00018
+## 3:     20    15 0.04  0.27  5.4e-02 0.15000
 ## 
 ## [[4]]
-##    nsites ninds   s2 est_s re.var_s    p_s
-## 1:     30    15 0.04  0.27   0.0548 0.0810
-## 2:     30    15 0.04  0.35   0.0004 0.0110
-## 3:     30    15 0.04  0.61   0.2304 0.0073</code></pre>
+##    nsites ninds   s2 est_s re.var_s     p_s
+## 1:     30    15 0.04  0.18  8.2e-05 1.8e-01
+## 2:     30    15 0.04  0.75  6.2e-02 8.9e-06
+## 3:     30    15 0.04  0.17  1.9e-02 2.5e-01</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/power-1.png" width="768" /></p>
 <p><a name="addendum"></a></p>
 <p> </p>
@@ -223,10 +280,10 @@ s_def &lt;- function() {
   defa &lt;- defDataAdd(defa, varname = &quot;censor&quot;, 
                      formula = &quot;365 - start_day &quot;, dist = &quot;nonrandom&quot;)
   
-  defs &lt;- defSurv(varname = &quot;ttc&quot;, formula = &quot;-4.815 + 0.4 * rx + b&quot;, shape = 1.326)
+  defs &lt;- defSurv(varname = &quot;tte&quot;, formula = &quot;-4.815 + 0.4 * rx + b&quot;, shape = 1.326)
   
   defa2 &lt;- defDataAdd(varname = &quot;event6&quot;, 
-                      formula = &quot;1*(ttc &lt;= 182)&quot;, dist = &quot;nonrandom&quot;)
+                      formula = &quot;1*(tte &lt;= 182)&quot;, dist = &quot;nonrandom&quot;)
   
   return(list(defc = defc, defa = defa, defs = defs, defa2 = defa2))
   
@@ -241,7 +298,7 @@ s_generate &lt;- function(argsvec, list_of_defs) {
   dd &lt;- genCluster(dc, &quot;site&quot;, ninds, &quot;id&quot;)
   dd &lt;- addColumns(defa, dd)
   dd &lt;- genSurv(dd, defs, digits = 0)
-  dx &lt;- addCompRisk(dd, events = c(&quot;ttc&quot;, &quot;censor&quot;), 
+  dx &lt;- addCompRisk(dd, events = c(&quot;tte&quot;, &quot;censor&quot;), 
                     timeName = &quot;time&quot;, censorName = &quot;censor&quot;, keepEvents = TRUE)
   dx &lt;- addColumns(defa2, dx)
   
