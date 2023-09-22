@@ -1,0 +1,178 @@
+---
+title: Creating a nice looking Table 1 with standardized mean differences
+author: Package Build
+date: '2023-09-26'
+slug: []
+categories: []
+tags:
+  - R
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+I've recently entered a perfect storm created by the completion of three major randomized clinical trials (RCTs), with patient recruitment long finished and data collection all wrapped up. This means *a lot* of data analysis, presentation preparation, and paper writing (and not so much blogging). One common (and not so glamorous) thread cutting across all of this is the need to generate a **Table 1**, the comparison of baseline characteristics that convinces readers that groups used in the analysis are "comparable." My ostensible goal here is to provide some `R` code to automate the generation of this table, but not before highlighting some issues and pointing you to a couple of really interesting papers.
+
+In Table 1, we report summary statistics by intervention arm. The mean and standard deviation (or median and interquartile range) of continuous measures and percentages for categorical measures are provided for a selected set of baseline subject characteristics, such as age, sex, and baseline health status. Typically, these tables will also include a statistic that is intended to provide an objective measure of balance (or lack thereof). The thinking is that if there is an objective measure of imbalance for a particular characteristic across groups, the final analysis should be adjusted, lest there be any residual confounding bias clouding the effect estimate.
+
+There are two key (and related) questions here. First, what should that "objective" measure of imbalance be, and second should we even be checking for imbalance? Traditionally, Table 1 has included a set of p-values resulting from a series of between-group comparisons, one for each measure. This [paper](https://academic.oup.com/jrsssd/article-abstract/34/1/125/7121455){target="_blank"}, written by Douglas Altman in 1985 (back when I was still in college!), points out a slew of issues with using the p-value. I've always been concerned with studies with large sample sizes that have small p-values for small differences (i.e., ones that we should not be worried about), but Altman is most concerned that using p-values in the context of smaller sample sizes can mislead us into ignoring important differences. He states "Unfortunately, ... use of significance tests may be unhelpful It is the strength of the association rather than the significance level (which also depends upon sample size) which is of importance."
+
+A second [paper](https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780131703){target="_blank"}, written ten years later by Stephen Senn, argued even more strongly that it is actually counter-productive to attempt to do a "formal" assessment of balance. Using the p-value, you are implicitly conducting a hypothesis test with the null hypothesis that the study has used randomization to allocate subjects to the groups. But this is indeed what you *have* done, so there is no question there. (Of course, it is possible that someone has cheated.) Senn recommends instead that rather than conducting these test, "the practical statistician will do well to establish beforehand a limited list of covariates deemed useful and fit them regardless. Such a strategy will usually lead to a gain in power, has no adverse effect on unconditional size and controls conditional size with respect to the covariates identified."
+
+Given all of this, why should we do anything beyond reporting the group means and percentages and let the readers decide if the groups are comparable? It is hardly very compelling to say this, but I think most journals will demand some formal comparison (though to be honest, I haven't actually attempted to go without). And, if there needs to be a comparison, I would move away from the p-value given its shortcomings here, and use a standardized mean difference. In the case of a continuous measure, this is the difference in group means divided by the pooled standard deviation (and is defined differently for categorical measures). At least this quantifies the difference on scale that is comparable across measures so that the reader can get a sense where the largest imbalances are.
+
+Which is a long-winded way of getting to the point of the this post: how can we easily generate a nice looking Table 1 with standardized mean differences in `R`?
+
+### Simulating data
+
+First step is to generate some data for an RCT. Here are the `R` packages I will be using:
+
+```{r, warning=FALSE,message=FALSE}
+library(simstudy)
+library(table1)
+library(smd)
+library(flextable)
+library(officer)
+library(smd)
+```
+
+The data set will have four "baseline" measures, two numerical and two categorical. IN addition, the data set will be generated so that two of the variables will have missing observations. Three of the variables, are actually derived from the same categorical variable so that it is possible to compare the SMD for a categorical variable treated numerically as well as with missing data.
+
+```{r}
+def <-  
+  defData(varname = "rx", formula = "1;1", dist = "trtAssign") |>
+  defData(varname = "x", formula = 0, variance = 10) |>
+  defData(varname = "v1", formula = ".5;.3;.2", dist = "categorical")
+
+dm <- 
+  defMiss(varname = "x", formula = .10) |>
+  defMiss(varname = "f2_v1", formula = '.05 + .05*(frx == "Control")')
+
+set.seed(8312)
+
+dd <- genData(1000, def)
+dd <- genFactor(dd, "rx", labels = c("Control", "Treatment"), replace = TRUE)
+dd <- genFactor(dd, "v1", prefix = "f1_")
+dd <- genFactor(dd, "v1", prefix = "f2_", labels = c("red", "blue", "green"))
+
+missMat <- genMiss(dd, dm, idvars = "id")
+dobs <- genObs(dd, missMat, idvars = "id")
+
+dobs
+```
+
+### Calculating the SMD
+
+The standardized mean difference is calculated using the `smd` package, which uses the methods described in this [paper](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=6cf4bd36ca4c90006a5d6563f646a391c255581b){target="_blank"} by Yang and Dalton. The standardized mean difference for a numeric measure is 
+
+$$
+d = \frac{ \left( \bar{x}_1 - \bar{x}_2 \right) } {\text{se}_p } \\
+$$
+
+where $\bar{x}_1$ and $\bar{x}_2$ are the means for each group. $\text{se}_p$ is the pooled standard deviation:
+
+$$
+\text{se}_p = \sqrt{\frac{s^2_1 + s^2_2}{2}}
+$$
+
+$s^2_1$ and $s^2_2$ are the group-specific variances. Here is the SMD for the continuous measure *x*:
+
+```{r}
+with(dobs, smd(x = x, g = frx, na.rm = TRUE))
+```
+
+For categorical measures, the SMD is the multivariate Mahalanobis distance between the group-specific proportion vectors: $\{p_{11}, \dots,p_{1k}\}$ and $\{p_{21}, \dots,p_{2k}\}$. Here is the SMD for the categorical measure *f1_v1*:
+
+```{r}
+with(dobs, smd(x = f1_v1, g = frx, na.rm = TRUE))
+```
+
+### Creating Table 1
+
+We are creating Table 1 with `R` package `table1`. (See [here](https://benjaminrich.github.io/table1/vignettes/table1-examples.html){target="_blank"} for a nice vignette.) The package does not explicitly calculate the SMD, but allows us to customize the table creation with a user-defined function, which is shown below. An alternative package,`tableone`, *does* have an SMD option built in; the disadvantage with this `tableone`, however, is that missing data reporting does not seem to be built in, nor does the package integrate seamlessly with the `flextable` package, as it is with `table1`.
+
+Here is the relatively simple code used to generate the table:
+
+```{r}
+mysmd <- function(x, ...) {
+  
+  # Construct vectors of data y, and groups (strata) g
+  
+  y <- unlist(x)
+  g <- factor(rep(1:length(x), times=sapply(x, length)))
+  
+  abs(round(smd::smd(y, g, na.rm = TRUE)[2], 3))
+  
+}
+
+tab_1 <- table1(
+  ~ x + v1 + f1_v1 + f2_v1 | frx, 
+  data = dobs, overall = FALSE, 
+  render.continuous=c(.="Mean (SD)"),
+  extra.col = list(`SMD`= mysmd)
+)
+```
+
+And here is the table that comes directly from `table1`:
+
+```{r, echo = FALSE, fig.align='center', }
+tab_1
+```
+
+This isn't too bad, but we might want embellish a bit by using the capabilities of `flextable`, another package I've become enamored with lately. The `table1` object can be turned directly into a `flextable` using the `t1flex` function. Once we have transformed the table type, the possibilities are almost endless. And the really nice thing about a flextable is that it can be output to a Word file, to a PowerPoint file, html, or other useful formats. Table 1 generation (or really any table generation) can be fully automated, obviating any manual data entry and eliminating at least one possible source of human error.
+
+Here is code that approximates a JAMA-style table:
+
+```{r}
+set_flextable_defaults(
+  font.family = "Calibri", 
+  font.size = 11
+)
+
+header <- "Table 1"
+footer <- "Values are No. (%) unless otherwise noted. SD = standard deviation"
+
+tab_1f <- t1flex(tab_1) |> 
+  add_header_lines(header) |>
+  add_footer_lines(footer) |>
+  bold(i = 1, part = "header") |> 
+  hline_top(part = "header", border = fp_border(color = "red", width = 3)) |> 
+  hline(i = 1, part = "header", border = fp_border(width = 0.25)) |>
+  hline_top(part = "body", border = fp_border(width = 0.25)) |> 
+  hline_bottom(part = "body", border = fp_border(width = 0.25)) |> 
+  hline_bottom(part = "footer", border = fp_border(width = 0.25)) |> 
+  border_inner_h(part = "body", border = fp_border(width = 0.25, style = "dotted")) |> 
+  autofit(part = "body") |>
+  bg(part = "body", bg = "#f5f5f5") |>
+  align(part = "all", align = "center") |> 
+  align(part = "header", j=1, i=2, align = "left")  |>
+  align(part = "footer", align = "left") |>
+  merge_v(j = 1) |>
+  valign(j = 1, valign = "top") |>
+  align(j = 1, align = "left")
+```
+
+And here is the final product:
+
+```{r, echo=FALSE}
+tab_1f
+```
+
+<p><small><font color="darkkhaki">
+References:
+
+Altman, Douglas G. "Comparability of randomised groups." Journal of the Royal Statistical Society Series D: The Statistician 34, no. 1 (1985): 125-136.
+
+Senn, Stephen. "Testing for baseline balance in clinical trials." Statistics in medicine 13, no. 17 (1994): 1715-1726.
+
+Yang, D. and Dalton, J.E., 2012, April. A unified approach to measuring the effect size between two groups using SAS. In SAS global forum (Vol. 335, pp. 1-6).
+
+Rich B (2023). _table1: Tables of Descriptive Statistics in HTML_. R package
+version 1.4.3.
+
+Gohel D, Skintzos P (2023). _flextable: Functions for Tabular Reporting_.
+
+</font></small></p>
+
+
