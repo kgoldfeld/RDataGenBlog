@@ -12,19 +12,21 @@ image: ''
 draft: true
 ---
 
-I've recently entered a perfect storm created by the completion of three major randomized clinical trials (RCTs), with patient recruitment long finished and data collection all wrapped up. This means *a lot* of data analysis, presentation preparation, and paper writing (and not so much blogging). One common (and not so glamorous) thread cutting across all of this is the need to generate a **Table 1**, the comparison of baseline characteristics that convinces readers that groups used in the analysis are "comparable." My ostensible goal here is to provide some `R` code to automate the generation of this table, but not before highlighting some issues and pointing you to a couple of really interesting papers.
+I'm in the middle of a perfect storm, winding down three randomized clinical trials (RCTs), with patient recruitment long finished and data collection all wrapped up. This means *a lot* of data analysis, presentation prep, and paper writing (and not so much blogging). One common (and not so glamorous) thread cutting across all of these RCTs is the need to generate a **Table 1**, the comparison of baseline characteristics that convinces readers that randomization worked its magic (i.e., that study groups are indeed "comparable"). My primary goal here is to provide some `R` code to automate the generation of this table, but not before highlighting some issues related to checking for balance and pointing you to a couple of really interesting papers.
 
-In Table 1, we report summary statistics by intervention arm. The mean and standard deviation (or median and interquartile range) of continuous measures and percentages for categorical measures are provided for a selected set of baseline subject characteristics, such as age, sex, and baseline health status. Typically, these tables will also include a statistic that is intended to provide an objective measure of balance (or lack thereof). The thinking is that if there is an objective measure of imbalance for a particular characteristic across groups, the final analysis should be adjusted, lest there be any residual confounding bias clouding the effect estimate.
+#### Table 1 and balance
 
-There are two key (and related) questions here. First, what should that "objective" measure of imbalance be, and second should we even be checking for imbalance? Traditionally, Table 1 has included a set of p-values resulting from a series of between-group comparisons, one for each measure. This [paper](https://academic.oup.com/jrsssd/article-abstract/34/1/125/7121455){target="_blank"}, written by Douglas Altman in 1985 (back when I was still in college!), points out a slew of issues with using the p-value. I've always been concerned with studies with large sample sizes that have small p-values for small differences (i.e., ones that we should not be worried about), but Altman is most concerned that using p-values in the context of smaller sample sizes can mislead us into ignoring important differences. He states "Unfortunately, ... use of significance tests may be unhelpful It is the strength of the association rather than the significance level (which also depends upon sample size) which is of importance."
+In Table 1, we report summary statistics by intervention arm. The mean and standard deviation (or median and interquartile range) of continuous measures and percentages for categorical measures are provided for a selected set of baseline subject characteristics, such as age, sex, and baseline health status. Typically, these tables will include a statistic intended to provide an objective measure of balance (or lack thereof). Any indication of imbalance for a particular characteristic across groups, might suggest that the final estimate of the treatment effect should be adjusted, lest there be any residual confounding bias of the effect estimate.
 
-A second [paper](https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780131703){target="_blank"}, written ten years later by Stephen Senn, argued even more strongly that it is actually counter-productive to attempt to do a "formal" assessment of balance. Using the p-value, you are implicitly conducting a hypothesis test with the null hypothesis that the study has used randomization to allocate subjects to the groups. But this is indeed what you *have* done, so there is no question there. (Of course, it is possible that someone has cheated.) Senn recommends instead that rather than conducting these test, "the practical statistician will do well to establish beforehand a limited list of covariates deemed useful and fit them regardless. Such a strategy will usually lead to a gain in power, has no adverse effect on unconditional size and controls conditional size with respect to the covariates identified."
+There are two key (and related) questions here. First, what should that "objective" measure of imbalance be, and second should we even be checking for imbalance in the first place? Traditionally, Table 1 has included a set of p-values resulting from a series of between-group comparisons, one for each baseline measure. This [paper](https://academic.oup.com/jrsssd/article-abstract/34/1/125/7121455){target="_blank"}, written by Douglas Altman in 1985 (back when I was still an undergraduate!), points out a slew of issues with using the p-value in this context. I've always been concerned that studies with large sample sizes may have small p-values for small differences (i.e., differences that we should not be worried about), but Altman is actually most concerned that using p-values in the context of smaller studies can mislead us into ignoring important differences. He states that "unfortunately, ... use of significance tests may be unhelpful. It is the strength of the association rather than the significance level (which also depends upon sample size) which is of importance."
 
-Given all of this, why should we do anything beyond reporting the group means and percentages and let the readers decide if the groups are comparable? It is hardly very compelling to say this, but I think most journals will demand some formal comparison (though to be honest, I haven't actually attempted to go without). And, if there needs to be a comparison, I would move away from the p-value given its shortcomings here, and use a standardized mean difference. In the case of a continuous measure, this is the difference in group means divided by the pooled standard deviation (and is defined differently for categorical measures). At least this quantifies the difference on scale that is comparable across measures so that the reader can get a sense where the largest imbalances are.
+A second [paper](https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780131703){target="_blank"}, written ten years later by Stephen Senn, argued even more strongly that it may actually be counter-productive to attempt a "formal" assessment of balance. Using the p-value, you are implicitly conducting a hypothesis test, with the null hypothesis that the study has used randomization to allocate subjects to the groups. But this is indeed what you *have* done, so there is no question there. (Of course, it is possible that someone has cheated.) Senn recommends instead that rather than conducting these tests, "the practical statistician will do well to establish beforehand a limited list of covariates deemed useful and fit them regardless. Such a strategy will usually lead to a gain in power, has no adverse effect on unconditional size and controls conditional size with respect to the covariates identified."
 
-Which is a long-winded way of getting to the point of the this post: how can we easily generate a nice looking Table 1 with standardized mean differences in `R`?
+Given all of this, why should we do anything beyond reporting the group means and percentages and let the readers decide about comparability? It is hardly compelling to say this, but I think most journals will demand *some* formal comparison (though, to be honest, I haven't attempted to submit a table without). And, if there needs to be a comparison, I would move away from the p-value given its shortcomings alluded to here, and use a standardized mean difference (SMD). In the case of a continuous measure, this is the difference in group means divided by the pooled standard deviation (and is defined differently for categorical measures). The SMD quantifies the difference on a scale that is comparable across measures so that the reader can identify where the largest imbalances are, and make a judgement about comparability.
 
-### Simulating data
+Which is a long-winded way of getting to the point of the this post: how can we easily generate a nice looking Table 1 with SMDs in `R`?
+
+#### Simulating data
 
 First step is to generate some data for an RCT. Here are the `R` packages I will be using:
 
@@ -37,7 +39,9 @@ library(officer)
 library(smd)
 ```
 
-The data set will have four "baseline" measures, two numerical and two categorical. IN addition, the data set will be generated so that two of the variables will have missing observations. Three of the variables, are actually derived from the same categorical variable so that it is possible to compare the SMD for a categorical variable treated numerically as well as with missing data.
+The data set will have four "baseline" measures, two numerical and two categorical; missingness will be generated for two of the measures. Three of the variables are actually derived from the same categorical variable in order to compare the SMD for a categorical variable treated numerically as well as with missing data.
+
+Here is the data generation process:
 
 ```{r}
 def <-  
@@ -62,21 +66,21 @@ dobs <- genObs(dd, missMat, idvars = "id")
 dobs
 ```
 
-### Calculating the SMD
+#### Calculating the SMD
 
-The standardized mean difference is calculated using the `smd` package, which uses the methods described in this [paper](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=6cf4bd36ca4c90006a5d6563f646a391c255581b){target="_blank"} by Yang and Dalton. The standardized mean difference for a numeric measure is 
+Standardized mean differences can be calculated using the `smd` package, which uses the methods described in this [paper](https://citeseerx.ist.psu.edu/document?repid=rep1&type=pdf&doi=6cf4bd36ca4c90006a5d6563f646a391c255581b){target="_blank"} by Yang and Dalton. The standardized mean difference for a numeric measure is 
 
 $$
-d = \frac{ \left( \bar{x}_1 - \bar{x}_2 \right) } {\text{se}_p } \\
+d = \frac{ \left( \bar{x}_1 - \bar{x}_2 \right) } {\text{se}_p },
 $$
 
 where $\bar{x}_1$ and $\bar{x}_2$ are the means for each group. $\text{se}_p$ is the pooled standard deviation:
 
 $$
-\text{se}_p = \sqrt{\frac{s^2_1 + s^2_2}{2}}
+\text{se}_p = \sqrt{\frac{s^2_1 + s^2_2}{2}},
 $$
 
-$s^2_1$ and $s^2_2$ are the group-specific variances. Here is the SMD for the continuous measure *x*:
+where $s^2_1$ and $s^2_2$ are the group-specific variances. Here is the SMD for the continuous measure *x*:
 
 ```{r}
 with(dobs, smd(x = x, g = frx, na.rm = TRUE))
@@ -88,9 +92,9 @@ For categorical measures, the SMD is the multivariate Mahalanobis distance betwe
 with(dobs, smd(x = f1_v1, g = frx, na.rm = TRUE))
 ```
 
-### Creating Table 1
+#### Creating Table 1
 
-We are creating Table 1 with `R` package `table1`. (See [here](https://benjaminrich.github.io/table1/vignettes/table1-examples.html){target="_blank"} for a nice vignette.) The package does not explicitly calculate the SMD, but allows us to customize the table creation with a user-defined function, which is shown below. An alternative package,`tableone`, *does* have an SMD option built in; the disadvantage with this `tableone`, however, is that missing data reporting does not seem to be built in, nor does the package integrate seamlessly with the `flextable` package, as it is with `table1`.
+We are creating Table 1 with package `table1`. (See [here](https://benjaminrich.github.io/table1/vignettes/table1-examples.html){target="_blank"} for a nice vignette.) The package does not explicitly calculate the SMD, but allows us to customize the table creation with a user-defined function, which is shown below. An alternative package,`tableone`, *does* have an SMD option built in. However, missing data reporting and integration with the `flextable` package, two very important features, are not built into `tableone`; in contrast, `table1` provides both capabilities.
 
 Here is the relatively simple code used to generate the table:
 
@@ -114,15 +118,17 @@ tab_1 <- table1(
 )
 ```
 
-And here is the table that comes directly from `table1`:
+And here is the table that is generated by `table1`:
 
+<div align="center">
 ```{r, echo = FALSE, fig.align='center', }
 tab_1
-```
+``` 
+</div>
 
-This isn't too bad, but we might want embellish a bit by using the capabilities of `flextable`, another package I've become enamored with lately. The `table1` object can be turned directly into a `flextable` using the `t1flex` function. Once we have transformed the table type, the possibilities are almost endless. And the really nice thing about a flextable is that it can be output to a Word file, to a PowerPoint file, html, or other useful formats. Table 1 generation (or really any table generation) can be fully automated, obviating any manual data entry and eliminating at least one possible source of human error.
+This is pretty nice as it is, but we might want embellish a bit by using the capabilities of `flextable`, another package I've become enamored with lately. The `table1` object can be turned directly into a *flextable* using function `t1flex`. And once we have transformed the table type, the possibilities are almost endless. One really nice thing about a flextable is that it can be output to a Word file, to a PowerPoint file, html, or other useful formats. Taking this approach, Table 1 generation (or really any table generation) can be fully automated, obviating any need for manual table creation and eliminating at least one possible source of human error.
 
-Here is code that approximates a JAMA-style table:
+For example, here is code that approximates a JAMA-style table:
 
 ```{r}
 set_flextable_defaults(
@@ -153,7 +159,7 @@ tab_1f <- t1flex(tab_1) |>
   align(j = 1, align = "left")
 ```
 
-And here is the final product:
+And, the final product:
 
 ```{r, echo=FALSE}
 tab_1f
