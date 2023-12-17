@@ -1,0 +1,205 @@
+---
+title: A three-arm trial using two-step randomization
+author: Package Build
+date: '2023-12-19'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+I've been involved with designing a trial focused on comparing a clinical decision support (CDS) tool with an enhanced version of CDS (CDS+). The main goal is to directly compare patient-level outcomes for those who have been exposed to different versions of the CDS. However, we might also be interested in comparing the basic CDS with a control arm. This would suggest a three-arm trial.
+
+A key question is the unit of randomization. If we can assume that CDS and CDS+ can be implemented at the patient level without any contamination (and in our case, we don't think this is possible), the trial comparing these two could take advantage of patient-level randomization. However, because once you turn on CDS or CDS+ at the provider level, it would be impossible to have an uncontaminated control arm, suggesting a less efficient cluster randomized trial. One of my colleagues came up with a design that takes advantage of patient-level randomization while acknowledging the need to address potential contamination of the patients in the control arm. This would be accomplished by randomizing providers to either the control or CDS arms, and then randomizing patients within the CDS arm (stratified by provider) to either CDS or CDS+ intervention. 
+
+It should be fairly obvious that two-step approach with at least some patient-level randomization would be better (with respect to statistical power) than a more standard three-arm cluster randomized trial that could provide the same effect estimates (though my initial reaction was that it wasn't so obvious). My goal here is to simulate data using each design and estimate power to confirm this. 
+
+### Preliminaries
+
+Before we get started, here are the libraries that will be need for the simulations, model fitting, and outputting the results:
+
+```{r, message=FALSE, warning=FALSE}
+library(simstudy)
+library(ggplot2)
+library(lmerTest)
+library(data.table)
+library(multcomp)
+library(parallel)
+library(flextable)
+```
+
+### Three-arm cluster randomized trial
+
+We'll start with the three-arm cluster randomized trial, where providers would be randomized in a 1:1:1 ratio to either $Control$, $CDS$, or $CDS+$. The data definitions for the cluster-level data includes a random effect $b$ and a three-level treatment indicator $A$. The individual-level outcome is a continuous variable centered around 0 for patients in the control arm (offset by the provider-specific random effect). The effect of CDS (compared to Control) is 1.5, and the incremental effect of CDS+ (compared to CDS) is 0.75.
+
+```{r}
+defs <- 
+  defData(varname = "b", formula = 0, variance = 1) |>
+  defData(varname = "A", formula = "1;1;1", dist = "trtAssign") 
+
+defy <- 
+  defDataAdd(varname = "y", formula = "0 + 1.50*(A==2) + 2.50*(A==3) + b", variance = 8)
+```
+
+To generate a single data set, we generate the provider level data, add the patient-level records and generate the patient-level outcomes.
+
+```{r}
+set.seed(7161)
+
+dc <- genData(30, defs, id = "provider")
+dd <- genCluster(dc, "provider", 40, "id")
+dd <- addColumns(defy, dd)
+```
+
+```{r, echo = FALSE, fig.height = 3.5}
+dp <- copy(dd)
+dp[, A := factor(A, labels = c("Control", "CDS", "CDS+"))]
+
+dg <- dp[, .SD[1, .(A)] ,keyby = .(provider)]
+dg[, grpid := 1:.N, keyby = A]
+
+dp <- merge(dp, dg, by = c("provider", "A"))
+
+ggplot(data = dp, aes(x = factor(grpid), y = y)) +
+  geom_jitter(width = 0.15, size = 0.5, aes(color = factor(A))) +
+  facet_grid(~ A) +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.text.x = element_blank(),
+        legend.position = "none") 
+```
+
+A mixed effects model with a provider-level random effect gives the parameter estimates for the effect of CDS (versus control) and CDS+ (also versus control):
+
+```{r, eval = FALSE}
+lmerfit <- lmer(y ~ factor(A) + (1|provider), data = dd)
+as_flextable(lmerfit) |> delete_part(part = "footer")
+```
+
+<br>
+
+```{r, echo = FALSE}
+lmerfit <- lmer(y ~ factor(A) + (1|provider), data = dd)
+as_flextable(lmerfit) |> delete_part(part = "footer")
+```
+
+However, we are really interested in comparing CDS with Control and CDS+ with CDS, so we use the `glht` package to provide the contrasts. To ensure that our overall Type I error rate is 5%, we would use a Bonferroni-corrected p-value threshold of 0.025. In this particular case, we would not infer that there is any benefit to CDS+.
+
+```{r}
+K1 <- matrix(c(0, 1, 0, 0, -1, 1), 2, byrow = T)
+summary(glht(lmerfit, K1))
+```
+
+In the next step, I'm generating 2500 data sets and fitting a model for each one. The estimated parameters, standard errors, and p-values are saved to an `R` *list* so that I can estimate the power to detect an effect for each comparison (based on the assumptions used to generate the data):
+
+```{r, cache=TRUE}
+genandfit <- function() {
+  
+  dc <- genData(30, defs, id = "provider")
+  dd <- genCluster(dc, "provider", 40, "id")
+  dd <- addColumns(defy, dd)
+  
+  lmerfit <- lmer(y ~ factor(A) + (1|provider), data = dd)
+  K1 <- matrix(c(0, 1, 0, 0, -1, 1), 2, byrow = T)
+  data.table(ests = summary(glht(lmerfit, K1))$test$coefficients,
+             sd = summary(glht(lmerfit, K1))$test$sigma,
+             pvals = summary(glht(lmerfit, K1))$test$pvalues
+  )
+  
+}
+
+reps <- mclapply(1:2500, function(x) genandfit())
+reps[1:3]
+```
+
+The estimated power for each effect estimate is the proportion of iterations with a p-value less than 0.025. Using this three-arm study study design with cluster randomization only, there is 73% power to detect a difference between CDS and Control when the true difference is 1.50, and only 35% power to detect a difference between CDS+ and CDS when the true difference is 0.75:
+
+```{r}
+pvals <- rbindlist(mclapply(reps, function(x) data.table(t(x[, pvals]))))
+pvals[, .(`CDS vs Control` = mean(V1 < 0.025), `CDS+ vs CDS` = mean(V2 < 0.025))]
+```
+
+### Two-step randomization
+
+We can use the same process to evaluate the two-step randomization. In this formulation, the clusters are randomized in a 1:2 ratio to control $(A = 0)$ or CDS $(A = 1)$. For the the clusters randomized to CDS ($2/3$ of the total), the individual patients are randomized to standard CDS $(X=0)$ or CDS+ $(X=1)$. The randomization is stratified by provider with a 1:1 ratio. The randomization scheme this is facilitated by the `simstudy` `defCondition` and `addCondition` functions. Note that for the patients in the control arm, $A=0$ and $X=1$.
+
+The individual outcome $y$ is generated slightly differently than in the three-arm trial, but the effect sizes are equivalent: 1.50 point difference between standard CDS and control and 0.75 difference between CDS+ and CDS.
+
+```{r}
+defs <- 
+  defData(varname = "b", formula = 0, variance = 1) |>
+  defData(varname = "A", formula = "1;2", dist = "trtAssign")
+
+defc <- 
+  defCondition(condition = "A == 1", formula = "1;1", 
+    variance = "provider", dist = "trtAssign") |>
+  defCondition(condition = "A == 0", formula = 0, 
+    dist = "nonrandom")
+
+defy <- 
+  defDataAdd(varname = "y", formula = "0 + 1.50*A + 0.75*X + b", variance = 8)
+
+dc <- genData(30, defs, id = "provider")
+dd <- genCluster(dc, "provider", 40, "id")
+dd <- addCondition(defc, dd, "X")
+dd <- addColumns(defy, dd)
+```
+
+```{r, echo=FALSE, fig.height = 5}
+dp <- copy(dd)
+dp[A == 0, X:= -1]
+dp[, X := factor(X, labels = c("None", "A", "AX"))]
+
+ggplot(data = dp, aes(x = factor(X), y = y)) +
+  geom_jitter(width = 0.25, size = 0.5, aes(color = factor(X))) +
+  facet_wrap( ~ provider, nrow = 5) +
+  scale_y_continuous(breaks = seq(-5, 5, 5)) +
+  theme(panel.grid = element_blank(),
+        axis.title.x = element_blank(),
+        legend.position = "none",
+        axis.text = element_text(size = 8))
+```
+
+The model for this data set also looks slightly different than the three arm case, as we can model the CDS+ vs CDS directly; there is no need to look at any contrasts.
+
+```{r, eval=FALSE}
+lmerfit <- lmer(y ~ A + X + (1|provider), data = dd)
+as_flextable(lmerfit) |> delete_part(part = "footer")
+```
+
+<br>
+
+```{r, echo=FALSE}
+lmerfit <- lmer(y ~ A + X + (1|provider), data = dd)
+as_flextable(lmerfit) |> delete_part(part = "footer")
+```
+
+```{r, cache = TRUE, echo=FALSE}
+genandfit <- function() {
+  
+  dc <- genData(30, defs, id = "provider")
+  dd <- genCluster(dc, "provider", 30, "id")
+  dd <- addCondition(defc, dd, "X")
+  dd <- addColumns(defy, dd)
+  
+  lmerfit <- lmer(y ~ A + X + (1|provider), data = dd)
+  coef(summary(lmerfit))
+}
+
+reps <- mclapply(1:2500, function(x) genandfit())
+pvals <- rbindlist(mclapply(reps, function(x) data.table(t(x[2:3, "Pr(>|t|)"]))))
+```
+
+The estimated the power from replicated data sets makes it pretty clear that the two-step randomization design has considerably more power for both effects, each reaching the 80% threshold.
+
+```{r}
+pvals[, .(`CDS vs Control` = mean(A < .025), `CDS+ vs CDS` = mean(X < 0.025))]
+```
+
+While it appears that the two-step randomization design is clearly superior to the three-arm cluster randomized design, it is important to again point out the key caveat here that, conditional on the provder, the patient outcomes in the CDS and CDS+ arms patients are independent of each other. For example, if the provider can't avoid applying CDS+ tools to the CDS only patients, this assumption of independence is violated and the two-step design is not going to be appropriate. A three-arm cluster randomized design with more providers (clusters) will be needed.
