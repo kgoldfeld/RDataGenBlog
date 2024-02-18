@@ -33,30 +33,32 @@ This is the distribution of the number of EDs across the health systems:
 (2) Sort the health systems (including the subgroups) in descending order by number of EDs:
 ![](/img/post-clusterfactor/number_sorted.png){height=425px, width=400px}
 
-(3) This is the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, **5A** gets all arms. For each health system with fewer than 8 EDs, *K* arms are sampled without replacement, where *K* is the number of arms in the health system. So, in the example below, health system **2** has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for health system **7** have been determined, arms **1**, **2**, and **3** have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (**9**) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.
+(3) This is the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, **5A** gets all arms. For each health system with fewer than 8 EDs, *K* arms are sampled without replacement, where *K* is the number of EDs in the health system or subgroup. n the example below, health system (HS) **2** has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for HS **7** have been determined, arms **1**, **2**, and **3** have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (HS **9**) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.
 
 ![](/img/post-clusterfactor/randomization_sorted.png){height=425px, width=420px}
 
 (4) The final stage is to assign specific EDs in each health system to the treatment arms that have been allocated. For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of **5A** in our example, the first ED sampled is assigned to treatment arm **1**, the second to arm **2**, ..., all the way until the ED sampled eigth, which is assigned to arm **8**. In the case of health system *4*, there are only two EDs; the first sampled is assigned to arm **5** and the second ED is assigned to arm **8**.
 
-We could call it a day once the assignments have been made, but we are still concerned about the balance of ED characteristics across the arms. Using constrained randomization, we can generate a large number of possible randomization schemes and evaluate the balance for each one to create a set of possible balanced randomization schemes. This possible set will be a small subset of all the schemes. We will set the final randomization by randomly selecting one scheme from the subset of balanced schemes. In the code that follows, I have not included this step.
+In practice, we could call it a day once the assignments have been made, but in our case, we are still concerned about the balance of ED characteristics across the arms. This will be accomplished using constrained randomization: we can generate a large number of possible randomization schemes and evaluate the balance for each one to create a set of possible balanced randomization schemes. This possible set will be a small subset of all the schemes. The final randomization scheme will be a random selection from the subset of balanced schemes. In the code that follows, I have *not* included this step.
 
 ### The code
 
 For those who are interested, the implementation of the algorithm follows. First, we load the necessary libraries.
 
 ```{r}
-set.seed(1234)
+set.seed(12345)
 
 library(data.table)
 library(simstudy)
 ```
 
-Next we set the number of arms to eight, and the number of EDs for each of the nine health systems. As in the example above, there are 40 total EDs.
+The number of arms is set to eight, and the number of EDs for each of the nine health systems is also specified. As in the example above, there are 40 total EDs:
 
 ```{r}
 n_arms <- 8
-n_eds = c(4, 7, 5, 2, 9, 6, 3, 3, 1) 
+# n_eds = c(4, 7, 5, 2, 9, 6, 3, 3, 1) 
+n_eds = c(12, 1, 11, 5, 4, 7) 
+
 ```
 
 In this chunk of code, we are randomly sorting the EDs within each health system and splitting the large health systems into subgroups with a maximum eight EDs.
@@ -91,8 +93,10 @@ dd.split <- merge(dd.split, dd.hs, by = c("hs", "group"))
 Here is health system **5** that has been split into two groups, one with eight EDs and the second with one. It is also evident that the EDs have been randomly sorted.
 
 ```{r}
-dd.split[hs == 5]
+dd.split[hs == 1]
 ```
+
+The arms for each health system (or subgroup if a health system has been divided into smaller groups) are generated here. Howeever, before arms are sampled for a particular group, the arms that have previously reached the threshold are removed from the list of possible arms:
 
 ```{r}
 n_per_arm <- dd.hs[, sum(N)] / n_arms
@@ -108,25 +112,39 @@ mat.assign <- matrix(0, nrow = length(n_eds), ncol = n_arms)
   
 for (i in seq_along(n_eds)) {
   
-  # keeping all arms that haven't reached threshold
+  # keeping only arms that haven't reached threshold
+  
   B <- A[apply(mat.assign, 2, sum) < n_per_arm] 
   
-  if (length(B) == 1) {
+  if (length(B) == 1) {       # only one possible arm remains
+    
     mat.assign[i, B] <- 1
-  } else {
+    
+  } else {                    # multiple arms remain
+    
     a <- sample(B, n_eds[i], replace = FALSE)
     mat.assign[i, a] <- 1
+    
   }
 }
 
 mat.assign <- mat.assign[dd.hs$ed_index,]
-
-mat.assign
-apply(mat.assign, 1, sum)
-apply(mat.assign, 2, sum)
 ```
 
-#### Merge back with actual EDs
+In the assignment matrix, each row represents a health system or group, and each column represents each possible treatment arm. A value of one in each column indicates that treatment arm has been allocated to each arm. For systems or subgroups with eight EDs, all of the arms are allocated:
+
+```{r}
+mat.assign
+```
+
+Confirming that the number of arms per system and the number of EDs per arm are both correct:
+
+```{r}
+apply(mat.assign, 1, sum) # number of arms per system or subgroup
+apply(mat.assign, 2, sum) # number of EDs per arm
+```
+
+The final step is to apply the assignment matrix to the list of EDs, which is done by vectorizing the matrix and then merging with the list of EDs.
 
 ```{r}
 rownames(mat.assign) <- 1:nrow(mat.assign)
@@ -145,10 +163,34 @@ dd.assign <- merge(dd.assign, dd.split, by = c("hs_index", "ed_index"))
   
 dd.assign <- dd.assign[, .(hs, group, ed, arm)]
 setkey(dd.assign, ed)
-  
-dd.assign
 ```
 
+The treatment assignments for HS **1**:
+
+```{r}  
+dd.assign[hs == 1]
+```
+
+### Verifying the algorithm "works"
+
+A randomization method is only valid to the extent that each unit of randomization (in the case, the ED) has equal probability of being assigned to any of the arms. Since we have eight arms, we should expect that each ED has a orobability of 0.125 (1\8) of getting randomized to each arm. 
+
+In addition, we expect that each arm has equal probability of being assigned to each health system; the probability is a function of the number of EDs in the health system. The expected rate for an arm in a particular health system is the number of EDs divided by eight. For example, we would expect the rates for HS **1** to be close to 12/8 = 1.5.
+
+These hypothetical probabilities can be checked by generating a large number of possible ransomization schemes, and evaluating the empirical probabilities. I have gone ahead and generated 50,000 possible randomization schemes to provide a basis for these evaluations. (I haven't included the code as it is really just an adaptation of the code above.)
+
+The probabilities that the first six EDs getting assigned to each of the eight arms is shown below, one row for each ED. The probability of a particular ED getting assigned to one of the arms was quite close to the expected value of 0.125. (The results for the other EDs, not included here for brevity, are consistent with these.) 
+
+```{r, echo=FALSE}
+load("data/probs.Rdata")
+head(probs)
+```
+
+The averages at the health system level are show next. Each row represents a health system (**1** through **6**), showing the rate of an arm getting allocated to the health system. The key is that the rate is consistent across the arms for a particular health system.
+
+```{r, echo=FALSE}
+rates
+```
 
 <p><small><font color="darkkhaki">
 Support:
