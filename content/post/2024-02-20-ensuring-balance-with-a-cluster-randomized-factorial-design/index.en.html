@@ -1,0 +1,200 @@
+---
+title: Ensuring balance with a cluster randomized factorial design
+author: Package Build
+date: '2024-02-20'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>Over two years ago, I wrote a series of posts (starting <a href="https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/" target="_blank">here</a>) that described a possible analytic approach for a proposed cluster-randomized trial with a factorial design, as well as sample size considerations. That proposal has been funded by NIA/NIH, so the <em>Emergency departments leading the transformation of Alzheimer’s and dementia care</em> (ED-LEAD) trial is just getting underway, in its preparation phase. On my end, I am starting to think about how we will do the randomization, and I’m sharing some of those thoughts (and code) here.</p>
+<div id="the-study" class="section level3">
+<h3>The study</h3>
+<p>The ED-LEAD study is evaluating a set of three independent yet potentially synergistic interventions all targeted at improving the healthcare of persons living with dementia (PLWD). The common thread linking the three interventions – an emergency care redesign, community paramedicine, and nurse-telephonic care – is the particular focus of each on PLWD who present to the Emergency Department (ED) for care. The target population is patients 66 and older with a diagnosis of dementia who come to the Emergency Department (ED) but are discharge home. The primary outcome is whether a patient has a subsequent ED visit within 30 day.</p>
+<p>Currently, a total of 13 health systems are participating in the study, with each system contributing between 1 and 12 EDs, for a total of 80 EDs. The proposed randomization structure is based on the <em>factorial</em> design, where an ED will be randomized to any combination of the three interventions: (1) <em>none</em>, (2) <em>a</em> only, (3) <em>b</em> only, (4) <em>c</em> only, (5) <em>a + b</em>, (6) <em>a + c</em>, (7) <em>b + c</em>, and (8) <em>a + b + c</em>. A key challenge, which I am focusing on here, is how to randomize 16 EDs to each of the 8 arms while at the same time stratifying by health system. (Another challenge is how ensure decent balance of ED-level characteristics, such as patient volume or location, across the arms; for that, we’ll be using constrained randomization, which I <a href="https://www.rdatagen.net/post/2020-12-22-constrained-randomization-to-evaulate-the-vaccine-rollout-in-nursing-homes/" target="_blank">wrote</a> about quite a few years ago.)</p>
+</div>
+<div id="the-randomization-algorithm" class="section level3">
+<h3>The randomization algorithm</h3>
+<p>In the presentation of the algorithm, I am assuming there are 8 arms, 9 health systems, and 40 total EDs. (Clearly, the specifics change if the number of arms is different). Since we have 40 EDs and 8 arms, that means our target is to have 5 EDs per arm.</p>
+<p>This is the distribution of the number of EDs across the health systems:
+<img src="/img/post-clusterfactor/number_original.png" width="400" /></p>
+<ol style="list-style-type: decimal">
+<li><p>For each health system that has more than 8 EDs, randomly select 8 EDs from the health system to create a subgroup <strong>A</strong> and the remainder go in group <strong>B</strong>. If group <strong>B</strong> still has more than 8 EDs, continue the process until the remainder is less than 8. In the example, health system 5 has 9 EDs, so we create subgroups <strong>5A</strong> and <strong>5B</strong>:
+<img src="/img/post-clusterfactor/number_split.png" width="400" /></p></li>
+<li><p>Sort the health systems (including the subgroups) in descending order by number of EDs:
+<img src="/img/post-clusterfactor/number_sorted.png" width="400" /></p></li>
+<li><p>This is the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, <strong>5A</strong> gets all arms. For each health system with fewer than 8 EDs, <em>K</em> arms are sampled without replacement, where <em>K</em> is the number of arms in the health system. So, in the example below, health system <strong>2</strong> has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for health system <strong>7</strong> have been determined, arms <strong>1</strong>, <strong>2</strong>, and <strong>3</strong> have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (<strong>9</strong>) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.</p></li>
+</ol>
+<p><img src="/img/post-clusterfactor/randomization_sorted.png" width="420" /></p>
+<ol start="4" style="list-style-type: decimal">
+<li>The final stage is to assign specific EDs in each health system to the treatment arms that have been allocated. For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of <strong>5A</strong> in our example, the first ED sampled is assigned to treatment arm <strong>1</strong>, the second to arm <strong>2</strong>, …, all the way until the ED sampled eigth, which is assigned to arm <strong>8</strong>. In the case of health system <em>4</em>, there are only two EDs; the first sampled is assigned to arm <strong>5</strong> and the second ED is assigned to arm <strong>8</strong>.</li>
+</ol>
+<p>We could call it a day once the assignments have been made, but we are still concerned about the balance of ED characteristics across the arms. Using constrained randomization, we can generate a large number of possible randomization schemes and evaluate the balance for each one to create a set of possible balanced randomization schemes. This possible set will be a small subset of all the schemes. We will set the final randomization by randomly selecting one scheme from the subset of balanced schemes. In the code that follows, I have not included this step.</p>
+</div>
+<div id="the-code" class="section level3">
+<h3>The code</h3>
+<p>For those who are interested, the implementation of the algorithm follows. First, we load the necessary libraries.</p>
+<pre class="r"><code>set.seed(1234)
+
+library(data.table)
+library(simstudy)</code></pre>
+<p>Next we set the number of arms to eight, and the number of EDs for each of the nine health systems. As in the example above, there are 40 total EDs.</p>
+<pre class="r"><code>n_arms &lt;- 8
+n_eds = c(4, 7, 5, 2, 9, 6, 3, 3, 1) </code></pre>
+<p>In this chunk of code, we are randomly sorting the EDs within each health system and splitting the large health systems into subgroups with a maximum eight EDs.</p>
+<pre class="r"><code>dd.hs &lt;- data.table(hsid = 1:length(n_eds), N = n_eds )
+dd.ed &lt;- genCluster(dd.hs, &quot;hsid&quot;, &quot;N&quot;, &quot;id&quot;)
+
+n_groups &lt;- ceiling(n_eds / n_arms)
+
+dd.split &lt;- data.table()
+
+for (i in seq_along(n_groups)) {
+  eds &lt;- dd.ed[hsid == i, id]
+  n_to_samp &lt;- min(8, dd.ed[hsid == i, .N])
+  for (j in 1:n_groups[i]) {
+      
+    if (length(eds) &gt; 1) sample_eds &lt;- sample(eds, n_to_samp)
+    else sample_eds &lt;- eds
+      
+    dd.split &lt;- rbind(dd.split, data.table(hs = i, group = j, ed = sample_eds) ) 
+    eds &lt;- eds[!(eds %in% sample_eds)]
+    n_to_samp &lt;- min(8, length(eds))
+  }
+}
+  
+dd.split[, ed_index := 1:.N, keyby = .(hs, group)]
+dd.hs &lt;- dd.split[, .N, keyby = .(hs, group)][, hs_index := .I][]
+dd.split &lt;- merge(dd.split, dd.hs, by = c(&quot;hs&quot;, &quot;group&quot;))</code></pre>
+<p>Here is health system <strong>5</strong> that has been split into two groups, one with eight EDs and the second with one. It is also evident that the EDs have been randomly sorted.</p>
+<pre class="r"><code>dd.split[hs == 5]</code></pre>
+<pre><code>##    hs group ed ed_index N hs_index
+## 1:  5     1 26        1 8        5
+## 2:  5     1 24        2 8        5
+## 3:  5     1 22        3 8        5
+## 4:  5     1 25        4 8        5
+## 5:  5     1 23        5 8        5
+## 6:  5     1 27        6 8        5
+## 7:  5     1 21        7 8        5
+## 8:  5     1 20        8 8        5
+## 9:  5     2 19        1 1        6</code></pre>
+<pre class="r"><code>n_per_arm &lt;- dd.hs[, sum(N)] / n_arms
+  
+dd.hs &lt;- dd.hs[order(-N)]
+n_eds &lt;- copy(dd.hs$N)
+  
+dd.hs[, ed_index := .I ]
+setkey(dd.hs, hs_index)
+
+A &lt;- 1:n_arms
+mat.assign &lt;- matrix(0, nrow = length(n_eds), ncol = n_arms)
+  
+for (i in seq_along(n_eds)) {
+  
+  # keeping all arms that haven&#39;t reached threshold
+  B &lt;- A[apply(mat.assign, 2, sum) &lt; n_per_arm] 
+  
+  if (length(B) == 1) {
+    mat.assign[i, B] &lt;- 1
+  } else {
+    a &lt;- sample(B, n_eds[i], replace = FALSE)
+    mat.assign[i, a] &lt;- 1
+  }
+}
+
+mat.assign &lt;- mat.assign[dd.hs$ed_index,]
+
+mat.assign</code></pre>
+<pre><code>##       [,1] [,2] [,3] [,4] [,5] [,6] [,7] [,8]
+##  [1,]    1    0    1    0    0    1    0    1
+##  [2,]    1    1    1    0    1    1    1    1
+##  [3,]    1    1    1    0    0    1    0    1
+##  [4,]    0    0    0    1    1    0    0    0
+##  [5,]    1    1    1    1    1    1    1    1
+##  [6,]    0    0    0    1    0    0    0    0
+##  [7,]    1    1    1    0    0    1    1    1
+##  [8,]    0    0    0    1    1    0    1    0
+##  [9,]    0    1    0    0    1    0    1    0
+## [10,]    0    0    0    1    0    0    0    0</code></pre>
+<pre class="r"><code>apply(mat.assign, 1, sum)</code></pre>
+<pre><code>##  [1] 4 7 5 2 8 1 6 3 3 1</code></pre>
+<pre class="r"><code>apply(mat.assign, 2, sum)</code></pre>
+<pre><code>## [1] 5 5 5 5 5 5 5 5</code></pre>
+<div id="merge-back-with-actual-eds" class="section level4">
+<h4>Merge back with actual EDs</h4>
+<pre class="r"><code>rownames(mat.assign) &lt;- 1:nrow(mat.assign)
+colnames(mat.assign) &lt;- 1:ncol(mat.assign)
+
+dd.assign &lt;- data.table(as.table(mat.assign)) # vectorize
+dd.assign &lt;- dd.assign[N == 1]
+  
+dd.assign &lt;- dd.assign[, .(hs_index = V1, arm = V2)]
+dd.assign[,`:=`(hs_index = as.numeric(hs_index), arm = as.numeric(arm))]
+  
+setkey(dd.assign, hs_index)
+dd.assign[, ed_index := 1:.N, keyby = hs_index]
+  
+dd.assign &lt;- merge(dd.assign, dd.split, by = c(&quot;hs_index&quot;, &quot;ed_index&quot;))
+  
+dd.assign &lt;- dd.assign[, .(hs, group, ed, arm)]
+setkey(dd.assign, ed)
+  
+dd.assign</code></pre>
+<pre><code>##     hs group ed arm
+##  1:  1     1  1   8
+##  2:  1     1  2   3
+##  3:  1     1  3   6
+##  4:  1     1  4   1
+##  5:  2     1  5   2
+##  6:  2     1  6   5
+##  7:  2     1  7   8
+##  8:  2     1  8   1
+##  9:  2     1  9   3
+## 10:  2     1 10   7
+## 11:  2     1 11   6
+## 12:  3     1 12   8
+## 13:  3     1 13   1
+## 14:  3     1 14   3
+## 15:  3     1 15   6
+## 16:  3     1 16   2
+## 17:  4     1 17   5
+## 18:  4     1 18   4
+## 19:  5     2 19   4
+## 20:  5     1 20   8
+## 21:  5     1 21   7
+## 22:  5     1 22   3
+## 23:  5     1 23   5
+## 24:  5     1 24   2
+## 25:  5     1 25   4
+## 26:  5     1 26   1
+## 27:  5     1 27   6
+## 28:  6     1 28   3
+## 29:  6     1 29   2
+## 30:  6     1 30   7
+## 31:  6     1 31   8
+## 32:  6     1 32   1
+## 33:  6     1 33   6
+## 34:  7     1 34   7
+## 35:  7     1 35   5
+## 36:  7     1 36   4
+## 37:  8     1 37   5
+## 38:  8     1 38   7
+## 39:  8     1 39   2
+## 40:  9     1 40   4
+##     hs group ed arm</code></pre>
+<p>
+<p><small><font color="darkkhaki">
+Support:</p>
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U19AG078105, which funds the <em>Emergency departments leading the transformation of Alzheimer’s and dementia care</em> (ED-LEAD) study. The author, the leader of the Statistics Analysis Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small>
+</p>
+</div>
+</div>
