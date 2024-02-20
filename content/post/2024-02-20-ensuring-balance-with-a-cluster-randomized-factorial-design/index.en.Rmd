@@ -26,18 +26,21 @@ Currently, a total of 13 health systems are participating in the study, with eac
 In the presentation of the algorithm, I am assuming there are 8 arms, 9 health systems, and 40 total EDs. (Clearly, the specifics change if the number of arms is different). Since we have 40 EDs and 8 arms, that means our target is to have 5 EDs per arm.
 
 This is the distribution of the number of EDs across the health systems:
-![](/img/post-clusterfactor/number_original.png){height=410px, width=400px}
+![](image/number_original.png){height=300px, width=600px}
 
-(1) For each health system that has more than 8 EDs, randomly select 8 EDs from the health system to create a subgroup **A** and the remainder go in group **B**. If group **B** still has more than 8 EDs, continue the process until the remainder is less than 8. In the example, health system 5 has 9 EDs, so we create subgroups **5A** and **5B**:
-![](/img/post-clusterfactor/number_split.png){height=425px, width=400px}
+(1) For each health system that has more than eight EDs, randomly select eight EDs from the health system to create a subgroup **A** and the remainder go in group **B**. If group **B** still has more than eight EDs, continue the process until the remainder is fewer than eight. In the example, health system (HS) **1** has 12 EDs, so we create subgroups **1A** and **1B**. Likewise, HS **3** is split into two subgroups:
+![](image/number_split.png){height=300px}
+
 (2) Sort the health systems (including the subgroups) in descending order by number of EDs:
-![](/img/post-clusterfactor/number_sorted.png){height=425px, width=400px}
+![](image/number_sorted.png){height=300px}
 
-(3) This is the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, **5A** gets all arms. For each health system with fewer than 8 EDs, *K* arms are sampled without replacement, where *K* is the number of EDs in the health system or subgroup. n the example below, health system (HS) **2** has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for HS **7** have been determined, arms **1**, **2**, and **3** have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (HS **9**) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.
 
-![](/img/post-clusterfactor/randomization_sorted.png){height=425px, width=420px}
+(3) Now we are at the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, HS **1A** and HS **3A** will each be allocated all eight arms. For each health system with fewer than eight EDs, *K* arms are sampled without replacement, where *K* is the number of EDs in the health system or subgroup. In the example below, HS **2** has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for HS **1B** have been determined, arms **7** and **8** have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (HS **5**) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.
+![](image/randomization_sorted.png){height=300px}
+(4) In the next step we sort the assignment matrix so that we can merge it with the actual EDs:
+![](image/randomization.png){height=300px}
 
-(4) The final stage is to assign specific EDs in each health system to the treatment arms that have been allocated. For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of **5A** in our example, the first ED sampled is assigned to treatment arm **1**, the second to arm **2**, ..., all the way until the ED sampled eigth, which is assigned to arm **8**. In the case of health system *4*, there are only two EDs; the first sampled is assigned to arm **5** and the second ED is assigned to arm **8**.
+(4) The final stage is to assign specific EDs in each health system to the treatment arms that have been allocated. For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of HS **1A** in our example, the first ED sampled is assigned to treatment arm **1**, the second to arm **2**, ..., all the way until the ED sampled eigth, which is assigned to arm **8**. In the case of HS *3B*, there are only three EDs; the first sampled is assigned to arm **1**,  the second ED is assigned to arm **5**, and the third to arm **6**.
 
 In practice, we could call it a day once the assignments have been made, but in our case, we are still concerned about the balance of ED characteristics across the arms. This will be accomplished using constrained randomization: we can generate a large number of possible randomization schemes and evaluate the balance for each one to create a set of possible balanced randomization schemes. This possible set will be a small subset of all the schemes. The final randomization scheme will be a random selection from the subset of balanced schemes. In the code that follows, I have *not* included this step.
 
@@ -56,7 +59,6 @@ The number of arms is set to eight, and the number of EDs for each of the nine h
 
 ```{r}
 n_arms <- 8
-# n_eds = c(4, 7, 5, 2, 9, 6, 3, 3, 1) 
 n_eds = c(12, 1, 11, 5, 4, 7) 
 
 ```
