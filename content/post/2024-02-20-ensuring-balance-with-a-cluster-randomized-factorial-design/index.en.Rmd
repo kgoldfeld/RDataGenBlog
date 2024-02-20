@@ -1,5 +1,5 @@
 ---
-title: Ensuring balance with a cluster randomized factorial design
+title: Perfectly balanced treatment arm distribution in a multifactorial CRT using stratified randomization
 author: Package Build
 date: '2024-02-20'
 slug: []
@@ -10,43 +10,42 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
-Over two years ago, I wrote a series of posts (starting [here](https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/){target="_blank"}) that described a possible analytic approach for a proposed cluster-randomized trial with a factorial design, as well as sample size considerations. That proposal has been funded by NIA/NIH, so the *Emergency departments leading the transformation of Alzheimer’s and dementia care* (ED-LEAD) trial is just getting underway, in its preparation phase. On my end, I am starting to think about how we will do the randomization, and I'm sharing some of those thoughts (and code) here.
+Over two years ago, I wrote a series of posts (starting [here](https://www.rdatagen.net/post/2021-09-28-analyzing-a-factorial-trial-with-a-bayesian-model/){target="_blank"}) that described possible analytic approaches for a proposed cluster-randomized trial with a factorial design. That proposal was recently funded by NIA/NIH, and now the *Emergency departments leading the transformation of Alzheimer's and dementia care* (ED-LEAD) trial is just getting underway. Since the trial is in its early planning phase, I am starting to think about how we will do the randomization, and I'm sharing some of those thoughts (and code) here.
 
-### The study
+### A brief overview of ED-LEAD
 
-The ED-LEAD study is evaluating a set of three independent yet potentially synergistic interventions all targeted at improving the healthcare of persons living with dementia (PLWD). The common thread linking the three interventions -- an emergency care redesign, community paramedicine, and nurse-telephonic care -- is the particular focus of each on PLWD who present to the Emergency Department (ED) for care. The target population is patients 66 and older with a diagnosis of dementia who come to the Emergency Department (ED) but are discharge home. The primary outcome is whether a patient has a subsequent ED visit within 30 day.
+The ED-LEAD study is evaluating a set of three independent yet potentially synergistic interventions all targeted at improving the healthcare of persons living with dementia (PLWD) and their caregivers. The target population is patients 66 and older with a diagnosis of dementia who come to the Emergency Department (ED) but are discharge home. The common thread linking the three interventions -- an emergency care redesign, community paramedicine, and nurse-telephonic care -- is the particular focus of each on PLWD who have gone to the Emergency Department (ED) for care.  The primary outcome is whether a patient has a subsequent ED visit within 30 day.
 
-Currently, a total of 13 health systems are participating in the study, with each system contributing between 1 and 12 EDs, for a total of 80 EDs. The proposed randomization structure is based on the *factorial* design, where an ED will be randomized to any combination of the three interventions: (1) *none*, (2) *a* only, (3) *b* only, (4) *c* only, (5) *a + b*, (6) *a + c*, (7) *b + c*, and (8) *a + b + c*. A key challenge, which I am focusing on here, is how to randomize 16 EDs to each of the 8 arms while at the same time stratifying by health system. (Another challenge is how ensure decent balance of ED-level characteristics, such as patient volume or location, across the arms; for that, we'll be using constrained randomization, which I [wrote](https://www.rdatagen.net/post/2020-12-22-constrained-randomization-to-evaulate-the-vaccine-rollout-in-nursing-homes/){target="_blank"} about quite a few years ago.)
+Currently, a total of 14 health systems are participating in the study, with each system contributing between 1 and 12 EDs, for a total of 80 EDs. The proposed randomization structure is based on the *factorial* design, where an ED will be randomized to any combination of the three interventions: (1) *none*, (2) *a* only, (3) *b* only, (4) *c* only, (5) *a + b*, (6) *a + c*, (7) *b + c*, and (8) *a + b + c*. A key challenge, which I am focusing on here, is how to randomize 16 EDs to each of the 8 arms while at the same time stratifying by health system. (Another challenge is how ensure decent balance of ED-level characteristics, such as patient volume or location, across the arms; for that, we'll be using constrained randomization, which I [wrote](https://www.rdatagen.net/post/2020-12-22-constrained-randomization-to-evaulate-the-vaccine-rollout-in-nursing-homes/){target="_blank"} about quite a few years ago.)
 
 ### The randomization algorithm
 
-In the presentation of the algorithm, I am assuming there are 8 arms, 9 health systems, and 40 total EDs. (Clearly, the specifics change if the number of arms is different). Since we have 40 EDs and 8 arms, that means our target is to have 5 EDs per arm.
+In the presentation of the algorithm, I am simplifying a bit, assuming there are eight arms, but only six health systems, and 40 total EDs. Since we have 40 EDs and eight arms, our target is a random allocation that has exactly five EDs per arm.
 
-This is the distribution of the number of EDs across the health systems:
+In our simplified example, this is the distribution of the number of EDs across the health systems:
 ![](image/number_original.png){height=300px, width=600px}
 
-(1) For each health system that has more than eight EDs, randomly select eight EDs from the health system to create a subgroup **A** and the remainder go in group **B**. If group **B** still has more than eight EDs, continue the process until the remainder is fewer than eight. In the example, health system (HS) **1** has 12 EDs, so we create subgroups **1A** and **1B**. Likewise, HS **3** is split into two subgroups:
+(1) *Split health systems with more than eight EDs into smaller subgroups.* For each health system that has more than eight EDs, randomly select eight EDs from the health system to create a subgroup *A* and the remainder go in group *B*. If group *B* still has more than eight EDs, split those into *B* and *C*, and continue the process until the last subgroup has fewer than eight EDs. In the example, *Health System (HS) 1* has 12 EDs, so we create subgroups *1A* and *1B*. Likewise, *HS 3* is split into two subgroups:
 ![](image/number_split.png){height=300px}
 
-(2) Sort the health systems (including the subgroups) in descending order by number of EDs:
+(2) *Sort the health systems (including the subgroups) in descending order by number of EDs*:
 ![](image/number_sorted.png){height=300px}
 
 
-(3) Now we are at the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, HS **1A** and HS **3A** will each be allocated all eight arms. For each health system with fewer than eight EDs, *K* arms are sampled without replacement, where *K* is the number of EDs in the health system or subgroup. In the example below, HS **2** has seven EDs, so seven arms are selected at random. This process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list. At some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for HS **1B** have been determined, arms **7** and **8** have been allocated to five health systems, so they are no longer available for the four remaining health systems. When we get to the final health system (HS **5**) that has only one ED, the arm is predetermined based on the earlier randomizations, since all the others already have been allocated to five health systems.
+(3) *Sequentially make random allocations for each health system.* Now we are at the heart of the algorithm. Each system or subgroup with eight EDs will be assigned all eight arms. So, *HS 1A* and *HS 3A* will each be allocated all eight arms. For each health system with fewer than eight EDs, *K* arms are sampled without replacement, where *K* is the number of EDs in the health system or subgroup. In the example below, *HS 2* has seven EDs, so seven arms are selected at random. The process is repeated for each health system in descending order based on the number of EDs, with one key modification as we progress down the list: at some point, we will reach the maximum number of EDs for an arm, so that arm must be removed from the possible arms for the subsequent health systems. In the example, after the arms for *HS 1B* have been determined (the fifth iteration of the sequence), arms **7** and **8** have been allocated to five health systems; since the limit has been reached, these two arms are no longer available for the three remaining health systems. When we get to the final health system (*HS 5*) that has only one ED, there is only a single arm available, since all the other arms have been allocated to five health systems.
 ![](image/randomization_sorted.png){height=300px}
-(4) In the next step we sort the assignment matrix so that we can merge it with the actual EDs:
+(4) *Re-sort the assignment matrix.* This sorting needs to happen so that we can merge the allocations with the actual EDs in each health system:
 ![](image/randomization.png){height=300px}
 
-(4) The final stage is to assign specific EDs in each health system to the treatment arms that have been allocated. For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of HS **1A** in our example, the first ED sampled is assigned to treatment arm **1**, the second to arm **2**, ..., all the way until the ED sampled eigth, which is assigned to arm **8**. In the case of HS *3B*, there are only three EDs; the first sampled is assigned to arm **1**,  the second ED is assigned to arm **5**, and the third to arm **6**.
+(5) *Assign specific EDs in each health system to the treatment arms that have been allocated.* For each health system (or subgroup), we sample with replacement all of the EDs. The treatment arm assignments are made in the order of this randomization. In the case of *HS 1A* in our example, the first sampled ED is assigned to treatment arm **1**, the second to arm **2**, etc., all the way until the ED that was sampled eighth, which is assigned to arm **8**. In the case of *HS 3B*, there are only three EDs; the first sampled is assigned to arm **1**,  the second ED is assigned to arm **5**, and the third to arm **6**.
 
-In practice, we could call it a day once the assignments have been made, but in our case, we are still concerned about the balance of ED characteristics across the arms. This will be accomplished using constrained randomization: we can generate a large number of possible randomization schemes and evaluate the balance for each one to create a set of possible balanced randomization schemes. This possible set will be a small subset of all the schemes. The final randomization scheme will be a random selection from the subset of balanced schemes. In the code that follows, I have *not* included this step.
+In practice, we could call it a day once the assignments have been made, but the case of ED-LEAD, we are still concerned about the balance of ED characteristics across the arms. This will be accomplished using constrained randomization, which involves generating a large number (say 500K  or 1M) of possible random allocations. We will evaluate the balance for each one with respect to the desired characteristics in order to create a set of possible balanced random allocations. (This possible set will likely be a very small subset of all the generated allocations, which is why we need such a large pool.) The final random allocation will be a random selection from the subset of balanced allocations. (In the code that follows, I have *not* included this step.)
 
 ### The code
 
-For those who are interested, the implementation of the algorithm follows. First, we load the necessary libraries.
+The implementation of the algorithm in `R` follows. First, we load the necessary libraries.
 
 ```{r}
 set.seed(12345)
@@ -55,7 +54,7 @@ library(data.table)
 library(simstudy)
 ```
 
-The number of arms is set to eight, and the number of EDs for each of the nine health systems is also specified. As in the example above, there are 40 total EDs:
+The number of arms is set to eight, and the number of EDs for each of the six health systems is also specified. As in the example above, there are 40 total EDs:
 
 ```{r}
 n_arms <- 8
@@ -92,13 +91,13 @@ dd.hs <- dd.split[, .N, keyby = .(hs, group)][, hs_index := .I][]
 dd.split <- merge(dd.split, dd.hs, by = c("hs", "group"))
 ```
 
-Here is health system **5** that has been split into two groups, one with eight EDs and the second with one. It is also evident that the EDs have been randomly sorted.
+Here is *HS 1* that has been split into two groups, one with eight EDs and the second with one. Note that the EDs have been randomly sorted and randomly assigned to the two subgroups.
 
 ```{r}
 dd.split[hs == 1]
 ```
 
-The arms for each health system (or subgroup if a health system has been divided into smaller groups) are generated here. Howeever, before arms are sampled for a particular group, the arms that have previously reached the threshold are removed from the list of possible arms:
+The arms for each health system (or subgroup if a health system has been divided into smaller groups) are generated here. However, before arms are sampled for a particular group, the arms that have previously reached the threshold of five EDS are removed from the list of possible arms:
 
 ```{r}
 n_per_arm <- dd.hs[, sum(N)] / n_arms
@@ -130,10 +129,10 @@ for (i in seq_along(n_eds)) {
   }
 }
 
-mat.assign <- mat.assign[dd.hs$ed_index,]
+mat.assign <- mat.assign[dd.hs$ed_index,] # sorted in the original order
 ```
 
-In the assignment matrix, each row represents a health system or group, and each column represents each possible treatment arm. A value of one in each column indicates that treatment arm has been allocated to each arm. For systems or subgroups with eight EDs, all of the arms are allocated:
+In the assignment matrix, each row represents a health system or group, and each column represents each possible treatment arm. A value of 1 in each column indicates that treatment arm has been allocated to a health system. For systems or subgroups with eight EDs, all of the arms are allocated:
 
 ```{r}
 mat.assign
@@ -175,20 +174,20 @@ dd.assign[hs == 1]
 
 ### Verifying the algorithm "works"
 
-A randomization method is only valid to the extent that each unit of randomization (in the case, the ED) has equal probability of being assigned to any of the arms. Since we have eight arms, we should expect that each ED has a orobability of 0.125 (1\8) of getting randomized to each arm. 
+A randomization protocol is only valid to the extent that each unit of randomization (in the case, the ED) has equal probability of being assigned to any of the arms. Since we have eight arms, we should expect that each ED has a probability of 0.125 (1\8) of getting randomized to each arm. 
 
-In addition, we expect that each arm has equal probability of being assigned to each health system; the probability is a function of the number of EDs in the health system. The expected rate for an arm in a particular health system is the number of EDs divided by eight. For example, we would expect the rates for HS **1** to be close to 12/8 = 1.5.
+In addition, within each health system, we expect that each arm has equal probability of being assigned; the probability is a function of the number of EDs in the health system. The expected rate (over repeated random allocations) for an arm in a particular health system is the number of EDs divided by eight. For example, we would expect the rates for *HS 1* to be 1.5 (12/8).
 
-These hypothetical probabilities can be checked by generating a large number of possible ransomization schemes, and evaluating the empirical probabilities. I have gone ahead and generated 50,000 possible randomization schemes to provide a basis for these evaluations. (I haven't included the code as it is really just an adaptation of the code above.)
+These hypothetical probabilities can be checked by generating a large number of possible random allocations and evaluating the empirical probabilities. I have generated 50,000 possible random allocations. (I haven't included the code as it is really just an adaptation of the code above.)
 
-The probabilities that the first six EDs getting assigned to each of the eight arms is shown below, one row for each ED. The probability of a particular ED getting assigned to one of the arms was quite close to the expected value of 0.125. (The results for the other EDs, not included here for brevity, are consistent with these.) 
+The probabilities for the first six EDs are shown below, one row for each ED. In every case, the probability of a particular ED getting assigned to one of the arms was quite close to the expected value of 0.125. (The results for the other EDs, not included here for brevity, are consistent with these.) 
 
 ```{r, echo=FALSE}
 load("data/probs.Rdata")
 head(probs)
 ```
 
-The averages at the health system level are show next. Each row represents a health system (**1** through **6**), showing the rate of an arm getting allocated to the health system. The key is that the rate is consistent across the arms for a particular health system.
+The averages at the health system level are show next. Each row represents a health system (*1* through *6*), showing the rate of an arm getting allocated to the health system. The theoretical rates for each of the six health systems are $12/8 = 1.500$, $1/8 = 0.125$, $11/8 = 1.375$, $5/8 = 0.625$, $4/8 = 0.500$, and $7/8 = 0.875$, respectively. We are looking to see if the rates are consistent across the arms for a particular health system, and that they are close to the theoretical value. It appears that they are:
 
 ```{r, echo=FALSE}
 rates
@@ -197,7 +196,7 @@ rates
 <p><small><font color="darkkhaki">
 Support:
 
-This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U19AG078105, which funds the *Emergency departments leading the transformation of Alzheimer’s and dementia care* (ED-LEAD) study. The author, the leader of the Statistics Analysis Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+This work was supported in part by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U19AG078105, which funds the *Emergency departments leading the transformation of Alzheimer's and dementia care* (ED-LEAD) study. The author, the leader of the Statistics Analysis Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
 </font></small></p>
 
 
