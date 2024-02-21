@@ -3,8 +3,9 @@ data {
   int<lower=1> N;        // number of observations
   int<lower=1> I;        // number of interventions
   int<lower=1> X2;       // number of 2-way interactions
-  int main[N, I];        // interventions
-  int x[N, X2];          // interactions - provide levels for each intervention?
+  array[N, I] int main;  // interventions
+  array [N, X2] int x;   // interactions - provide levels for each intervention?
+
   vector[N] y;           // outcome
   
 }
@@ -13,12 +14,12 @@ parameters {
   
   real t_0;
   
-  vector[3] z_raw[I];
-  vector[15] z_x_raw[X2];
+  array[I] vector[3] z_raw;
+  array[X2] vector[15] z_x_raw;
   
   real<lower=0> sigma;
-  real<lower=0> sigma_m[I];
-  real<lower=0> sigma_x[X2];
+  array[I] real<lower=0> sigma_m;
+  array[X2] real<lower=0> sigma_x;
   
   real<lower=0> sigma_main;
 
@@ -28,11 +29,11 @@ transformed parameters {
   
   // constrain parameters to sum to 0
   
-  vector[4] z[I]; 
-  vector[16] z_x[X2]; 
+  array[I] vector[4] z; 
+  array[X2] vector[16] z_x; 
   
-  vector[4] t[I];
-  vector[16] t_x[X2];
+  array[I] vector[4] t;
+  array[X2] vector[16] t_x;
   
   vector[N] yhat;
   

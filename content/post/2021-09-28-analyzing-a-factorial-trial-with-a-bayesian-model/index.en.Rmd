@@ -172,7 +172,7 @@ dsum <- dd[, .(yhat = mean(y)), keyby = .(a, b)]
 
 ggplot(data = dsum, aes(x=b, y = yhat)) +
   geom_vline(aes(xintercept = b), color = "white", size = .25) +
-  geom_line(color = "#06295e", size =1.25) +
+  geom_line(color = "#06295e", linewidth = 1.25) +
   facet_grid(.~a, labeller = labeller(a = label_both)) +
   theme(panel.grid = element_blank())  + 
   scale_color_brewer()
@@ -240,7 +240,8 @@ fit <- mod$sample(
   adapt_delta = 0.99,
   step_size = .05,
   max_treedepth = 20,
-  show_messages = FALSE
+  show_messages = FALSE,
+  show_exceptions = FALSE
 )
 ```
 
@@ -396,11 +397,12 @@ The model is implemented in Stan using a *non-centered* parameterization, so tha
 ```{stan, output.var="mod", eval=FALSE}
 data {
   
-  int<lower=1> N;        // # of observations
-  int<lower=1> I;        // # of interventions
-  int<lower=1> X2;       // # of 2-way interactions
-  int main[N, I];        // interventions
-  int x[N, X2];          // interactions
+  int<lower=1> N;        // number of observations
+  int<lower=1> I;        // number of interventions
+  int<lower=1> X2;       // number of 2-way interactions
+  array[N, I] int main;  // interventions
+  array [N, X2] int x;   // interactions - provide levels for each intervention?
+
   vector[N] y;           // outcome
   
 }
@@ -409,12 +411,12 @@ parameters {
   
   real t_0;
   
-  vector[3] z_raw[I];
-  vector[15] z_x_raw[X2];
+  array[I] vector[3] z_raw;
+  array[X2] vector[15] z_x_raw;
   
   real<lower=0> sigma;
-  real<lower=0> sigma_m[I];
-  real<lower=0> sigma_x[X2];
+  array[I] real<lower=0> sigma_m;
+  array[X2] real<lower=0> sigma_x;
   
   real<lower=0> sigma_main;
 
@@ -424,11 +426,11 @@ transformed parameters {
   
   // constrain parameters to sum to 0
   
-  vector[4] z[I]; 
-  vector[16] z_x[X2]; 
+  array[I] vector[4] z; 
+  array[X2] vector[16] z_x; 
   
-  vector[4] t[I];
-  vector[16] t_x[X2];
+  array[I] vector[4] t;
+  array[X2] vector[16] t_x;
   
   vector[N] yhat;
   
