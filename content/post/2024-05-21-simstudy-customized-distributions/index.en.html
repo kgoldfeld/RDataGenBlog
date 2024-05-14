@@ -1,0 +1,123 @@
+---
+title: 'simstudy: customized distributions'
+author: Package Build
+date: '2024-05-21'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: true
+---
+
+
+
+<p>Over the past few years, a number of folks have asked if <code>simstudy</code> accommodates customized distributions. There’s been an interest in truncated, zero-inflated, or even more standard distributions that have not yet been implemented in <code>simstudy</code>. I’ve come up with solutions in specific cases, but was never able to come up with anything general enough that might satisfy this need.</p>
+<p>Looking through the <a href="https://github.com/kgoldfeld/simstudy/issues" target="_blank">issue</a> list last week, I had a brief moment of inspiration, so I decided to tackle the problem anew. And I am happy to say that custom distributions can now be specified in <code>defData</code> and <code>defDataAdd</code> by setting the argument <em>dist</em> to “custom”. While not perfect, the new functionality has the potential to be quite useful. By way of introduction, I am providing a couple of examples. If you want to test this out for yourself, the development version of <code>simstudy</code> on <a href="https://kgoldfeld.github.io/simstudy/dev/index.html" target="_blank">GitHub</a> makes this available.</p>
+<div id="specifying-the-customized-distribution" class="section level3">
+<h3>Specifying the customized distribution</h3>
+<p>When defining a custom distribution in <code>defData</code>, you provide the name of the user-defined function as a string in the <em>formula</em> argument. The arguments of this custom function need to be listed in the <em>variance</em> argument, separated by commas and formatted as “<strong>arg_1 = val_form_1, arg_2 = val_form_2, <span class="math inline">\(\dots\)</span>, arg_K = val_form_K</strong>”.</p>
+<p>Here, the <em>arg_k’s</em> represent the names of the arguments passed to the customized function, where <span class="math inline">\(k\)</span> ranges from <span class="math inline">\(1\)</span> to <span class="math inline">\(K\)</span>. You can use values or formulas for each <em>val_form_k</em>. If formulas are used, ensure that the variables have been previously generated. Double dot notation is available in specifying <em>value_formula_k</em>. One important requirement for the custom function is that the parameter list must include an argument”<strong>n = n</strong>”, but do not include <span class="math inline">\(n\)</span> in the definition as part of <code>defData</code> or <code>defDataAdd</code>.</p>
+</div>
+<div id="example-1" class="section level3">
+<h3>Example 1</h3>
+<p>I think it’s easiest to see with an example. Here is a case where we would like to generate data from a zero-inflated beta distribution (I’ve implemented something like this in the past using a mixture distribution, which is a fine way to go). I’ve created a user-defined function <code>zeroBeta</code> that takes on shape parameters <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> for the beta distribution, as well as <span class="math inline">\(p_0\)</span>, the proportion of the sample that is zero. Note that the function also takes an argument <span class="math inline">\(n\)</span> that will not to be be specified in the data definition; <span class="math inline">\(n\)</span> will represent the number of observations being generated:</p>
+<pre class="r"><code>zeroBeta &lt;- function(n, a, b, p0) {
+  betas &lt;- rbeta(n, a, b)
+  is.zero &lt;- rbinom(n, 1, p0)
+  betas*!(is.zero)
+}</code></pre>
+<p>The data definition specifies a new variable <span class="math inline">\(zb\)</span> with <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> set to 0.75, and <span class="math inline">\(p_0 = 0.02\)</span>:</p>
+<pre class="r"><code>def &lt;- defData(
+  varname = &quot;zb&quot;, 
+  formula = &quot;zeroBeta&quot;, 
+  variance = &quot;a = 0.75, b = 0.75, p0 = 0.02&quot;, 
+  dist = &quot;custom&quot;
+)</code></pre>
+<p>The data are generated with a call to <code>genData</code> as is typically done in <code>simstudy</code>:</p>
+<pre class="r"><code>set.seed(1234)
+dd &lt;- genData(100000, def)</code></pre>
+<pre><code>## Key: &lt;id&gt;
+##             id         zb
+##          &lt;int&gt;      &lt;num&gt;
+##      1:      1 0.93922887
+##      2:      2 0.35609519
+##      3:      3 0.08087245
+##      4:      4 0.99796758
+##      5:      5 0.28481522
+##     ---                  
+##  99996:  99996 0.81740836
+##  99997:  99997 0.98586333
+##  99998:  99998 0.68770216
+##  99999:  99999 0.45096868
+## 100000: 100000 0.74101272</code></pre>
+<p>A plot of the data highlights an over-representation of zeroes:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="576" /></p>
+</div>
+<div id="example-2" class="section level3">
+<h3>Example 2</h3>
+<p>In this second example, I am generating sets of truncated Gaussian distributions with means ranging from <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>. (I wrote about <a href="https://www.rdatagen.net/post/generating-data-from-a-truncated-distribution/" target="_blank">this</a> a while ago - the approach implemented here is an alternative way to generate these data.) <code>rnormt</code> is a customized (user-defined) function that generates the truncated Gaussian data, and requires four arguments (the left truncation value, the right truncation value, the distribution average and the standard deviation):</p>
+<pre class="r"><code>rnormt &lt;- function(n, min, max, mu, s) {
+  
+  F.a &lt;- pnorm(min, mean = mu, sd = s)
+  F.b &lt;- pnorm(max, mean = mu, sd = s)
+  
+  u &lt;- runif(n, min = F.a, max = F.b)
+  qnorm(u, mean = mu, sd = s)
+  
+}</code></pre>
+<p>In this example, truncation limits differ based on group membership. Initially, three groups are created, followed by the generation of truncated values. For Group 1, truncation is defined by the range of <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>, for Group 2, it’s <span class="math inline">\(-2\)</span> to <span class="math inline">\(2\)</span> and for Group 3, it’s <span class="math inline">\(-3\)</span> to <span class="math inline">\(3\)</span>. We’ll generate three data sets, each with a distinct mean denoted by M, using the double-dot notation to implement these different means.</p>
+<pre class="r"><code>def &lt;-
+  defData(
+    varname = &quot;limit&quot;, 
+    formula = &quot;1/4;1/2;1/4&quot;,
+    dist = &quot;categorical&quot;
+  ) |&gt;
+  defData(
+    varname = &quot;tn&quot;, 
+    formula = &quot;rnormt&quot;, 
+    variance = &quot;min = -limit, max = limit, mu = ..M, s = 1.5&quot;,
+    dist = &quot;custom&quot;
+  )</code></pre>
+<p>The data generation requires three calls to <code>genData</code>, which I implement with <code>lapply</code>:</p>
+<pre class="r"><code>mus &lt;- c(-1, 0, 1)
+dd &lt;-lapply(mus, function(M) genData(100000, def))</code></pre>
+<p>The output is a list of three data sets; here are the first six observations from each of the three data sets:</p>
+<pre><code>## [[1]]
+## Key: &lt;id&gt;
+##       id limit         tn
+##    &lt;int&gt; &lt;int&gt;      &lt;num&gt;
+## 1:     1     2  0.6949619
+## 2:     2     2 -0.3641963
+## 3:     3     2 -0.4721632
+## 4:     4     3 -2.6083796
+## 5:     5     2 -0.6800441
+## 6:     6     3 -0.5813880
+## 
+## [[2]]
+## Key: &lt;id&gt;
+##       id limit         tn
+##    &lt;int&gt; &lt;int&gt;      &lt;num&gt;
+## 1:     1     1  0.4853614
+## 2:     2     2 -0.5690811
+## 3:     3     2  0.5282246
+## 4:     4     2  0.1107778
+## 5:     5     2 -0.3504309
+## 6:     6     2  1.9439890
+## 
+## [[3]]
+## Key: &lt;id&gt;
+##       id limit         tn
+##    &lt;int&gt; &lt;int&gt;      &lt;num&gt;
+## 1:     1     2  1.3560628
+## 2:     2     2  1.4543616
+## 3:     3     3  1.4491010
+## 4:     4     2  0.7328855
+## 5:     5     2 -0.1254556
+## 6:     6     2 -0.7455908</code></pre>
+<p>A plot highlights the group differences for each of the three data sets:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="768" /></p>
+</div>
