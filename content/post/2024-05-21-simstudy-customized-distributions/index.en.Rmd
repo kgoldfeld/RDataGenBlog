@@ -1,5 +1,5 @@
 ---
-title: 'simstudy: customized distributions'
+title: 'simstudy 0.8.0: customized distributions'
 author: Package Build
 date: '2024-05-21'
 slug: []
@@ -51,19 +51,19 @@ ggtheme <- function(panelback = "white") {
 
 ```
 
-Over the past few years, a number of folks have asked if `simstudy` accommodates customized distributions. There's been interest in truncated, zero-inflated, or even more standard distributions that have not yet been implemented in `simstudy`. While I've come up with approaches for some of the specific cases, I was never able to develop a general solution that could provide broader flexibility.
+Over the past few years, a number of folks have asked if `simstudy` accommodates customized distributions. There's been interest in truncated, zero-inflated, or even more standard distributions that haven't been implemented in `simstudy`. While I've come up with approaches for some of the specific cases, I was never able to develop a general solution that could provide broader flexibility.
 
-That changes with the latest version of `simstudy` available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"}. Looking through the [issue](https://github.com/kgoldfeld/simstudy/issues){target="_blank"} list recently, I had a brief moment of inspiration, so I decided to tackle the problem anew. I am happy to say that custom distributions can now be specified in `defData` and `defDataAdd` by setting the argument *dist* to "custom". While not perfect, the new functionality has the potential to be quite useful. To introduce the new option, I am providing a couple of examples. 
+This shortcoming changes with the latest version of `simstudy`, now available on [CRAN](https://cran.r-project.org/web/packages/simstudy/index.html){target="_blank"}. Custom distributions can now be specified in `defData` and `defDataAdd` by setting the argument *dist* to "custom". To introduce the new option, I am providing a couple of examples. 
 
 ### Specifying the customized distribution
 
-When defining a custom distribution in `defData`, you provide the name of the user-defined function as a string in the *formula* argument. The arguments of this custom function need to be listed in the *variance* argument, separated by commas and formatted as "**arg_1 = val_form_1, arg_2 = val_form_2, $\dots$, arg_K = val_form_K**".
+When defining a custom distribution in `defData`, you provide the name of the user-defined function as a string in the *formula* argument. The arguments of this custom function are listed in the *variance* argument, separated by commas and formatted as "**arg_1 = val_form_1, arg_2 = val_form_2, $\dots$, arg_K = val_form_K**".
 
-Here, the *arg_k's* represent the names of the arguments passed to the customized function, where $k$ ranges from $1$ to $K$. You can use values or formulas for each *val_form_k*. If formulas are used, ensure that the variables have been previously generated. Double dot notation is available in specifying *value_formula_k*. One important requirement for the custom function is that the parameter list must include an argument"**n = n**", but do not include $n$ in the definition as part of `defData` or `defDataAdd`.
+The *arg_k's* represent the names of the arguments passed to the customized function, where $k$ ranges from $1$ to $K$. You can use values or formulas for each *val_form_k*. If formulas are used, ensure that the variables have been previously generated. Double dot notation is available in specifying *value_formula_k*. It is important to note that the parameter list of the actual function must include an argument"**n = n**", but $n$ should not be included in the definition as part of `defData` or `defDataAdd` (specified in the *variance* field).
 
 ### Example 1
 
-Here is an example where we would like to generate data from a zero-inflated beta distribution (I've implemented something like this in the past using a mixture distribution, which is a fine way to go). I've created a user-defined function `zeroBeta` that takes on shape parameters $a$ and $b$ for the beta distribution, as well as $p_0$, the proportion of the sample that is zero. Note that the function also takes an argument $n$ that will not to be be specified in the data definition; $n$ will represent the number of observations being generated:
+Here is an example where we generate data from a zero-inflated beta distribution. (I've implemented something like this in the past using a mixture distribution, which is also a fine way to go). I've created a user-defined function `zeroBeta` that takes on shape parameters $a$ and $b$ for the beta distribution, as well as $p_0$, the proportion of the sample that takes on a value of zero. Note that the function also takes an argument $n$ that will not to be be specified in the data definition; $n$ will represent the number of observations being generated:
 
 ```{r}
 zeroBeta <- function(n, a, b, p0) {
@@ -73,7 +73,7 @@ zeroBeta <- function(n, a, b, p0) {
 }
 ```
 
-The data definition specifies a new variable $zb$ with $a$ and $b$ set to 0.75, and $p_0 = 0.02$:
+The data definition specifies that we want to create a variable $zb$ from the user-defined `zeroBeta` function with $a$ and $b$ set to 0.75, and $p_0 = 0.02$:
 
 ```{r}
 def <- defData(
@@ -105,7 +105,7 @@ ggplot(data = dd, aes(x = zb)) +
 
 ### Example 2
 
-In this second example, I am generating sets of truncated Gaussian distributions with means ranging from $-1$ to $1$. (I wrote about [this](https://www.rdatagen.net/post/generating-data-from-a-truncated-distribution/){target="_blank"} a while ago - the approach implemented here is an alternative way to generate these data.) `rnormt` is a customized (user-defined) function that generates the truncated Gaussian data, and requires four arguments (the left truncation value, the right truncation value, the distribution average and the standard deviation):
+In this second example, I am generating sets of truncated Gaussian distributions with means ranging from $-1$ to $1$. (I wrote about [this](https://www.rdatagen.net/post/generating-data-from-a-truncated-distribution/){target="_blank"} a while ago - the approach implemented here is an alternative way to generate these data.) `rnormt` is a customized (user-defined) function that generates the truncated Gaussian data, and requires four arguments (the left truncation value, the right truncation value, the distribution average without truncation and the distribution standard deviation without truncation):
 
 ```{r}
 rnormt <- function(n, min, max, mu, s) {
@@ -120,7 +120,7 @@ rnormt <- function(n, min, max, mu, s) {
 ```
 
 
-In this example, truncation limits differ based on group membership. Initially, three groups are created, followed by the generation of truncated values. For Group 1, truncation is defined by the range of $-1$ to $1$, for Group 2, it's $-2$ to $2$ and for Group 3, it's $-3$ to $3$. We'll generate three data sets, each with a distinct mean denoted by M, using the double-dot notation to implement these different means.
+In this example, truncation limits differ based on group membership. Initially, three groups are created (represented by the variable defined as *limit*), followed by the generation of truncated values (named *tn*). For Group 1, truncation is defined by the range of $-1$ to $1$; for Group 2, the range is  $-2$ to $2$; and for Group 3, the range is $-3$ to $3$. We'll generate three data sets, each with a distinct mean denoted by M, using the double-dot notation to implement the different means.
 
 ```{r}
 def <-
@@ -137,11 +137,11 @@ def <-
   )
 ```
 
-The data generation requires three calls to `genData`, which I implement with `lapply`:
+The data generation requires three calls to `genData`, one for each different mean value $\mu$. I have chosen to implement this with `lapply`:
 
 ```{r}
-mus <- c(-1, 0, 1)
-dd <-lapply(mus, function(M) genData(100000, def))
+mu <- c(-1, 0, 1)
+dd <-lapply(mu, function(M) genData(100000, def))
 ```
 
 The output is a list of three data sets; here are the first six observations from each of the three data sets:
@@ -162,7 +162,7 @@ pfunc <- function(dx, i) {
     scale_fill_manual(values = plotcolors) +
     scale_x_continuous(breaks = seq(-3, 3, by =1)) +
     scale_y_continuous(limits = c(0, 1000)) +
-    ggtitle(paste("mu =", mus[i]))
+    ggtitle(paste("mu =", mu[i]))
 }
 
 plist <- lapply(seq_along(dd), function(a) pfunc(dd[[a]], a))

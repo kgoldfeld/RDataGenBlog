@@ -1,5 +1,5 @@
 ---
-title: 'simstudy: customized distributions'
+title: 'simstudy 0.8.0: customized distributions'
 author: Package Build
 date: '2024-05-21'
 slug: []
@@ -15,22 +15,22 @@ draft: true
 
 
 
-<p>Over the past few years, a number of folks have asked if <code>simstudy</code> accommodates customized distributions. There’s been interest in truncated, zero-inflated, or even more standard distributions that have not yet been implemented in <code>simstudy</code>. While I’ve come up with approaches for some of the specific cases, I was never able to develop a general solution that could provide broader flexibility.</p>
-<p>That changes with the latest version of <code>simstudy</code> available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a>. Looking through the <a href="https://github.com/kgoldfeld/simstudy/issues" target="_blank">issue</a> list recently, I had a brief moment of inspiration, so I decided to tackle the problem anew. I am happy to say that custom distributions can now be specified in <code>defData</code> and <code>defDataAdd</code> by setting the argument <em>dist</em> to “custom”. While not perfect, the new functionality has the potential to be quite useful. To introduce the new option, I am providing a couple of examples.</p>
+<p>Over the past few years, a number of folks have asked if <code>simstudy</code> accommodates customized distributions. There’s been interest in truncated, zero-inflated, or even more standard distributions that haven’t been implemented in <code>simstudy</code>. While I’ve come up with approaches for some of the specific cases, I was never able to develop a general solution that could provide broader flexibility.</p>
+<p>This shortcoming changes with the latest version of <code>simstudy</code>, now available on <a href="https://cran.r-project.org/web/packages/simstudy/index.html" target="_blank">CRAN</a>. Custom distributions can now be specified in <code>defData</code> and <code>defDataAdd</code> by setting the argument <em>dist</em> to “custom”. To introduce the new option, I am providing a couple of examples.</p>
 <div id="specifying-the-customized-distribution" class="section level3">
 <h3>Specifying the customized distribution</h3>
-<p>When defining a custom distribution in <code>defData</code>, you provide the name of the user-defined function as a string in the <em>formula</em> argument. The arguments of this custom function need to be listed in the <em>variance</em> argument, separated by commas and formatted as “<strong>arg_1 = val_form_1, arg_2 = val_form_2, <span class="math inline">\(\dots\)</span>, arg_K = val_form_K</strong>”.</p>
-<p>Here, the <em>arg_k’s</em> represent the names of the arguments passed to the customized function, where <span class="math inline">\(k\)</span> ranges from <span class="math inline">\(1\)</span> to <span class="math inline">\(K\)</span>. You can use values or formulas for each <em>val_form_k</em>. If formulas are used, ensure that the variables have been previously generated. Double dot notation is available in specifying <em>value_formula_k</em>. One important requirement for the custom function is that the parameter list must include an argument”<strong>n = n</strong>”, but do not include <span class="math inline">\(n\)</span> in the definition as part of <code>defData</code> or <code>defDataAdd</code>.</p>
+<p>When defining a custom distribution in <code>defData</code>, you provide the name of the user-defined function as a string in the <em>formula</em> argument. The arguments of this custom function are listed in the <em>variance</em> argument, separated by commas and formatted as “<strong>arg_1 = val_form_1, arg_2 = val_form_2, <span class="math inline">\(\dots\)</span>, arg_K = val_form_K</strong>”.</p>
+<p>The <em>arg_k’s</em> represent the names of the arguments passed to the customized function, where <span class="math inline">\(k\)</span> ranges from <span class="math inline">\(1\)</span> to <span class="math inline">\(K\)</span>. You can use values or formulas for each <em>val_form_k</em>. If formulas are used, ensure that the variables have been previously generated. Double dot notation is available in specifying <em>value_formula_k</em>. It is important to note that the parameter list of the actual function must include an argument”<strong>n = n</strong>”, but <span class="math inline">\(n\)</span> should not be included in the definition as part of <code>defData</code> or <code>defDataAdd</code> (specified in the <em>variance</em> field).</p>
 </div>
 <div id="example-1" class="section level3">
 <h3>Example 1</h3>
-<p>Here is an example where we would like to generate data from a zero-inflated beta distribution (I’ve implemented something like this in the past using a mixture distribution, which is a fine way to go). I’ve created a user-defined function <code>zeroBeta</code> that takes on shape parameters <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> for the beta distribution, as well as <span class="math inline">\(p_0\)</span>, the proportion of the sample that is zero. Note that the function also takes an argument <span class="math inline">\(n\)</span> that will not to be be specified in the data definition; <span class="math inline">\(n\)</span> will represent the number of observations being generated:</p>
+<p>Here is an example where we generate data from a zero-inflated beta distribution. (I’ve implemented something like this in the past using a mixture distribution, which is also a fine way to go). I’ve created a user-defined function <code>zeroBeta</code> that takes on shape parameters <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> for the beta distribution, as well as <span class="math inline">\(p_0\)</span>, the proportion of the sample that takes on a value of zero. Note that the function also takes an argument <span class="math inline">\(n\)</span> that will not to be be specified in the data definition; <span class="math inline">\(n\)</span> will represent the number of observations being generated:</p>
 <pre class="r"><code>zeroBeta &lt;- function(n, a, b, p0) {
   betas &lt;- rbeta(n, a, b)
   is.zero &lt;- rbinom(n, 1, p0)
   betas*!(is.zero)
 }</code></pre>
-<p>The data definition specifies a new variable <span class="math inline">\(zb\)</span> with <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> set to 0.75, and <span class="math inline">\(p_0 = 0.02\)</span>:</p>
+<p>The data definition specifies that we want to create a variable <span class="math inline">\(zb\)</span> from the user-defined <code>zeroBeta</code> function with <span class="math inline">\(a\)</span> and <span class="math inline">\(b\)</span> set to 0.75, and <span class="math inline">\(p_0 = 0.02\)</span>:</p>
 <pre class="r"><code>def &lt;- defData(
   varname = &quot;zb&quot;, 
   formula = &quot;zeroBeta&quot;, 
@@ -59,7 +59,7 @@ dd &lt;- genData(100000, def)</code></pre>
 </div>
 <div id="example-2" class="section level3">
 <h3>Example 2</h3>
-<p>In this second example, I am generating sets of truncated Gaussian distributions with means ranging from <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>. (I wrote about <a href="https://www.rdatagen.net/post/generating-data-from-a-truncated-distribution/" target="_blank">this</a> a while ago - the approach implemented here is an alternative way to generate these data.) <code>rnormt</code> is a customized (user-defined) function that generates the truncated Gaussian data, and requires four arguments (the left truncation value, the right truncation value, the distribution average and the standard deviation):</p>
+<p>In this second example, I am generating sets of truncated Gaussian distributions with means ranging from <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>. (I wrote about <a href="https://www.rdatagen.net/post/generating-data-from-a-truncated-distribution/" target="_blank">this</a> a while ago - the approach implemented here is an alternative way to generate these data.) <code>rnormt</code> is a customized (user-defined) function that generates the truncated Gaussian data, and requires four arguments (the left truncation value, the right truncation value, the distribution average without truncation and the distribution standard deviation without truncation):</p>
 <pre class="r"><code>rnormt &lt;- function(n, min, max, mu, s) {
   
   F.a &lt;- pnorm(min, mean = mu, sd = s)
@@ -69,7 +69,7 @@ dd &lt;- genData(100000, def)</code></pre>
   qnorm(u, mean = mu, sd = s)
   
 }</code></pre>
-<p>In this example, truncation limits differ based on group membership. Initially, three groups are created, followed by the generation of truncated values. For Group 1, truncation is defined by the range of <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>, for Group 2, it’s <span class="math inline">\(-2\)</span> to <span class="math inline">\(2\)</span> and for Group 3, it’s <span class="math inline">\(-3\)</span> to <span class="math inline">\(3\)</span>. We’ll generate three data sets, each with a distinct mean denoted by M, using the double-dot notation to implement these different means.</p>
+<p>In this example, truncation limits differ based on group membership. Initially, three groups are created (represented by the variable defined as <em>limit</em>), followed by the generation of truncated values (named <em>tn</em>). For Group 1, truncation is defined by the range of <span class="math inline">\(-1\)</span> to <span class="math inline">\(1\)</span>; for Group 2, the range is <span class="math inline">\(-2\)</span> to <span class="math inline">\(2\)</span>; and for Group 3, the range is <span class="math inline">\(-3\)</span> to <span class="math inline">\(3\)</span>. We’ll generate three data sets, each with a distinct mean denoted by M, using the double-dot notation to implement the different means.</p>
 <pre class="r"><code>def &lt;-
   defData(
     varname = &quot;limit&quot;, 
@@ -82,9 +82,9 @@ dd &lt;- genData(100000, def)</code></pre>
     variance = &quot;min = -limit, max = limit, mu = ..M, s = 1.5&quot;,
     dist = &quot;custom&quot;
   )</code></pre>
-<p>The data generation requires three calls to <code>genData</code>, which I implement with <code>lapply</code>:</p>
-<pre class="r"><code>mus &lt;- c(-1, 0, 1)
-dd &lt;-lapply(mus, function(M) genData(100000, def))</code></pre>
+<p>The data generation requires three calls to <code>genData</code>, one for each different mean value <span class="math inline">\(\mu\)</span>. I have chosen to implement this with <code>lapply</code>:</p>
+<pre class="r"><code>mu &lt;- c(-1, 0, 1)
+dd &lt;-lapply(mu, function(M) genData(100000, def))</code></pre>
 <p>The output is a list of three data sets; here are the first six observations from each of the three data sets:</p>
 <pre><code>## [[1]]
 ## Key: &lt;id&gt;
