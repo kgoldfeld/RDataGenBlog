@@ -1,0 +1,210 @@
+---
+title: 'simstudy: another way to generate data from a non-standard density'
+author: Package Build
+date: '2024-06-04'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+One of my goals for the `simstudy` package is to make it as easy as possible to generate data from a wide range of data distributions. The recent [update](https://www.rdatagen.net/post/2024-05-21-simstudy-customized-distributions/){target="_blank"} created the possibility of generating data from a customized distribution specified in a user-defined function. Last week, I added two functions, `genDataDist` and `addDataDist`, that allow data generation from an empirical distribution defined by a vector of integers. (See [here](https://kgoldfeld.github.io/simstudy/dev/index.html){target="_blank"} for how to download latest development version.) This post provides a simple illustration of the new functionality.
+
+Here are the libraries needed, in case you want to follow along:
+
+```{r}
+library(simstudy)
+library(data.table)
+library(ggplot2)
+
+set.seed(1234)
+```
+
+The target density is simply defined by specifying a vector that is intended to loosely represent a data distribution. We start by specifying the vector (which can be of any length):
+
+```{r}
+base_data <- 
+  c(1, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 8, 9, 9, 9, 10, 10, 10, 10, 10)
+```
+
+We can look at the density to make sure this is the shape we are interested in drawing our data from:
+
+```{r, fig.width = 8, fig.height = 4}
+emp_density <- density(base_data, n = 10000)
+den_curve <- data.table(x = emp_density$x, y = emp_density$y)
+
+ggplot(data = den_curve, aes(x = x, y = y)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(name = "density\n", limits = c(0, 0.11), 
+     breaks = seq(0, .10, by = .02)) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank())
+```
+
+Drawing samples from this distribution is a simple call to `genDataDensity`. The key argument is the data distribution as as represented by the vector of integers:  
+
+```{r, fig.width = 8, fig.height = 4, warning=FALSE}
+dx1 <- genDataDensity(10000, dataDist = base_data, varname = "x1")
+```
+
+Here's a look at the sampled data and their relationship to the target density:
+
+```{r, warning=FALSE, fig.height = 4, fig.width = 8}
+ggplot(data = dx1, aes(x=x1)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), 
+    binwidth = 1, fill = "grey", color = "black", alpha = .2) +
+  geom_line(data = den_curve, aes(x = x, y = y), 
+    color = "black", linewidth = 2) +
+  scale_y_continuous(name = "density\n", limits = c(0, 0.11), 
+     breaks = seq(0, .10, by = .02)) +
+  scale_x_continuous(limits = c(-6, 15), breaks = seq(-5, 10, by = 5)) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold", size = 10))
+```
+
+Just to show that this was not a fluke, here are three additional target distributions, specified with three different vectors:
+
+```{r}
+base_data <- list(
+  c(1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7,   7,  8,  9, 10),
+  c(1, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4, 5, 6, 6, 7, 7, 7, 8, 9, 10, 10, 10, 10, 10),
+  c(1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10)
+)
+```
+
+```{r, fig.width = 8, fig.height = 4, echo=FALSE}
+den_dt <- function(x) {
+  de <- density(x, n = 10000)
+  de <- data.table(x = de$x, y = de$y)
+} 
+
+dens <- rbindlist(lapply(base_data, function(x) den_dt(x)), idcol = TRUE)
+
+colors <- c("#83d7ea", "#9683ea", "#ea9683")
+
+ggplot(data = dens, aes(x = x, y = y, group = .id)) +
+  geom_line(aes(color = factor(.id)), linewidth = 1) +
+  scale_y_continuous(name = "density\n", limits = c(0, 0.15), 
+    breaks = seq(0, .14, by = .02)) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none")
+```
+
+We can generate data from each of the distributions and then confirm that each one adequately fits its target distribution:
+
+```{r}
+dx2 <- genDataDensity(10000, dataDist = base_data[[1]], varname = "x1")
+dx3 <- genDataDensity(10000, dataDist = base_data[[2]], varname = "x1")
+dx4 <- genDataDensity(10000, dataDist = base_data[[3]], varname = "x1")
+```
+
+```{r, fig.width = 10, fig.height = 2.75, warning=FALSE, echo = FALSE}
+dx <- rbindlist(list(dx2, dx3, dx4), idcol = TRUE)
+
+cuts <- seq(dx[,floor(min(x1))], dx[,ceiling(max(x1))], by = 1)
+dcuts <- data.table(bin = 1:length(cuts), binlab = cuts)
+
+dx[, bin := cut(x1, breaks = cuts, labels = FALSE)]
+dx <- merge(dx, dcuts, by = "bin")
+
+dp <- dx[, .N, keyby = .(.id, binlab)]
+dp[, p := N/sum(N), keyby = .id]
+
+ggplot(data = dp, aes(x = binlab, y = p)) +
+  geom_bar(aes(fill = factor(.id), color = factor(.id)), stat = "identity", alpha = .4) +
+  geom_line(data = dens, aes(x = x, y = y, color = factor(.id)), 
+            linewidth = 2) +
+  xlab("\nx1") +
+  ylab("density\n") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold", size = 10),
+        legend.position = "none") + 
+  facet_grid(~ .id)  
+```
+
+
+### Addendum: code to generate multiple distribution plot
+
+This is a little off topic, but thought I'd share in case some one, some day might find the code useful to generate the "facet" plot. In the plot with the single distribution, I specified the histogram with this command:
+
+```{r, eval=FALSE}
+geom_histogram(aes(y = after_stat(count / sum(count))), ...)
+```               
+
+When I tried to apply this to the "facet" plot, the denominator of that plot (`sum(count)`) is not calculated for each subgroup (i.e., data set), but is the total across all data sets. As a result, the data set specific proportions were way too low; we can see that here:
+
+```{r, warning=FALSE, fig.height = 2.75, fig.width = 10}
+
+dx <- rbindlist(list(dx2, dx3, dx4), idcol = TRUE)
+
+ggplot(data = dx, aes(x=x1)) +
+  geom_histogram(
+    aes(y = after_stat(count / sum(count)), fill = factor(.id), color = factor(.id)),
+    binwidth = 1, alpha = .2) +
+  geom_line(data = dens, aes(x = x, y = y, color = factor(.id)), linewidth = 2) +
+    xlab("\nx1") +
+  ylab("density\n") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold", size = 10),
+        legend.position = "none") + 
+  facet_grid(~ .id)  
+```
+
+I looked around for a way to address this, but couldn't find anything that obviously addressed this shortcoming (though I am convinced it must be possible). I considered using `ggarrange`or something similar, but was not satisfied with the results. Instead, I though it would be faster just to calculate the proportions myself. This is the process I used:
+
+First, I created a data set with the bins (using a bin size of 1):
+
+```{r}
+cuts <- seq(dx[,floor(min(x1))], dx[,ceiling(max(x1))], by = 1)
+dcuts <- data.table(bin = 1:length(cuts), binlab = cuts)
+
+dcuts
+```
+
+Then, I allocated each observation to a bin using the `cut` function:
+
+```{r}
+dx[, bin := cut(x1, breaks = cuts, labels = FALSE)]
+dx <- merge(dx, dcuts, by = "bin")
+
+dx
+```
+
+Finally, I calculated the distribution-specific proportions (showing only the second distribution):
+
+```{r}
+dp <- dx[, .N, keyby = .(.id, binlab)]
+dp[, p := N/sum(N), keyby = .id]
+
+dp[.id == 2]
+```
+
+And now the facet plot will work just fine. Here is the code and the plot (again).
+
+```{r, fig.width = 10, fig.height = 2.75, warning=FALSE}
+ggplot(data = dp, aes(x = binlab, y = p)) +
+  geom_bar(aes(fill = factor(.id), color = factor(.id)), stat = "identity", alpha = .4) +
+  geom_line(data = dens, aes(x = x, y = y, color = factor(.id)), 
+            linewidth = 2) +
+  xlab("\nx1") +
+  ylab("density\n") +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold", size = 10),
+        legend.position = "none") + 
+  facet_grid(~ .id)  
+```
+
+
+  

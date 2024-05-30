@@ -1,0 +1,170 @@
+---
+title: 'simstudy: another way to generate data from a non-standard density'
+author: Package Build
+date: '2024-06-04'
+slug: []
+categories: []
+tags:
+  - R
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>One of my goals for the <code>simstudy</code> package is to make it as easy as possible to generate data from a wide range of data distributions. The recent <a href="https://www.rdatagen.net/post/2024-05-21-simstudy-customized-distributions/" target="_blank">update</a> created the possibility of generating data from a customized distribution specified in a user-defined function. Last week, I added two functions, <code>genDataDist</code> and <code>addDataDist</code>, that allow data generation from an empirical distribution defined by a vector of integers. (See <a href="https://kgoldfeld.github.io/simstudy/dev/index.html" target="_blank">here</a> for how to download latest development version.) This post provides a simple illustration of the new functionality.</p>
+<p>Here are the libraries needed, in case you want to follow along:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+
+set.seed(1234)</code></pre>
+<p>The target density is simply defined by specifying a vector that is intended to loosely represent a data distribution. We start by specifying the vector (which can be of any length):</p>
+<pre class="r"><code>base_data &lt;- 
+  c(1, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 8, 9, 9, 9, 10, 10, 10, 10, 10)</code></pre>
+<p>We can look at the density to make sure this is the shape we are interested in drawing our data from:</p>
+<pre class="r"><code>emp_density &lt;- density(base_data, n = 10000)
+den_curve &lt;- data.table(x = emp_density$x, y = emp_density$y)
+
+ggplot(data = den_curve, aes(x = x, y = y)) +
+  geom_line(linewidth = 1) +
+  scale_y_continuous(name = &quot;density\n&quot;, limits = c(0, 0.11), 
+     breaks = seq(0, .10, by = .02)) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank())</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
+<p>Drawing samples from this distribution is a simple call to <code>genDataDensity</code>. The key argument is the data distribution as as represented by the vector of integers:</p>
+<pre class="r"><code>dx1 &lt;- genDataDensity(10000, dataDist = base_data, varname = &quot;x1&quot;)</code></pre>
+<p>Here’s a look at the sampled data and their relationship to the target density:</p>
+<pre class="r"><code>ggplot(data = dx1, aes(x=x1)) +
+  geom_histogram(aes(y = after_stat(count / sum(count))), 
+    binwidth = 1, fill = &quot;grey&quot;, color = &quot;black&quot;, alpha = .2) +
+  geom_line(data = den_curve, aes(x = x, y = y), 
+    color = &quot;black&quot;, linewidth = 2) +
+  scale_y_continuous(name = &quot;density\n&quot;, limits = c(0, 0.11), 
+     breaks = seq(0, .10, by = .02)) +
+  scale_x_continuous(limits = c(-6, 15), breaks = seq(-5, 10, by = 5)) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = &quot;bold&quot;, size = 10))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="768" /></p>
+<p>Just to show that this was not a fluke, here are three additional target distributions, specified with three different vectors:</p>
+<pre class="r"><code>base_data &lt;- list(
+  c(1, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 5, 5, 6, 6, 7,   7,  8,  9, 10),
+  c(1, 2, 2, 3, 3, 4, 4, 4, 4, 4, 4, 5, 6, 6, 7, 7, 7, 8, 9, 10, 10, 10, 10, 10),
+  c(1, 2, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 8, 8, 9, 9, 9, 9, 10, 10, 10, 10, 10)
+)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="768" /></p>
+<p>We can generate data from each of the distributions and then confirm that each one adequately fits its target distribution:</p>
+<pre class="r"><code>dx2 &lt;- genDataDensity(10000, dataDist = base_data[[1]], varname = &quot;x1&quot;)
+dx3 &lt;- genDataDensity(10000, dataDist = base_data[[2]], varname = &quot;x1&quot;)
+dx4 &lt;- genDataDensity(10000, dataDist = base_data[[3]], varname = &quot;x1&quot;)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
+<div id="addendum-code-to-generate-multiple-distribution-plot" class="section level3">
+<h3>Addendum: code to generate multiple distribution plot</h3>
+<p>This is a little off topic, but thought I’d share in case some one, some day might find the code useful to generate the “facet” plot. In the plot with the single distribution, I specified the histogram with this command:</p>
+<pre class="r"><code>geom_histogram(aes(y = after_stat(count / sum(count))), ...)</code></pre>
+<p>When I tried to apply this to the “facet” plot, the denominator of that plot (<code>sum(count)</code>) is not calculated for each subgroup (i.e., data set), but is the total across all data sets. As a result, the data set specific proportions were way too low; we can see that here:</p>
+<pre class="r"><code>dx &lt;- rbindlist(list(dx2, dx3, dx4), idcol = TRUE)
+
+ggplot(data = dx, aes(x=x1)) +
+  geom_histogram(
+    aes(y = after_stat(count / sum(count)), fill = factor(.id), color = factor(.id)),
+    binwidth = 1, alpha = .2) +
+  geom_line(data = dens, aes(x = x, y = y, color = factor(.id)), linewidth = 2) +
+    xlab(&quot;\nx1&quot;) +
+  ylab(&quot;density\n&quot;) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = &quot;bold&quot;, size = 10),
+        legend.position = &quot;none&quot;) + 
+  facet_grid(~ .id)  </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
+<p>I looked around for a way to address this, but couldn’t find anything that obviously addressed this shortcoming (though I am convinced it must be possible). I considered using <code>ggarrange</code>or something similar, but was not satisfied with the results. Instead, I though it would be faster just to calculate the proportions myself. This is the process I used:</p>
+<p>First, I created a data set with the bins (using a bin size of 1):</p>
+<pre class="r"><code>cuts &lt;- seq(dx[,floor(min(x1))], dx[,ceiling(max(x1))], by = 1)
+dcuts &lt;- data.table(bin = 1:length(cuts), binlab = cuts)
+
+dcuts</code></pre>
+<pre><code>##       bin binlab
+##     &lt;int&gt;  &lt;num&gt;
+##  1:     1     -3
+##  2:     2     -2
+##  3:     3     -1
+##  4:     4      0
+##  5:     5      1
+##  6:     6      2
+##  7:     7      3
+##  8:     8      4
+##  9:     9      5
+## 10:    10      6
+## 11:    11      7
+## 12:    12      8
+## 13:    13      9
+## 14:    14     10
+## 15:    15     11
+## 16:    16     12
+## 17:    17     13
+## 18:    18     14</code></pre>
+<p>Then, I allocated each observation to a bin using the <code>cut</code> function:</p>
+<pre class="r"><code>dx[, bin := cut(x1, breaks = cuts, labels = FALSE)]
+dx &lt;- merge(dx, dcuts, by = &quot;bin&quot;)
+
+dx</code></pre>
+<pre><code>## Key: &lt;bin&gt;
+##          bin   .id    id        x1 binlab
+##        &lt;int&gt; &lt;int&gt; &lt;int&gt;     &lt;num&gt;  &lt;num&gt;
+##     1:     1     1  1251 -2.097413     -3
+##     2:     1     1  2215 -2.580587     -3
+##     3:     1     1  2404 -2.042049     -3
+##     4:     1     1  3228 -2.078958     -3
+##     5:     1     1  5039 -2.055471     -3
+##    ---                                   
+## 29996:    17     3  7690 13.290347     13
+## 29997:    17     3  8360 13.083991     13
+## 29998:    17     3  8860 13.149421     13
+## 29999:    17     3  9214 13.043727     13
+## 30000:    17     3  9743 13.199752     13</code></pre>
+<p>Finally, I calculated the distribution-specific proportions (showing only the second distribution):</p>
+<pre class="r"><code>dp &lt;- dx[, .N, keyby = .(.id, binlab)]
+dp[, p := N/sum(N), keyby = .id]
+
+dp[.id == 2]</code></pre>
+<pre><code>## Key: &lt;.id&gt;
+##       .id binlab     N      p
+##     &lt;int&gt;  &lt;num&gt; &lt;int&gt;  &lt;num&gt;
+##  1:     2     -3     3 0.0003
+##  2:     2     -2    38 0.0038
+##  3:     2     -1   130 0.0130
+##  4:     2      0   340 0.0340
+##  5:     2      1   619 0.0619
+##  6:     2      2   938 0.0938
+##  7:     2      3  1161 0.1161
+##  8:     2      4  1155 0.1155
+##  9:     2      5  1035 0.1035
+## 10:     2      6   882 0.0882
+## 11:     2      7   828 0.0828
+## 12:     2      8   861 0.0861
+## 13:     2      9   822 0.0822
+## 14:     2     10   641 0.0641
+## 15:     2     11   384 0.0384
+## 16:     2     12   140 0.0140
+## 17:     2     13    23 0.0023</code></pre>
+<p>And now the facet plot will work just fine. Here is the code and the plot (again).</p>
+<pre class="r"><code>ggplot(data = dp, aes(x = binlab, y = p)) +
+  geom_bar(aes(fill = factor(.id), color = factor(.id)), stat = &quot;identity&quot;, alpha = .4) +
+  geom_line(data = dens, aes(x = x, y = y, color = factor(.id)), 
+            linewidth = 2) +
+  xlab(&quot;\nx1&quot;) +
+  ylab(&quot;density\n&quot;) +
+  scale_fill_manual(values = colors) +
+  scale_color_manual(values = colors) +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = &quot;bold&quot;, size = 10),
+        legend.position = &quot;none&quot;) + 
+  facet_grid(~ .id)  </code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-15-1.png" width="960" /></p>
+</div>
