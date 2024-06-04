@@ -10,7 +10,6 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 
@@ -25,7 +24,7 @@ set.seed(1234)</code></pre>
 <p>The target density is simply defined by specifying a vector that is intended to loosely represent a data distribution. We start by specifying the vector (which can be of any length):</p>
 <pre class="r"><code>base_data &lt;- 
   c(1, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 8, 9, 9, 9, 10, 10, 10, 10, 10)</code></pre>
-<p>We can look at the density to make sure this is the shape we are interested in drawing our data from:</p>
+<p>We can look at the density to make sure this is the distribution we are interested in drawing our data from:</p>
 <pre class="r"><code>emp_density &lt;- density(base_data, n = 10000)
 den_curve &lt;- data.table(x = emp_density$x, y = emp_density$y)
 
@@ -36,7 +35,7 @@ ggplot(data = den_curve, aes(x = x, y = y)) +
   scale_color_manual(values = colors) +
   theme(panel.grid = element_blank())</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="768" /></p>
-<p>Drawing samples from this distribution is a simple call to <code>genDataDensity</code>. The key argument is the data distribution as as represented by the vector of integers:</p>
+<p>Actually drawing samples from this distribution is a simple call to <code>genDataDensity</code>. The key argument is the data distribution as as represented by the vector of integers:</p>
 <pre class="r"><code>dx1 &lt;- genDataDensity(10000, dataDist = base_data, varname = &quot;x1&quot;)</code></pre>
 <p>Here’s a look at the sampled data and their relationship to the target density:</p>
 <pre class="r"><code>ggplot(data = dx1, aes(x=x1)) +
@@ -64,9 +63,9 @@ dx4 &lt;- genDataDensity(10000, dataDist = base_data[[3]], varname = &quot;x1&qu
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="960" /></p>
 <div id="addendum-code-to-generate-multiple-distribution-plot" class="section level3">
 <h3>Addendum: code to generate multiple distribution plot</h3>
-<p>This is a little off topic, but thought I’d share in case some one, some day might find the code useful to generate the “facet” plot. In the plot with the single distribution, I specified the histogram with this command:</p>
+<p>Here is a little more detail in case someone might find it useful to have the code that generates the “facet” plot. In the plot with the single distribution, I specified the histogram with this command:</p>
 <pre class="r"><code>geom_histogram(aes(y = after_stat(count / sum(count))), ...)</code></pre>
-<p>When I tried to apply this to the “facet” plot, the denominator of that plot (<code>sum(count)</code>) is not calculated for each subgroup (i.e., data set), but is the total across all data sets. As a result, the data set specific proportions were way too low; we can see that here:</p>
+<p>When I tried to apply this to the “facet” plot, the denominator of that plot (<code>sum(count)</code>) was not calculated for each subgroup (i.e., dataset), but was the total across all datasets. As a result, the dataset-specific proportions were underestimated; we can see that here:</p>
 <pre class="r"><code>dx &lt;- rbindlist(list(dx2, dx3, dx4), idcol = TRUE)
 
 ggplot(data = dx, aes(x=x1)) +
@@ -83,8 +82,8 @@ ggplot(data = dx, aes(x=x1)) +
         legend.position = &quot;none&quot;) + 
   facet_grid(~ .id)  </code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-11-1.png" width="960" /></p>
-<p>I looked around for a way to address this, but couldn’t find anything that obviously addressed this shortcoming (though I am convinced it must be possible). I considered using <code>ggarrange</code>or something similar, but was not satisfied with the results. Instead, I though it would be faster just to calculate the proportions myself. This is the process I used:</p>
-<p>First, I created a data set with the bins (using a bin size of 1):</p>
+<p>I looked around for a way to address this, but couldn’t find anything that obviously addressed this shortcoming (though I am convinced it must be possible, and I just couldn’t locate the solution). I considered using <code>ggarrange</code>or something similar, but was not satisfied with the results. Instead, it turned out to be faster just to calculate the proportions myself. This is the process I used:</p>
+<p>First, I created a dataset with the bins (using a bin size of 1):</p>
 <pre class="r"><code>cuts &lt;- seq(dx[,floor(min(x1))], dx[,ceiling(max(x1))], by = 1)
 dcuts &lt;- data.table(bin = 1:length(cuts), binlab = cuts)
 

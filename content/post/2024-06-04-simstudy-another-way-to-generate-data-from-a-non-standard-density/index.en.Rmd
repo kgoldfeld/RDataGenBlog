@@ -10,7 +10,6 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 One of my goals for the `simstudy` package is to make it as easy as possible to generate data from a wide range of data distributions. The recent [update](https://www.rdatagen.net/post/2024-05-21-simstudy-customized-distributions/){target="_blank"} created the possibility of generating data from a customized distribution specified in a user-defined function. Last week, I added two functions, `genDataDist` and `addDataDist`, that allow data generation from an empirical distribution defined by a vector of integers. (See [here](https://kgoldfeld.github.io/simstudy/dev/index.html){target="_blank"} for how to download latest development version.) This post provides a simple illustration of the new functionality.
@@ -32,7 +31,7 @@ base_data <-
   c(1, 2, 2, 2, 2, 2, 2, 3, 3, 4, 4, 5, 6, 6, 7, 8, 9, 9, 9, 10, 10, 10, 10, 10)
 ```
 
-We can look at the density to make sure this is the shape we are interested in drawing our data from:
+We can look at the density to make sure this is the distribution we are interested in drawing our data from:
 
 ```{r, fig.width = 8, fig.height = 4}
 emp_density <- density(base_data, n = 10000)
@@ -46,7 +45,7 @@ ggplot(data = den_curve, aes(x = x, y = y)) +
   theme(panel.grid = element_blank())
 ```
 
-Drawing samples from this distribution is a simple call to `genDataDensity`. The key argument is the data distribution as as represented by the vector of integers:  
+Actually drawing samples from this distribution is a simple call to `genDataDensity`. The key argument is the data distribution as as represented by the vector of integers:  
 
 ```{r, fig.width = 8, fig.height = 4, warning=FALSE}
 dx1 <- genDataDensity(10000, dataDist = base_data, varname = "x1")
@@ -133,13 +132,13 @@ ggplot(data = dp, aes(x = binlab, y = p)) +
 
 ### Addendum: code to generate multiple distribution plot
 
-This is a little off topic, but thought I'd share in case some one, some day might find the code useful to generate the "facet" plot. In the plot with the single distribution, I specified the histogram with this command:
+Here is a little more detail in case someone might find it useful to have the code that generates the "facet" plot. In the plot with the single distribution, I specified the histogram with this command:
 
 ```{r, eval=FALSE}
 geom_histogram(aes(y = after_stat(count / sum(count))), ...)
 ```               
 
-When I tried to apply this to the "facet" plot, the denominator of that plot (`sum(count)`) is not calculated for each subgroup (i.e., data set), but is the total across all data sets. As a result, the data set specific proportions were way too low; we can see that here:
+When I tried to apply this to the "facet" plot, the denominator of that plot (`sum(count)`) was not calculated for each subgroup (i.e., dataset), but was the total across all datasets. As a result, the dataset-specific proportions were underestimated; we can see that here:
 
 ```{r, warning=FALSE, fig.height = 2.75, fig.width = 10}
 
@@ -160,9 +159,9 @@ ggplot(data = dx, aes(x=x1)) +
   facet_grid(~ .id)  
 ```
 
-I looked around for a way to address this, but couldn't find anything that obviously addressed this shortcoming (though I am convinced it must be possible). I considered using `ggarrange`or something similar, but was not satisfied with the results. Instead, I though it would be faster just to calculate the proportions myself. This is the process I used:
+I looked around for a way to address this, but couldn't find anything that obviously addressed this shortcoming (though I am convinced it must be possible, and I just couldn't locate the solution). I considered using `ggarrange`or something similar, but was not satisfied with the results. Instead, it turned out to be faster just to calculate the proportions myself. This is the process I used:
 
-First, I created a data set with the bins (using a bin size of 1):
+First, I created a dataset with the bins (using a bin size of 1):
 
 ```{r}
 cuts <- seq(dx[,floor(min(x1))], dx[,ceiling(max(x1))], by = 1)
