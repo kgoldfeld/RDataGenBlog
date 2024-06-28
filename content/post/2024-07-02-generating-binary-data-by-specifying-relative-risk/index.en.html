@@ -1,0 +1,152 @@
+---
+title: Generating binary data by specifying the relative risk
+author: Package Build
+date: '2024-07-02'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+  - logistic regression
+  - poisson regression
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>The traditional approach for analyzing binary outcome data is logistic regression, where the estimated parameters are interpreted as log odds ratios or, if exponentiated, as odds ratios (ORs). No one other than statisticians (and maybe not even statisticians) finds the odds ratio to be a very compelling statistic, and many feel that a risk difference or risk ratio/relative risks (RRs) are much more interpretable. Indeed, there seems to be a strong belief that readers will, more often than not, interpret odds ratios as risk ratios. This turns out to be reasonable when an event is rare. However, when the event is more prevalent, the odds ratio will diverge from the risk ratio. (Here is a <a href="https://doi.org/10.1093/aje/kwh090" target="_blank">paper</a> that discusses some of these issues in greater depth, in case you came here looking for more.)</p>
+<p>I was playing around with ORs and RRs using <code>simstudy</code> and realized that up until now, one could not specify a binary data generating process using an assumption about the underlying RR. (Well, you actually could, but it required the extra step of explicitly creating probability parameters using a RR assumption.) I’ve rectified that in the latest development version, by including a “log” link option for the binary distribution (and for binomial data generation more broadly). Here’s some simulation code to show this in action.</p>
+<div id="simulation" class="section level3">
+<h3>Simulation</h3>
+<p>In this data set, the treatment indicator is <span class="math inline">\(A\)</span>. The control group (<span class="math inline">\(A = 0\)</span>) will have a <span class="math inline">\(20\%\)</span> underlying probability of an outcome. The risk ratio is 1.8, so that the underlying probability of an outcome in the treatment group (<span class="math inline">\(A = 1\)</span>) is <span class="math inline">\(1.8 \times 0.20 = 36\%\)</span>.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+
+def &lt;- 
+  defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;) |&gt;
+  defData(
+    varname = &quot;y&quot;, 
+    formula = &quot;log(0.2) + A * log(1.8)&quot;,
+    dist = &quot;binary&quot;,
+    link = &quot;log&quot;
+  )</code></pre>
+<p>The data generation bears this out:</p>
+<pre class="r"><code>set.seed(123)
+dd &lt;- genData(1000, def)</code></pre>
+<pre><code>## Key: &lt;id&gt;
+##          id     A     y
+##       &lt;int&gt; &lt;int&gt; &lt;int&gt;
+##    1:     1     0     0
+##    2:     2     0     0
+##    3:     3     0     0
+##    4:     4     1     0
+##    5:     5     0     0
+##   ---                  
+##  996:   996     0     1
+##  997:   997     0     0
+##  998:   998     0     0
+##  999:   999     1     0
+## 1000:  1000     0     0</code></pre>
+<pre class="r"><code>dsum &lt;- dd[, .(p = mean(y)), keyby = A]
+dsum</code></pre>
+<pre><code>## Key: &lt;A&gt;
+##        A     p
+##    &lt;int&gt; &lt;num&gt;
+## 1:     0 0.210
+## 2:     1 0.366</code></pre>
+</div>
+<div id="added-bonus-estimating-the-rr-using-regression" class="section level3">
+<h3>Added bonus: estimating the RR using regression</h3>
+<p>Under the traditional approach, we might estimate a logistic regression model:</p>
+<pre class="r"><code>summary(glm(y ~ A, family = binomial, data = dd))</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = y ~ A, family = binomial, data = dd)
+## 
+## Coefficients:
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)  -1.3249     0.1098 -12.067  &lt; 2e-16 ***
+## A             0.7755     0.1438   5.393 6.91e-08 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 1200.7  on 999  degrees of freedom
+## Residual deviance: 1170.7  on 998  degrees of freedom
+## AIC: 1174.7
+## 
+## Number of Fisher Scoring iterations: 4</code></pre>
+<p>The parameter of interest is <span class="math inline">\(e^{0.7755} = 2.1716\)</span>, which is a bit higher than the <span class="math inline">\(RR = 1.8\)</span> used to generate the data. The reason, of course, is that it is the OR.</p>
+<pre class="r"><code>fit_logbin = glm(y ~ A, family = binomial(link=&quot;log&quot;), data = dd)
+summary(fit_logbin)</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = y ~ A, family = binomial(link = &quot;log&quot;), data = dd)
+## 
+## Coefficients:
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept) -1.56065    0.08674  -17.99  &lt; 2e-16 ***
+## A            0.55553    0.10483    5.30 1.16e-07 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 1200.7  on 999  degrees of freedom
+## Residual deviance: 1170.7  on 998  degrees of freedom
+## AIC: 1174.7
+## 
+## Number of Fisher Scoring iterations: 6</code></pre>
+<p>Here, the estimated parameter <em>is</em> the log(RR), so the estimated <span class="math inline">\(RR =e^{0.5555} = 1.7428\)</span>, much closer to the true value.</p>
+<p>The <a href="https://doi.org/10.1093/aje/kwh090" target="_blank">paper</a> I’ve referenced suggests that binomial regression with a log link does not always reliably converge, so they suggest a modified Poisson regression as a better approach. The modification arises because the standard errors estimated from the Poisson model are too conservative (i.e. high). We know that the binary data (Bernoulli distribution) variation is proportional to <span class="math inline">\(p(1-p)\)</span>, whereas the variance for the Poisson model is proportional to <span class="math inline">\(p\)</span>. Since <span class="math inline">\(0 &lt; p &lt; 1\)</span>, <span class="math inline">\(p &gt; p(1-p)\)</span>. This makes sense as the binary outcome data is limited to <span class="math inline">\(0\)</span> and <span class="math inline">\(1\)</span>, but the Poisson data can include values greater than <span class="math inline">\(1\)</span>.</p>
+<p>We can see this by simply generating data from each distribution:</p>
+<pre class="r"><code>rb &lt;- rbinom(10000, 1, 0.20)
+rp &lt;- rpois(10000, 0.20)</code></pre>
+<pre><code>##      dist   avg   var   min   max
+##    &lt;char&gt; &lt;num&gt; &lt;num&gt; &lt;num&gt; &lt;int&gt;
+## 1:  binom   0.2  0.16     0     1
+## 2:   pois   0.2  0.19     0     3</code></pre>
+<p>Now, we can estimate a Poisson regression model. Since “log” is the default link for <em>Poisson</em> regression for function <code>glm</code>, we should get a risk ratio estimate similar to the log-binomial regression above, and in fact we do:</p>
+<pre class="r"><code>fit_pois &lt;- glm(y ~  A, family = poisson, data = dd)
+summary(fit_pois)</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = y ~ A, family = poisson, data = dd)
+## 
+## Coefficients:
+##             Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept) -1.56065    0.09758 -15.994  &lt; 2e-16 ***
+## A            0.55553    0.12242   4.538 5.68e-06 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for poisson family taken to be 1)
+## 
+##     Null deviance: 717.00  on 999  degrees of freedom
+## Residual deviance: 695.61  on 998  degrees of freedom
+## AIC: 1275.6
+## 
+## Number of Fisher Scoring iterations: 5</code></pre>
+<p>The only issue is that we see that the standard error is inflated somewhat, the log-binomial model standard error the treatment parameter was <span class="math inline">\(0.10483\)</span>, whereas it is <span class="math inline">\(0.12242\)</span> in the Poisson model. If we estimate a robust standard error using the function <code>vcovHC</code> in the <code>sandwich</code> package, we can see that it is much more in line with the log-binomial estimate. (I could simulate many data sets to see what the variation of the estimate is, but I’ll leave that to you as an exercise.)</p>
+<pre class="r"><code>library(sandwich)
+
+data.table(
+  t(summary(fit_pois)$coef[&quot;A&quot;,c(&quot;Estimate&quot;, &quot;Std. Error&quot;)]),
+  logbin.SE = summary(fit_logbin)$coef[&quot;A&quot;,c(&quot;Std. Error&quot;)],
+  robust.SE = sqrt(diag(vcovHC(fit_pois, type = &quot;HC3&quot;)))[&quot;A&quot;]
+)</code></pre>
+<pre><code>##     Estimate Std. Error logbin.SE robust.SE
+##        &lt;num&gt;      &lt;num&gt;     &lt;num&gt;     &lt;num&gt;
+## 1: 0.5555258   0.122418  0.104825 0.1050351</code></pre>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+Guangyong Zou. “A Modified Poisson Regression Approach to Prospective Studies with Binary Data.” American Journal of Epidemiology. Volume 159, Issue 7, 1 April 2004, Pages 702–706.
+</font></small>
+</p>
+</div>

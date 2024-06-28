@@ -1,0 +1,117 @@
+---
+title: Generating binary data by specifying the relative risk
+author: Package Build
+date: '2024-07-02'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+  - logistic regression
+  - poisson regression
+  - simstudy
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+The traditional approach for analyzing binary outcome data is logistic regression, where the estimated parameters are interpreted as log odds ratios or, if exponentiated, as odds ratios (ORs). No one other than statisticians (and maybe not even statisticians) finds the odds ratio to be a very compelling statistic, and many feel that a risk difference or risk ratio/relative risks (RRs) are much more interpretable. Indeed, there seems to be a strong belief that readers will, more often than not, interpret odds ratios as risk ratios. This turns out to be reasonable when an event is rare. However, when the event is more prevalent, the odds ratio will diverge from the risk ratio. (Here is a [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} that discusses some of these issues in greater depth, in case you came here looking for more.)
+
+I was playing around with ORs and RRs using `simstudy` and realized that up until now, one could not specify a binary data generating process using an assumption about the underlying RR. (Well, you actually could, but it required the extra step of explicitly creating probability parameters using a RR assumption.) I've rectified that in the latest development version, by including a "log" link option for the binary distribution (and for binomial data generation more broadly). Here's some simulation code to show this in action.
+
+### Simulation
+
+In this data set, the treatment indicator is $A$. The control group ($A = 0$) will have a $20\%$ underlying probability of an outcome. The risk ratio is 1.8, so that the underlying probability of an outcome in the treatment group ($A = 1$) is $1.8 \times 0.20 = 36\%$.
+
+```{r}
+library(simstudy)
+library(data.table)
+
+def <- 
+  defData(varname = "A", formula = "1;1", dist = "trtAssign") |>
+  defData(
+    varname = "y", 
+    formula = "log(0.2) + A * log(1.8)",
+    dist = "binary",
+    link = "log"
+  )
+```
+
+The data generation bears this out:
+
+```{r}
+set.seed(123)
+dd <- genData(1000, def)
+```
+
+```{r,echo = FALSE}
+dd
+```
+
+```{r}
+dsum <- dd[, .(p = mean(y)), keyby = A]
+dsum
+```
+
+### Added bonus: estimating the RR using regression
+
+Under the traditional approach, we might estimate a logistic regression model:
+
+```{r}
+summary(glm(y ~ A, family = binomial, data = dd))
+```
+
+The parameter of interest is $e^{0.7755} = 2.1716$, which is a bit higher than the $RR = 1.8$ used to generate the data. The reason, of course, is that it is the OR.
+
+```{r}
+fit_logbin = glm(y ~ A, family = binomial(link="log"), data = dd)
+summary(fit_logbin)
+```
+
+Here, the estimated parameter *is* the log(RR), so the estimated $RR =e^{0.5555} = 1.7428$, much closer to the true value.
+
+The [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} I've referenced suggests that binomial regression with a log link does not always reliably converge, so they suggest a modified Poisson regression as a better approach. The modification arises because the standard errors estimated from the Poisson model are too conservative (i.e. high). We know that the binary data (Bernoulli distribution) variation is proportional to $p(1-p)$, whereas the variance for the Poisson model is proportional to $p$. Since $0 < p < 1$, $p > p(1-p)$. This makes sense as the binary outcome data is limited to $0$ and $1$, but the Poisson data can include values greater than $1$.
+
+We can see this by simply generating data from each distribution:
+
+```{r}
+rb <- rbinom(10000, 1, 0.20)
+rp <- rpois(10000, 0.20)
+```
+
+```{r, echo = FALSE}
+data.table(
+  dist = c("binom", "pois"), 
+  avg = round(c(mean(rb), mean(rp)), 2),
+  var = round(c(var(rb), var(rp)), 2),
+  min = round(c(min(rb), min(rp)), 2),
+  max = c(max(rb), max(rp))
+)
+```
+
+Now, we can estimate a Poisson regression model. Since "log" is the default link for *Poisson* regression for function `glm`, we should get a risk ratio estimate similar to the log-binomial regression above, and in fact we do:
+
+```{r}
+fit_pois <- glm(y ~  A, family = poisson, data = dd)
+summary(fit_pois)
+```
+
+The only issue is that we see that the standard error is inflated somewhat, the log-binomial model standard error the treatment parameter was $0.10483$, whereas it is $0.12242$ in the Poisson model. If we estimate a robust standard error using the function `vcovHC` in the `sandwich` package, we can see that it is much more in line with the log-binomial estimate. (I could simulate many data sets to see what the variation of the estimate is, but I'll leave that to you as an exercise.)
+
+```{r}
+library(sandwich)
+
+data.table(
+  t(summary(fit_pois)$coef["A",c("Estimate", "Std. Error")]),
+  logbin.SE = summary(fit_logbin)$coef["A",c("Std. Error")],
+  robust.SE = sqrt(diag(vcovHC(fit_pois, type = "HC3")))["A"]
+)
+```
+
+<p><small><font color="darkkhaki">
+References:
+
+Guangyong Zou. "A Modified Poisson Regression Approach to Prospective Studies with Binary Data." American Journal of Epidemiology. Volume 159, Issue 7, 1 April 2004, Pages 702–706.
+</font></small></p>
+
