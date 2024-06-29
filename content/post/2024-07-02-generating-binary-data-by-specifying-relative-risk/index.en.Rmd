@@ -16,7 +16,7 @@ image: ''
 draft: TRUE
 ---
 
-The traditional approach for analyzing binary outcome data is logistic regression, where the estimated parameters are interpreted as log odds ratios or, if exponentiated, as odds ratios (ORs). No one other than statisticians (and maybe not even statisticians) finds the odds ratio to be a very compelling statistic, and many feel that a risk difference or risk ratio/relative risks (RRs) are much more interpretable. Indeed, there seems to be a strong belief that readers will, more often than not, interpret odds ratios as risk ratios. This turns out to be reasonable when an event is rare. However, when the event is more prevalent, the odds ratio will diverge from the risk ratio. (Here is a [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} that discusses some of these issues in greater depth, in case you came here looking for more.)
+The most traditional approach for analyzing binary outcome data is logistic regression, where the estimated parameters are interpreted as log odds ratios or, if exponentiated, as odds ratios (ORs). No one other than statisticians (and maybe not even statisticians) finds the odds ratio to be a very intuitive statistic, and many feel that a risk difference or risk ratio/relative risks (RRs) are much more interpretable. Indeed, there seems to be a strong belief that readers will, more often than not, interpret odds ratios as risk ratios. This turns out to be reasonable when an event is rare. However, when the event is more prevalent, the odds ratio will diverge from the risk ratio. (Here is a [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} that discusses some of these issues in greater depth, in case you came here looking for more.)
 
 I was playing around with ORs and RRs using `simstudy` and realized that up until now, one could not specify a binary data generating process using an assumption about the underlying RR. (Well, you actually could, but it required the extra step of explicitly creating probability parameters using a RR assumption.) I've rectified that in the latest development version, by including a "log" link option for the binary distribution (and for binomial data generation more broadly). Here's some simulation code to show this in action.
 
@@ -50,8 +50,7 @@ dd
 ```
 
 ```{r}
-dsum <- dd[, .(p = mean(y)), keyby = A]
-dsum
+dd[, .(obs_p = mean(y)), keyby = A]
 ```
 
 ### Added bonus: estimating the RR using regression
@@ -64,6 +63,8 @@ summary(glm(y ~ A, family = binomial, data = dd))
 
 The parameter of interest is $e^{0.7755} = 2.1716$, which is a bit higher than the $RR = 1.8$ used to generate the data. The reason, of course, is that it is the OR.
 
+We can estimate the RR by using a log-binomial regression model. Like logistic regression, this is implemented using the `glm` function with the binomial "familly", but with a "log" link instead of a "logistic" link:
+
 ```{r}
 fit_logbin = glm(y ~ A, family = binomial(link="log"), data = dd)
 summary(fit_logbin)
@@ -71,9 +72,9 @@ summary(fit_logbin)
 
 Here, the estimated parameter *is* the log(RR), so the estimated $RR =e^{0.5555} = 1.7428$, much closer to the true value.
 
-The [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} I've referenced suggests that binomial regression with a log link does not always reliably converge, so they suggest a modified Poisson regression as a better approach. The modification arises because the standard errors estimated from the Poisson model are too conservative (i.e. high). We know that the binary data (Bernoulli distribution) variation is proportional to $p(1-p)$, whereas the variance for the Poisson model is proportional to $p$. Since $0 < p < 1$, $p > p(1-p)$. This makes sense as the binary outcome data is limited to $0$ and $1$, but the Poisson data can include values greater than $1$.
+The [paper](https://doi.org/10.1093/aje/kwh090){target="_blank"} I've referenced suggests that binomial regression with a log link does not always reliably converge, so they suggest a modified Poisson regression as a better approach. The modification arises because the standard errors estimated from the Poisson model are too conservative (i.e. too high). We know that the binary data (Bernoulli distribution) variation is proportional to $p(1-p)$, whereas the variance for the Poisson model is proportional to $p$. Since $0 < p < 1$, $p > p(1-p)$. This makes sense as the binary outcome data is limited to $0$ and $1$, but the Poisson data can include values greater than $1$.
 
-We can see this by simply generating data from each distribution:
+We can see this by generating data from each distribution:
 
 ```{r}
 rb <- rbinom(10000, 1, 0.20)
@@ -90,21 +91,22 @@ data.table(
 )
 ```
 
-Now, we can estimate a Poisson regression model. Since "log" is the default link for *Poisson* regression for function `glm`, we should get a risk ratio estimate similar to the log-binomial regression above, and in fact we do:
+Now, let's estimate a Poisson regression model. Since "log" is the default link for *Poisson* regression for function `glm`, we should get a risk ratio estimate similar to the log-binomial regression above, and in fact we do:
 
 ```{r}
 fit_pois <- glm(y ~  A, family = poisson, data = dd)
 summary(fit_pois)
 ```
 
-The only issue is that we see that the standard error is inflated somewhat, the log-binomial model standard error the treatment parameter was $0.10483$, whereas it is $0.12242$ in the Poisson model. If we estimate a robust standard error using the function `vcovHC` in the `sandwich` package, we can see that it is much more in line with the log-binomial estimate. (I could simulate many data sets to see what the variation of the estimate is, but I'll leave that to you as an exercise.)
+The only issue is that we see that the standard error is inflated somewhat, the log-binomial model standard error the treatment parameter was $0.10483$, whereas the estimate is $0.12242$ in the Poisson model. If we estimate a robust standard error using the function `vcovHC` in the `sandwich` package, the standard error is in now line with the log-binomial estimate. (I could simulate many data sets to see what the empirical variation of the estimate is, but I'll leave that to you as an exercise.)
 
 ```{r}
 library(sandwich)
 
 data.table(
-  t(summary(fit_pois)$coef["A",c("Estimate", "Std. Error")]),
-  logbin.SE = summary(fit_logbin)$coef["A",c("Std. Error")],
+  estimate = summary(fit_pois)$coef["A", "Estimate"],
+  pois.SE = summary(fit_pois)$coef["A", "Std. Error"],
+  logbin.SE = summary(fit_logbin)$coef["A", "Std. Error"],
   robust.SE = sqrt(diag(vcovHC(fit_pois, type = "HC3")))["A"]
 )
 ```
