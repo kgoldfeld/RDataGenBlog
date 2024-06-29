@@ -63,7 +63,7 @@ summary(glm(y ~ A, family = binomial, data = dd))
 
 The parameter of interest is $e^{0.7755} = 2.1716$, which is a bit higher than the $RR = 1.8$ used to generate the data. The reason, of course, is that it is the OR.
 
-We can estimate the RR by using a log-binomial regression model. Like logistic regression, this is implemented using the `glm` function with the binomial "familly", but with a "log" link instead of a "logistic" link:
+We can estimate the RR by using a log-binomial regression model. Like logistic regression, this is implemented using the `glm` function with the binomial "family", but with a "log" link instead of a "logistic" link:
 
 ```{r}
 fit_logbin = glm(y ~ A, family = binomial(link="log"), data = dd)
@@ -110,6 +110,27 @@ data.table(
   robust.SE = sqrt(diag(vcovHC(fit_pois, type = "HC3")))["A"]
 )
 ```
+
+And just to doubly make sure that the robust standard errors are reasonable, we can estimate standard errors using a simple bootstrap:
+
+```{r}
+bootstrap_both <- function(dx) {
+  
+  selected.rows <- dx[, sample(id, replace = TRUE), keyby = A][, V1]
+  ds <- dx[selected.rows]
+  
+  fit_logbin = glm(y ~ A, family = binomial(link="log"), data = ds)
+  fit_pois <- glm(y ~  A, family = poisson, data = ds)
+  
+  data.table(bs.logbin = coef(fit_logbin)["A"], bs.pois = coef(fit_pois)["A"])
+  
+}
+
+bs.res <- rbindlist(lapply(1:1500, function(x) bootstrap_both(dd)))
+bs.res[, .(bs.se_logbin = sd(bs.logbin), bs.se_pois = sd(bs.pois))]
+```
+
+It does look like the robust standard errors for the Poisson regression model are indeed pretty robust, and that in this simple case at least, there is no difference between the Poisson and log-binomial models.
 
 <p><small><font color="darkkhaki">
 References:

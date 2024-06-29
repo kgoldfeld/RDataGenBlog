@@ -81,7 +81,7 @@ dd &lt;- genData(1000, def)</code></pre>
 ## 
 ## Number of Fisher Scoring iterations: 4</code></pre>
 <p>The parameter of interest is <span class="math inline">\(e^{0.7755} = 2.1716\)</span>, which is a bit higher than the <span class="math inline">\(RR = 1.8\)</span> used to generate the data. The reason, of course, is that it is the OR.</p>
-<p>We can estimate the RR by using a log-binomial regression model. Like logistic regression, this is implemented using the <code>glm</code> function with the binomial “familly”, but with a “log” link instead of a “logistic” link:</p>
+<p>We can estimate the RR by using a log-binomial regression model. Like logistic regression, this is implemented using the <code>glm</code> function with the binomial “family”, but with a “log” link instead of a “logistic” link:</p>
 <pre class="r"><code>fit_logbin = glm(y ~ A, family = binomial(link=&quot;log&quot;), data = dd)
 summary(fit_logbin)</code></pre>
 <pre><code>## 
@@ -144,6 +144,25 @@ data.table(
 <pre><code>##     estimate  pois.SE logbin.SE robust.SE
 ##        &lt;num&gt;    &lt;num&gt;     &lt;num&gt;     &lt;num&gt;
 ## 1: 0.5555258 0.122418  0.104825 0.1050351</code></pre>
+<p>And just to doubly make sure that the robust standard errors are reasonable, we can estimate standard errors using a simple bootstrap:</p>
+<pre class="r"><code>bootstrap_both &lt;- function(dx) {
+  
+  selected.rows &lt;- dx[, sample(id, replace = TRUE), keyby = A][, V1]
+  ds &lt;- dx[selected.rows]
+  
+  fit_logbin = glm(y ~ A, family = binomial(link=&quot;log&quot;), data = ds)
+  fit_pois &lt;- glm(y ~  A, family = poisson, data = ds)
+  
+  data.table(bs.logbin = coef(fit_logbin)[&quot;A&quot;], bs.pois = coef(fit_pois)[&quot;A&quot;])
+  
+}
+
+bs.res &lt;- rbindlist(lapply(1:1500, function(x) bootstrap_both(dd)))
+bs.res[, .(bs.se_logbin = sd(bs.logbin), bs.se_pois = sd(bs.pois))]</code></pre>
+<pre><code>##    bs.se_logbin bs.se_pois
+##           &lt;num&gt;      &lt;num&gt;
+## 1:    0.1043538  0.1043538</code></pre>
+<p>It does look like the robust standard errors for the Poisson regression model are indeed pretty robust, and that in this simple case at least, there is no difference between the Poisson and log-binomial models.</p>
 <p>
 <p><small><font color="darkkhaki">
 References:</p>
