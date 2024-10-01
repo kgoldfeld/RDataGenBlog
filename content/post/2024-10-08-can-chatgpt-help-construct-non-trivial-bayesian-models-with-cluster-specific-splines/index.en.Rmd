@@ -1,0 +1,356 @@
+---
+title: Can ChatGPT help construct non-trivial bayesian models? An example with cluster-specific splines
+author: Package Build
+date: '2024-10-08'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - ChatGPT
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+I've been curious to see how helpful ChatGPT can be for helping implelementing relatively complicated models in `R`. About two years, I [described](https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/){target="_blank"} a model that we had developed to estimate a treatment effect in the context of a cluster-randoimzed stepped wedge trial design. We used a generalized additive model (GAM) with site-specific splines to account for general time trends, which can be implemeented using the `mgcv` package. I was always interested in exploring whether we could implement a Bayeisan version of this model, but was never able to give it a try. Until, that is, I posed this simple question to ChatGPT:
+
+<blockquote>
+I want to build an R Stan model with cluster specific random splines - is that possible?
+</blockquote>
+
+And as ChatGPT does, it eagerly let me know that this would not be a problem:
+
+<blockquote>
+Yes, it's possible to build a model in R using Stan with cluster-specific random splines. This approach involves using a hierarchical model where each cluster has its own spline, but the splines share a common structure.
+
+Here is a step-by-step outline to guide you through this process:
+
+1. **Data Preparation**: Organize your data into clusters and ensure it's in a suitable format for modeling.
+2. **Spline Basis Functions**: Generate spline basis functions (e.g., B-splines) for your data. This can be done using packages like `splines` or `mgcv` in R.
+3. **Stan Model Code**: Write the Stan code for the hierarchical spline model. The model will include cluster-specific random effects for the spline coefficients.
+4. **Data List for Stan**: Create a list of data inputs required by the Stan model, including the spline basis functions and the data itself.
+5. **Run the Model**: Use the `rstan` package to compile and fit the model.
+</blockquote>
+
+Maybe I shouldn't have been, but I was pretty impressed by the code that followed. I thought I would share some of that here. (Though, obviously, who needs a blog like this when you can to ChatGPT yourself to get any example you might be seeking?)
+
+### Preliminaries
+
+Before I get started, here are the libraries needed to run all of the following code:
+
+```{r, message=FALSE}
+library(ggplot2)
+library(simstudy)
+library(data.table)
+library(mgcv)
+library(splines)
+library(splines2)
+library(cmdstanr)
+library(posterior)
+```
+
+### Data 
+
+Here is the data generation suggested by ChatGPT. I was actually underwhelmed by this, because we are want to model cluster-specific spline curves, but this code generates the same curve for each cluster, so it is not really a very interesting example:
+
+```{r, fig.width = 8.5, fig.height=4, warning=FALSE}
+set.seed(2024)
+
+n <- 1000
+k <- 10  # number of clusters
+x <- runif(n)
+cluster <- sample(1:k, n, replace = TRUE)
+y <- sin(2  * pi * x) + rnorm(n, sd = 0.35)
+dd <- data.table(y, x, cluster)
+dd$cluster <- factor(dd$cluster)
+
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+In any case, I don't really need ChatGPT to tell me how to simulate data, so I went ahead and wrote this code, which adds a cluster-specific parameter $a$ that stretches the *sin* curve:
+
+```{r}
+k <- 10  # number of clusters
+
+defc <- defData(varname = "a", formula = "0.6;1.4", dist = "uniform")
+defi <- 
+  defDataAdd(varname = "x", formula = "0;1", dist = "uniform") |>
+  defDataAdd(
+    varname = "y", 
+    formula =  "sin(2 * a * ..pi * x)", 
+    variance = 0.35^2
+  )
+
+dc <- genData(k, defc, id = "cluster")
+dd <- genCluster(dc, "cluster", 100, "id")
+dd <- addColumns(defi, dd)
+dd[, cluster := factor(cluster)]
+```
+
+```{r, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+Before getting to the Bayesian models - here is the GAM model that estimates an overall spline as well as cluster-specific random splines:
+
+```{r, fig.width = 8.5, fig.height=4, warning=FALSE}
+gam <- gamm(
+  y ~ s(x) + s(x, cluster, bs = "fs", k = 8),
+  data = dd, method="REML"
+)
+
+dd$g <- predict(gam$gam)
+```
+
+Here are the original data with the estimated fit from the GAM model in green:
+
+```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5, color = "grey65") +
+  geom_line(aes(y = g), color = "darkgreen") +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+### Bayesian spline model
+
+The first model that ChatGPT generated for me is the spline model that I asked for. To start off, here is the notation for the data:
+
+- $N$: number of individuals
+- $K$: number of clusters
+- $M$: number of spline basis functions
+- $y_{ik}$: outcome for individual $i$ in cluster $k$, $i \in 1,\dots,N$, $k \in 1,\dots ,K$
+- $\boldsymbol{X} \in \mathbb{R}^{N \times M}$: matrix of spline basis function values
+
+The parameters of the model followed:
+
+- $\boldsymbol{\beta_{k}} \in \mathbb{R}^M$: spline coefficients for cluster $k$ (a vector of length $M$ for each cluster)
+- $\sigma_y$: standard deviation of the observation noise
+- $\sigma_\beta$: prior standard deviation for the spline coefficients
+
+And here is the model itself, which includes the likelihood for the outcome and the prior distribution assumptions for the parameters:
+
+*Likelihood*:
+
+$$ y_{ik} \sim N\left( \sum_{m=1}^M X_{im} \beta_{km}, \sigma_y  \right), \ i \in 1,\dots, N, \ k \in 1, \dots, K$$
+
+*Priors*:
+
+$$ 
+\boldsymbol{\beta_{k}} \sim N(0, \sigma_{\beta} \boldsymbol{I_M}), \ \ k \in 1,...,K \\
+\sigma_{y} \sim N(0, 1), \ \ \sigma_y \gt 0 \\
+\sigma_{\beta} \sim N(0, 1), \ \ \sigma_{\beta} \gt 0
+$$
+
+And here is the `Stan` code that it provided, which largely follows from the description above. I also asked for predictions of the outcome based on the model to be generated, which is implemented in the *generated sections* code block. I wanted to be able to plot the median of those predictions for each individual $i$ to compare with the GAM plot above.
+
+```{stan output.var='priors', eval=FALSE}
+data {
+  int<lower=1> N;                          // number of observations
+  int<lower=1> K;                          // number of clusters
+  int<lower=1> M;                          // number of basis functions
+  array[N] int<lower=1, upper=K> cluster;  // cluster ids
+  matrix[N, M] X_spline;                   // basis function values
+  vector[N] y;                             // response variable
+}
+
+parameters {
+  matrix[K, M] beta;          // cluster-specific spline coefficients
+  real<lower=0> sigma_y;      // observation noise
+  real<lower=0> sigma_beta;   // prior standard deviation for beta
+}
+
+model {
+  sigma_y ~ normal(0, 1);
+  sigma_beta ~ normal(0, 1);
+  
+  // Priors for beta
+  
+  for (k in 1:K) {
+    beta[k] ~ normal(0, sigma_beta);
+  }
+  
+  // Likelihood
+  
+  for (n in 1:N) {
+    y[n] ~ normal(X_spline[n] * beta[cluster[n]]', sigma_y);
+  }
+}
+
+generated quantities {
+  
+  vector[N] y_pred;                    // Vector of observations.
+  
+  for (n in 1:N) {
+    y_pred[n] = normal_rng(X_spline[n] * beta[cluster[n]]', sigma_y);
+  }
+}
+```
+
+### Spline basis functions
+
+```{r}
+n_knots <- 8
+knot_dist <- 1/(n_knots + 1)
+probs <- seq(knot_dist, 1 - knot_dist, by = knot_dist)
+knots <- quantile(dd$x, probs = probs)
+spline_basis <- bs(dd$x, knots = knots, degree = 3, intercept = TRUE)
+X_spline <- as.matrix(spline_basis)
+```
+
+```{r, echo=FALSE, fig.width = 8.5, fig.height= 4}
+dx <- data.table(x = dd$x, X = X_spline)
+dx <- melt(dx, id.vars = "x", value.name = "X")
+
+ggplot(data = dx, aes(x = x, y = X, group = variable)) +
+  geom_line(aes(color = variable)) +
+  geom_vline(xintercept = dd[953, x], color = "grey50", lty = 3) +
+  theme(panel.grid = element_blank(),
+        legend.position = "none") +
+  scale_x_continuous(breaks = seq(0, 1, .2))
+```
+
+### Data list for stan
+
+```{r, message=FALSE}
+stan_data <- list(
+  N = nrow(dd),           # number of observations
+  K = k,                  # number of clusters
+  M = ncol(X_spline),     # number of basis functions
+  cluster = dd$cluster,   # vector of cluster ids
+  X_spline = X_spline,    # basis function values
+  y = dd$y                # resonse variable
+)
+```
+
+### Run stan model
+
+```{r, message=FALSE}
+mod <- cmdstan_model("code/spline.stan")
+
+fit <- mod$sample(
+  data = stan_data,
+  chains = 4,
+  iter_warmup = 500,
+  iter_sampling = 2000,
+  parallel_chains = 4,
+  refresh = 0 # print update every 500 iters
+)
+
+draws <- as_draws_df(fit$draws())
+
+ds <- summarize_draws(draws, .fun = median) |> data.table()
+dd$np <- ds[substr(variable, 1, 3) == "y_p", 2]
+```
+
+```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5, color = "grey65") +
+  geom_line(aes(y = np), color = "blue") +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+### Penalized spline
+  
+```{stan output.var='priors', eval=FALSE}
+model {
+  sigma_y ~ normal(0, 1);
+  sigma_beta ~ normal(0, 1);
+
+  // Priors for beta
+  for (k in 1:K) {
+    beta[k] ~ normal(0, sigma_beta);
+  }
+  
+  //Penalization
+  for (k in 1:K) {
+    target += -lambda * sum(square(D2_spline * beta[k]'));
+  }
+  
+  // Likelihood
+  for (n in 1:N) {
+    y[n] ~ normal(X_spline[n] * beta[cluster[n]]', sigma_y);
+  }
+}
+```
+
+```{r}
+D2 <- dbs(dd$x, knots = knots, degree = 3, derivs = 2, intercept = TRUE)
+D2_spline <- as.matrix(D2)
+
+stan_data <- list(
+  N = nrow(dd),
+  K = k,
+  M = ncol(X_spline),
+  cluster = dd$cluster,
+  X_spline = X_spline,
+  D2_spline = D2_spline,
+  y = dd$y,
+  lambda = 0.00001
+)
+```
+
+```{r, message=FALSE, echo = FALSE}
+mod <- cmdstan_model("code/spline_penalized.stan")
+
+fit <- mod$sample(
+  data = stan_data,
+  chains = 4,
+  iter_warmup = 500,
+  iter_sampling = 2000,
+  parallel_chains = 4,
+  max_treedepth = 19,
+  refresh = 0 # print update every 500 iters
+)
+
+draws <- as_draws_df(fit$draws())
+
+ds <- summarize_draws(draws, .fun = mean) |> data.table()
+dd$fl <- ds[substr(variable, 1, 3) == "y_p", 2]
+```
+
+```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5, color = "grey65") +
+  geom_line(aes(y = fl), color = "red") +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+We'd probably want to use a cubic spline - but I wanted to illustrate the impact of penalization.
+
+<p><small><font color="darkkhaki">
+Reference:
+
+OpenAI. (2024). ChatGPT (September 30, Version) [Large language model]. https://chat.openai.com/
+
+Support:
+
+This work is supported within the National Institutes of Health (NIH) Health Care Systems Research Collaboratory by cooperative agreement UG3/UH3AT009844 from the National Institute on Aging. This work also received logistical and technical support from the NIH Collaboratory Coordinating Center through cooperative agreement U24AT009676. Support was also provided by the NIH National Center for Complementary and Integrative Health Administrative Supplement for Complementary Health Practitioner Research Experience through cooperative agreement UH3AT009844 and by the National Center for Complementary and Integrative Health of the National Institutes of Health under award number UH3AT009844. Work also supported by Memorial Sloan Kettering Cancer Center Support Grant/Core Grant P30CA008748. The author was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health. 
+
+</font></small></p>
