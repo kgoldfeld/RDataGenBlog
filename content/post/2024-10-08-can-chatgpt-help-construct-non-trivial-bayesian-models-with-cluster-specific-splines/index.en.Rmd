@@ -51,9 +51,11 @@ library(cmdstanr)
 library(posterior)
 ```
 
-### Data 
+### Data generation
 
-Here is the data generation suggested by ChatGPT. I was actually underwhelmed by this, because we are want to model cluster-specific spline curves, but this code generates the same curve for each cluster, so it is not really a very interesting example:
+In order to explore the modeling options, we wanted to use a relatively simple data generation process. ChatGPT suggested the generating process for $y_{ik}$, the outcome for individual $i$ in cluster $k$, be a non-linear function of predictor $x_{ik}$:
+$$ y_{ik} = \text{sin}(2\pi x_{ik}), \ \ \{ x \in \mathbb{R} \mid 0 \leq x \leq 1 \} $$
+The code was simple enough:
 
 ```{r, fig.width = 8.5, fig.height=4, warning=FALSE}
 set.seed(2024)
@@ -65,7 +67,9 @@ cluster <- sample(1:k, n, replace = TRUE)
 y <- sin(2  * pi * x) + rnorm(n, sd = 0.35)
 dd <- data.table(y, x, cluster)
 dd$cluster <- factor(dd$cluster)
+```
 
+```{r, echo = FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5) +
   facet_wrap(~ cluster, nrow = 2) +
@@ -74,7 +78,8 @@ ggplot(data = dd, aes(x = x, y = y)) +
   ylim(-2, 2)
 ```
 
-In any case, I don't really need ChatGPT to tell me how to simulate data, so I went ahead and wrote this code, which adds a cluster-specific parameter $a$ that stretches the *sin* curve:
+Although the data generation process suggested by ChatGPT was helpful, it had a significant shortcoming. We aimed to model *cluster-specific* spline curves, but the ChatGPT code generated the same curve for all clusters. To address this, I used the general formulation and added a cluster-specific effect $a_k$, which stretches the *sin* curve differently for each cluster:
+$$ y_{ik} = \text{sin}(2\pi a_k x_{ik}), \ \ \{ a \in \mathbb{R} \mid 0.6 \leq a \leq 1.4 \} $$
 
 ```{r}
 k <- 10  # number of clusters
@@ -103,7 +108,12 @@ ggplot(data = dd, aes(x = x, y = y)) +
   ylim(-2, 2)
 ```
 
-Before getting to the Bayesian models - here is the GAM model that estimates an overall spline as well as cluster-specific random splines:
+### Data modeling
+
+The goal is to estimate cluster-specific curves that capture the relationship between $x$ and $y$ within each cluster. We aim for these curves to reflect the overall trend without overfitting the data; in other words, we want the function to provide a smooth and interpretable representation of the relationship, balancing flexibility and simplicity. While the purpose of my conversation with ChatGPT was to get a Bayesian version of this random spline model, I started off by asking for it to provide a generalized additive model (GAM):
+$$ y_{ik} = \beta_0 + s_k(x_{ik}) + \epsilon_{ik}, \ \ \epsilon \sim N(0, \sigma_y) $$
+
+where $s_k(x)$ is a smooth spline function of $x$. Once the model is estimated, we can obtain predictions to generate a curve that reflects the relationship between $x$ and $y$, which can then be plotted over the raw data:
 
 ```{r, fig.width = 8.5, fig.height=4, warning=FALSE}
 gam <- gamm(
@@ -113,8 +123,6 @@ gam <- gamm(
 
 dd$g <- predict(gam$gam)
 ```
-
-Here are the original data with the estimated fit from the GAM model in green:
 
 ```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
@@ -128,9 +136,11 @@ ggplot(data = dd, aes(x = x, y = y)) +
   ylim(-2, 2)
 ```
 
-### Bayesian spline model
+#### Bayesian spline model
 
-The first model that ChatGPT generated for me is the spline model that I asked for. To start off, here is the notation for the data:
+The first model that ChatGPT generated can be described using this notation:
+
+**Data**
 
 - $N$: number of individuals
 - $K$: number of clusters
@@ -138,13 +148,13 @@ The first model that ChatGPT generated for me is the spline model that I asked f
 - $y_{ik}$: outcome for individual $i$ in cluster $k$, $i \in 1,\dots,N$, $k \in 1,\dots ,K$
 - $\boldsymbol{X} \in \mathbb{R}^{N \times M}$: matrix of spline basis function values
 
-The parameters of the model followed:
+**Parameters**
 
 - $\boldsymbol{\beta_{k}} \in \mathbb{R}^M$: spline coefficients for cluster $k$ (a vector of length $M$ for each cluster)
 - $\sigma_y$: standard deviation of the observation noise
 - $\sigma_\beta$: prior standard deviation for the spline coefficients
 
-And here is the model itself, which includes the likelihood for the outcome and the prior distribution assumptions for the parameters:
+**Model**
 
 *Likelihood*:
 
@@ -158,7 +168,7 @@ $$
 \sigma_{\beta} \sim N(0, 1), \ \ \sigma_{\beta} \gt 0
 $$
 
-And here is the `Stan` code that it provided, which largely follows from the description above. I also asked for predictions of the outcome based on the model to be generated, which is implemented in the *generated sections* code block. I wanted to be able to plot the median of those predictions for each individual $i$ to compare with the GAM plot above.
+The `Stan` code provided by ChatGPT largely aligns with the description above. I also requested code to generate outcome predictions for each observation, which is implemented in the *generated quantities* block. My goal was to plot the median of those predictions for each individual $i$ to compare with the GAM plot above."
 
 ```{stan output.var='priors', eval=FALSE}
 data {
@@ -203,7 +213,7 @@ generated quantities {
 }
 ```
 
-### Spline basis functions
+#### Spline basis functions
 
 ```{r}
 n_knots <- 8
@@ -226,7 +236,7 @@ ggplot(data = dx, aes(x = x, y = X, group = variable)) +
   scale_x_continuous(breaks = seq(0, 1, .2))
 ```
 
-### Data list for stan
+#### Data list for stan
 
 ```{r, message=FALSE}
 stan_data <- list(
@@ -239,7 +249,7 @@ stan_data <- list(
 )
 ```
 
-### Run stan model
+#### Run stan model
 
 ```{r, message=FALSE}
 mod <- cmdstan_model("code/spline.stan")

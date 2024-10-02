@@ -45,9 +45,11 @@ library(splines2)
 library(cmdstanr)
 library(posterior)</code></pre>
 </div>
-<div id="data" class="section level3">
-<h3>Data</h3>
-<p>Here is the data generation suggested by ChatGPT. I was actually underwhelmed by this, because we are want to model cluster-specific spline curves, but this code generates the same curve for each cluster, so it is not really a very interesting example:</p>
+<div id="data-generation" class="section level3">
+<h3>Data generation</h3>
+<p>In order to explore the modeling options, we wanted to use a relatively simple data generation process. ChatGPT suggested the generating process for <span class="math inline">\(y_{ik}\)</span>, the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(k\)</span>, be a non-linear function of predictor <span class="math inline">\(x_{ik}\)</span>:
+<span class="math display">\[ y_{ik} = \text{sin}(2\pi x_{ik}), \ \ \{ x \in \mathbb{R} \mid 0 \leq x \leq 1 \} \]</span>
+The code was simple enough:</p>
 <pre class="r"><code>set.seed(2024)
 
 n &lt;- 1000
@@ -56,16 +58,10 @@ x &lt;- runif(n)
 cluster &lt;- sample(1:k, n, replace = TRUE)
 y &lt;- sin(2  * pi * x) + rnorm(n, sd = 0.35)
 dd &lt;- data.table(y, x, cluster)
-dd$cluster &lt;- factor(dd$cluster)
-
-ggplot(data = dd, aes(x = x, y = y)) +
-  geom_point(size = .5) +
-  facet_wrap(~ cluster, nrow = 2) +
-  theme(panel.grid = element_blank(),
-        panel.spacing = unit(1, &quot;lines&quot;)) +
-  ylim(-2, 2)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-2-1.png" width="816" /></p>
-<p>In any case, I don’t really need ChatGPT to tell me how to simulate data, so I went ahead and wrote this code, which adds a cluster-specific parameter <span class="math inline">\(a\)</span> that stretches the <em>sin</em> curve:</p>
+dd$cluster &lt;- factor(dd$cluster)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-3-1.png" width="816" /></p>
+<p>Although the data generation process suggested by ChatGPT was helpful, it had a significant shortcoming. We aimed to model <em>cluster-specific</em> spline curves, but the ChatGPT code generated the same curve for all clusters. To address this, I used the general formulation and added a cluster-specific effect <span class="math inline">\(a_k\)</span>, which stretches the <em>sin</em> curve differently for each cluster:
+<span class="math display">\[ y_{ik} = \text{sin}(2\pi a_k x_{ik}), \ \ \{ a \in \mathbb{R} \mid 0.6 \leq a \leq 1.4 \} \]</span></p>
 <pre class="r"><code>k &lt;- 10  # number of clusters
 
 defc &lt;- defData(varname = &quot;a&quot;, formula = &quot;0.6;1.4&quot;, dist = &quot;uniform&quot;)
@@ -81,20 +77,24 @@ dc &lt;- genData(k, defc, id = &quot;cluster&quot;)
 dd &lt;- genCluster(dc, &quot;cluster&quot;, 100, &quot;id&quot;)
 dd &lt;- addColumns(defi, dd)
 dd[, cluster := factor(cluster)]</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-4-1.png" width="816" /></p>
-<p>Before getting to the Bayesian models - here is the GAM model that estimates an overall spline as well as cluster-specific random splines:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-5-1.png" width="816" /></p>
+</div>
+<div id="data-modeling" class="section level3">
+<h3>Data modeling</h3>
+<p>The goal is to estimate cluster-specific curves that capture the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span> within each cluster. We aim for these curves to reflect the overall trend without overfitting the data; in other words, we want the function to provide a smooth and interpretable representation of the relationship, balancing flexibility and simplicity. While the purpose of my conversation with ChatGPT was to get a Bayesian version of this random spline model, I started off by asking for it to provide a generalized additive model (GAM):
+<span class="math display">\[ y_{ik} = \beta_0 + s_k(x_{ik}) + \epsilon_{ik}, \ \ \epsilon \sim N(0, \sigma_y) \]</span></p>
+<p>where <span class="math inline">\(s_k(x)\)</span> is a smooth spline function of <span class="math inline">\(x\)</span>. Once the model is estimated, we can obtain predictions to generate a curve that reflects the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span>, which can then be plotted over the raw data:</p>
 <pre class="r"><code>gam &lt;- gamm(
   y ~ s(x) + s(x, cluster, bs = &quot;fs&quot;, k = 8),
   data = dd, method=&quot;REML&quot;
 )
 
 dd$g &lt;- predict(gam$gam)</code></pre>
-<p>Here are the original data with the estimated fit from the GAM model in green:</p>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-6-1.png" width="816" /></p>
-</div>
-<div id="bayesian-spline-model" class="section level3">
-<h3>Bayesian spline model</h3>
-<p>The first model that ChatGPT generated for me is the spline model that I asked for. To start off, here is the notation for the data:</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-7-1.png" width="816" /></p>
+<div id="bayesian-spline-model" class="section level4">
+<h4>Bayesian spline model</h4>
+<p>The first model that ChatGPT generated can be described using this notation:</p>
+<p><strong>Data</strong></p>
 <ul>
 <li><span class="math inline">\(N\)</span>: number of individuals</li>
 <li><span class="math inline">\(K\)</span>: number of clusters</li>
@@ -102,13 +102,13 @@ dd$g &lt;- predict(gam$gam)</code></pre>
 <li><span class="math inline">\(y_{ik}\)</span>: outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(k\)</span>, <span class="math inline">\(i \in 1,\dots,N\)</span>, <span class="math inline">\(k \in 1,\dots ,K\)</span></li>
 <li><span class="math inline">\(\boldsymbol{X} \in \mathbb{R}^{N \times M}\)</span>: matrix of spline basis function values</li>
 </ul>
-<p>The parameters of the model followed:</p>
+<p><strong>Parameters</strong></p>
 <ul>
 <li><span class="math inline">\(\boldsymbol{\beta_{k}} \in \mathbb{R}^M\)</span>: spline coefficients for cluster <span class="math inline">\(k\)</span> (a vector of length <span class="math inline">\(M\)</span> for each cluster)</li>
 <li><span class="math inline">\(\sigma_y\)</span>: standard deviation of the observation noise</li>
 <li><span class="math inline">\(\sigma_\beta\)</span>: prior standard deviation for the spline coefficients</li>
 </ul>
-<p>And here is the model itself, which includes the likelihood for the outcome and the prior distribution assumptions for the parameters:</p>
+<p><strong>Model</strong></p>
 <p><em>Likelihood</em>:</p>
 <p><span class="math display">\[ y_{ik} \sim N\left( \sum_{m=1}^M X_{im} \beta_{km}, \sigma_y  \right), \ i \in 1,\dots, N, \ k \in 1, \dots, K\]</span></p>
 <p><em>Priors</em>:</p>
@@ -117,7 +117,7 @@ dd$g &lt;- predict(gam$gam)</code></pre>
 \sigma_{y} \sim N(0, 1), \ \ \sigma_y \gt 0 \\
 \sigma_{\beta} \sim N(0, 1), \ \ \sigma_{\beta} \gt 0
 \]</span></p>
-<p>And here is the <code>Stan</code> code that it provided, which largely follows from the description above. I also asked for predictions of the outcome based on the model to be generated, which is implemented in the <em>generated sections</em> code block. I wanted to be able to plot the median of those predictions for each individual <span class="math inline">\(i\)</span> to compare with the GAM plot above.</p>
+<p>The <code>Stan</code> code provided by ChatGPT largely aligns with the description above. I also requested code to generate outcome predictions for each observation, which is implemented in the <em>generated quantities</em> block. My goal was to plot the median of those predictions for each individual <span class="math inline">\(i\)</span> to compare with the GAM plot above.”</p>
 <pre class="stan"><code>data {
   int&lt;lower=1&gt; N;                          // number of observations
   int&lt;lower=1&gt; K;                          // number of clusters
@@ -159,18 +159,18 @@ generated quantities {
   }
 }</code></pre>
 </div>
-<div id="spline-basis-functions" class="section level3">
-<h3>Spline basis functions</h3>
+<div id="spline-basis-functions" class="section level4">
+<h4>Spline basis functions</h4>
 <pre class="r"><code>n_knots &lt;- 8
 knot_dist &lt;- 1/(n_knots + 1)
 probs &lt;- seq(knot_dist, 1 - knot_dist, by = knot_dist)
 knots &lt;- quantile(dd$x, probs = probs)
 spline_basis &lt;- bs(dd$x, knots = knots, degree = 3, intercept = TRUE)
 X_spline &lt;- as.matrix(spline_basis)</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-9-1.png" width="816" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-10-1.png" width="816" /></p>
 </div>
-<div id="data-list-for-stan" class="section level3">
-<h3>Data list for stan</h3>
+<div id="data-list-for-stan" class="section level4">
+<h4>Data list for stan</h4>
 <pre class="r"><code>stan_data &lt;- list(
   N = nrow(dd),           # number of observations
   K = k,                  # number of clusters
@@ -180,8 +180,8 @@ X_spline &lt;- as.matrix(spline_basis)</code></pre>
   y = dd$y                # resonse variable
 )</code></pre>
 </div>
-<div id="run-stan-model" class="section level3">
-<h3>Run stan model</h3>
+<div id="run-stan-model" class="section level4">
+<h4>Run stan model</h4>
 <pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/spline.stan&quot;)
 
 fit &lt;- mod$sample(
@@ -200,12 +200,13 @@ fit &lt;- mod$sample(
 ## 
 ## All 4 chains finished successfully.
 ## Mean chain execution time: 7.3 seconds.
-## Total execution time: 7.6 seconds.</code></pre>
+## Total execution time: 7.7 seconds.</code></pre>
 <pre class="r"><code>draws &lt;- as_draws_df(fit$draws())
 
 ds &lt;- summarize_draws(draws, .fun = median) |&gt; data.table()
 dd$np &lt;- ds[substr(variable, 1, 3) == &quot;y_p&quot;, 2]</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-12-1.png" width="816" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-13-1.png" width="816" /></p>
+</div>
 </div>
 <div id="penalized-spline" class="section level3">
 <h3>Penalized spline</h3>
@@ -242,15 +243,15 @@ stan_data &lt;- list(
   lambda = 0.00001
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...</code></pre>
-<pre><code>## Chain 1 finished in 18.8 seconds.
-## Chain 2 finished in 18.7 seconds.
-## Chain 4 finished in 18.7 seconds.
-## Chain 3 finished in 18.8 seconds.
+<pre><code>## Chain 4 finished in 18.7 seconds.
+## Chain 1 finished in 18.8 seconds.
+## Chain 2 finished in 18.8 seconds.
+## Chain 3 finished in 18.9 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 18.7 seconds.
-## Total execution time: 18.9 seconds.</code></pre>
-<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-16-1.png" width="816" /></p>
+## Mean chain execution time: 18.8 seconds.
+## Total execution time: 19.0 seconds.</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/unnamed-chunk-17-1.png" width="816" /></p>
 <p>We’d probably want to use a cubic spline - but I wanted to illustrate the impact of penalization.</p>
 <p>
 <p><small><font color="darkkhaki">
