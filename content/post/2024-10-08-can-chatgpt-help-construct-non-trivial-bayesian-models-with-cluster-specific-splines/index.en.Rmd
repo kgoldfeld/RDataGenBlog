@@ -14,7 +14,7 @@ image: ''
 draft: TRUE
 ---
 
-I've been curious to see how helpful ChatGPT can be for helping implelementing relatively complicated models in `R`. About two years, I [described](https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/){target="_blank"} a model that we had developed to estimate a treatment effect in the context of a cluster-randoimzed stepped wedge trial design. We used a generalized additive model (GAM) with site-specific splines to account for general time trends, which can be implemeented using the `mgcv` package. I was always interested in exploring whether we could implement a Bayeisan version of this model, but was never able to give it a try. Until, that is, I posed this simple question to ChatGPT:
+I've been curious to see how helpful ChatGPT can be for helping implementing relatively complicated models in `R`. About two years, I [described](https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/){target="_blank"} a model that we had developed to estimate a treatment effect in the context of a cluster-randomized stepped wedge trial design. We used a generalized additive model (GAM) with site-specific splines to account for general time trends, which can be implemented using the `mgcv` package. I was always interested in exploring whether we could implement a Bayesian version of this model, but was never able to give it a try. Until, that is, I posed this simple question to ChatGPT:
 
 <blockquote>
 I want to build an R Stan model with cluster specific random splines - is that possible?
@@ -69,7 +69,7 @@ dd <- data.table(y, x, cluster)
 dd$cluster <- factor(dd$cluster)
 ```
 
-```{r, echo = FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+```{r GPTdata, echo = FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5) +
   facet_wrap(~ cluster, nrow = 2) +
@@ -99,7 +99,7 @@ dd <- addColumns(defi, dd)
 dd[, cluster := factor(cluster)]
 ```
 
-```{r, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+```{r ksgData, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5) +
   facet_wrap(~ cluster, nrow = 2) +
@@ -115,7 +115,7 @@ $$ y_{ik} = \beta_0 + s_k(x_{ik}) + \epsilon_{ik}, \ \ \epsilon \sim N(0, \sigma
 
 where $s_k(x)$ is a smooth spline function of $x$. Once the model is estimated, we can obtain predictions to generate a curve that reflects the relationship between $x$ and $y$, which can then be plotted over the raw data:
 
-```{r, fig.width = 8.5, fig.height=4, warning=FALSE}
+```{r}
 gam <- gamm(
   y ~ s(x) + s(x, cluster, bs = "fs", k = 8),
   data = dd, method="REML"
@@ -124,7 +124,7 @@ gam <- gamm(
 dd$g <- predict(gam$gam)
 ```
 
-```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+```{r gamplot, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5, color = "grey65") +
   geom_line(aes(y = g), color = "darkgreen") +
@@ -215,16 +215,20 @@ generated quantities {
 
 #### Spline basis functions
 
-```{r}
-n_knots <- 8
+In the likelihood, $y_i$ is modeled as a function of the vector $\boldsymbol{X_i}$ rather than the single measurement $x_i$. While I won't delve deeply into spline estimation, I want to conceptually outline how this vector is constructed in the context of cubic splines.
+
+We control the flexibility of the curve by specifying the number of knots. A unique curve is fitted between each pair of knots (as well as at the ends), with constraints ensuring smooth transitions between these curves. The estimation of these curves is performed using basis functions, specifically B-spline basis functions of $x$.
+
+The number of basis functions is determined by the number of knots. For instance, the plot below illustrates the $M=9$ basis functions required for $K=5$ knots. Each basis function contributes an element to the vector $\boldsymbol{X}$ for each value of $x$. In the case of cubic splines, at most four basis functions can be non-zero between any two knots, as indicated by the intervals on the x-axis. Consequently, the vector $X$ consists of the values of each basis function at a given point $x$, with at most four non-zero entries corresponding to the active basis functions.
+
+```{r basis, echo=FALSE, fig.width = 8.5, fig.height= 4}
+n_knots <- 5 
 knot_dist <- 1/(n_knots + 1)
 probs <- seq(knot_dist, 1 - knot_dist, by = knot_dist)
 knots <- quantile(dd$x, probs = probs)
 spline_basis <- bs(dd$x, knots = knots, degree = 3, intercept = TRUE)
 X_spline <- as.matrix(spline_basis)
-```
 
-```{r, echo=FALSE, fig.width = 8.5, fig.height= 4}
 dx <- data.table(x = dd$x, X = X_spline)
 dx <- melt(dx, id.vars = "x", value.name = "X")
 
@@ -233,10 +237,23 @@ ggplot(data = dx, aes(x = x, y = X, group = variable)) +
   geom_vline(xintercept = dd[953, x], color = "grey50", lty = 3) +
   theme(panel.grid = element_blank(),
         legend.position = "none") +
-  scale_x_continuous(breaks = seq(0, 1, .2))
+  scale_x_continuous(breaks = round( seq(0, 1, knot_dist), 3) )
+```
+
+In this example, I am using $M = 5$ knots to introduce a slight overfitting of the data, which will allow me to apply another model in the next step that will further smooth the curves. In a real-world setting, it may have made more sense to start out with four knots. The `bs` function (in the `splines` package) computes the B-spline basis function values for each observed $x$.
+
+```{r, eval = FALSE}
+n_knots <- 5
+knot_dist <- 1/(n_knots + 1)
+probs <- seq(knot_dist, 1 - knot_dist, by = knot_dist)
+knots <- quantile(dd$x, probs = probs)
+spline_basis <- bs(dd$x, knots = knots, degree = 3, intercept = TRUE)
+X_spline <- as.matrix(spline_basis)
 ```
 
 #### Data list for stan
+
+To fit the model, we need to create the data set that `Stan` will use to estimate the parameters.
 
 ```{r, message=FALSE}
 stan_data <- list(
@@ -245,11 +262,13 @@ stan_data <- list(
   M = ncol(X_spline),     # number of basis functions
   cluster = dd$cluster,   # vector of cluster ids
   X_spline = X_spline,    # basis function values
-  y = dd$y                # resonse variable
+  y = dd$y                # response variable
 )
 ```
 
 #### Run stan model
+
+ChatGPT provided code to estimate the model using the `rstan` package. However, I prefer using the `cmdstanr` package, as I find it more stable and generally less finicky. I took the prerogative here to preempt ChatGPT. From the plot, you can see that the estimation was quite good. However, the curves are a bit too wiggly, indicating the data may have been slightly overfit, particularly for clusters 1, 3, and 7.
 
 ```{r, message=FALSE}
 mod <- cmdstan_model("code/spline.stan")
@@ -269,7 +288,7 @@ ds <- summarize_draws(draws, .fun = median) |> data.table()
 dd$np <- ds[substr(variable, 1, 3) == "y_p", 2]
 ```
 
-```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+```{r bayes, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5, color = "grey65") +
   geom_line(aes(y = np), color = "blue") +
@@ -283,27 +302,38 @@ ggplot(data = dd, aes(x = x, y = y)) +
 
 ### Penalized spline
   
+When I made my initial inquiry to ChatGPT, it provided only a single model and didn't indicate that there might be other options. To get another model, I had to specifically ask for it. To smooth the estimate provided by the initial model (which admittedly I made too wiggly on purpose), I asked ChatGPT to provide a *penalized* Bayesian spline model, and it obliged.
+
+The model is just an extension of the spline model, with a penalization term added to the model that is based on the second derivative of the B-spline basis functions. We can strengthen or weaken the penalization term using a tuning parameter $\lambda$, that is provided to the model. The `Stan` model code is unchanged from the original model, except that there is now a penalization term.
+
+
 ```{stan output.var='priors', eval=FALSE}
 model {
+
   sigma_y ~ normal(0, 1);
   sigma_beta ~ normal(0, 1);
 
   // Priors for beta
+  
   for (k in 1:K) {
     beta[k] ~ normal(0, sigma_beta);
   }
   
-  //Penalization
+  //Penalization <---------------------------------------
+  
   for (k in 1:K) {
     target += -lambda * sum(square(D2_spline * beta[k]'));
   }
   
   // Likelihood
+  
   for (n in 1:N) {
     y[n] ~ normal(X_spline[n] * beta[cluster[n]]', sigma_y);
   }
 }
 ```
+
+The second derivative of the B-spline basis functions is estimated using the `dbs` function in the `splines2` package. Like the matrix $\boldsymbol{X}$, $\boldsymbol{D_2}$ has dimensions $N \times\ M$. Both $\boldsymbol{D_2}$ and $\lambda$ are added to the data passed to `Stan`:
 
 ```{r}
 D2 <- dbs(dd$x, knots = knots, degree = 3, derivs = 2, intercept = TRUE)
@@ -317,7 +347,7 @@ stan_data <- list(
   X_spline = X_spline,
   D2_spline = D2_spline,
   y = dd$y,
-  lambda = 0.00001
+  lambda = 0.00005
 )
 ```
 
@@ -337,13 +367,16 @@ fit <- mod$sample(
 draws <- as_draws_df(fit$draws())
 
 ds <- summarize_draws(draws, .fun = mean) |> data.table()
-dd$fl <- ds[substr(variable, 1, 3) == "y_p", 2]
+dd$p <- ds[substr(variable, 1, 3) == "y_p", 2]
 ```
 
-```{r echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+The plot directly comparing the penalized Bayesian model with the initial Bayesian model (initial Bayesian model in blue) shows the impact of further smoothing.
+
+```{r pen, echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
 ggplot(data = dd, aes(x = x, y = y)) +
   geom_point(size = .5, color = "grey65") +
-  geom_line(aes(y = fl), color = "red") +
+  geom_line(aes(y = np), color = "blue") +
+  geom_line(aes(y = p), color = "red") +
   theme(panel.grid = element_blank(),
         panel.spacing = unit(1, "lines")) +
   facet_wrap(~ cluster, nrow = 2) +
@@ -352,7 +385,22 @@ ggplot(data = dd, aes(x = x, y = y)) +
   ylim(-2, 2)
 ```
 
-We'd probably want to use a cubic spline - but I wanted to illustrate the impact of penalization.
+A direct comparison between the GAM and penalized Bayesian models (GAM in green) suggests that there might be some differences in the estimation for at least several clusters, particularly those that change direction twice:
+
+```{r compare , echo=FALSE, fig.width = 8.5, fig.height=4, warning=FALSE}
+ggplot(data = dd, aes(x = x, y = y)) +
+  geom_point(size = .5, color = "grey65") +
+  geom_line(aes(y = g), color = "darkgreen") +
+  geom_line(aes(y = p), color = "red") +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  facet_wrap(~ cluster, nrow = 2) +
+  theme(panel.grid = element_blank(),
+        panel.spacing = unit(1, "lines")) +
+  ylim(-2, 2)
+```
+
+I was also familiar with another version of the Bayesian spline model that uses a *random-walk* prior on the $\beta\text{'s}$ to induce additional smoothing. Unprompted, ChatGPT did not mention this. But, upon request it did give me code that I was able to implement successfully. I’ll leave it to you to explore this further—or perhaps ask ChatGPT for assistance.
 
 <p><small><font color="darkkhaki">
 Reference:
