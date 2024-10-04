@@ -1,5 +1,5 @@
 ---
-title: Can ChatGPT help construct non-trivial bayesian models? An example with cluster-specific splines
+title: Can ChatGPT help construct non-trivial statistical models? An example with Bayesian "random" splines
 author: Package Build
 date: '2024-10-08'
 slug: []
@@ -16,7 +16,7 @@ draft: TRUE
 
 
 
-<p>I’ve been curious to see how helpful ChatGPT can be for helping implementing relatively complicated models in <code>R</code>. About two years, I <a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/" target="_blank">described</a> a model that we had developed to estimate a treatment effect in the context of a cluster-randomized stepped wedge trial design. We used a generalized additive model (GAM) with site-specific splines to account for general time trends, which can be implemented using the <code>mgcv</code> package. I was always interested in exploring whether we could implement a Bayesian version of this model, but was never able to give it a try. Until, that is, I posed this simple question to ChatGPT:</p>
+<p>I’ve been curious to see how helpful ChatGPT can be for implementing relatively complicated models in <code>R</code>. About two years ago, I <a href="https://www.rdatagen.net/post/2022-11-01-modeling-secular-trend-in-crt-using-gam/" target="_blank">described</a> a model for estimating a treatment effect in a cluster-randomized stepped wedge trial. We used a generalized additive model (GAM) with site-specific splines to account for general time trends, implemented using the <code>mgcv</code> package. I’ve been interested in exploring a Bayesian version of this model, but hadn’t found the time to try - until I happened to pose this simple question to ChatGPT:</p>
 <blockquote>
 I want to build an R Stan model with cluster specific random splines - is that possible?
 </blockquote>
@@ -32,10 +32,10 @@ I want to build an R Stan model with cluster specific random splines - is that p
 <li><strong>Run the Model</strong>: Use the <code>rstan</code> package to compile and fit the model.</li>
 </ol>
 </blockquote>
-<p>Maybe I shouldn’t have been, but I was pretty impressed by the code that followed. I thought I would share some of that here. (Though, obviously, who needs a blog like this when you can to ChatGPT yourself to get any example you might be seeking?)</p>
+<p>Maybe I shouldn’t have been, but I was pretty impressed by the code that followed. What follows are the highlights of my interaction with ChatGPT.</p>
 <div id="preliminaries" class="section level3">
 <h3>Preliminaries</h3>
-<p>Before I get started, here are the libraries needed to run all of the following code:</p>
+<p>Before getting started, here are the libraries needed to run all of the following code:</p>
 <pre class="r"><code>library(ggplot2)
 library(simstudy)
 library(data.table)
@@ -47,7 +47,7 @@ library(posterior)</code></pre>
 </div>
 <div id="data-generation" class="section level3">
 <h3>Data generation</h3>
-<p>In order to explore the modeling options, we wanted to use a relatively simple data generation process. ChatGPT suggested the generating process for <span class="math inline">\(y_{ik}\)</span>, the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(k\)</span>, be a non-linear function of predictor <span class="math inline">\(x_{ik}\)</span>:
+<p>To explore different modeling options, I wanted a simple data generation process to create the simulated data set. ChatGPT suggested using the following non-linear function for <span class="math inline">\(y_{ik}\)</span>, the outcome for individual <span class="math inline">\(i\)</span> in cluster <span class="math inline">\(k\)</span>, based on predictor <span class="math inline">\(x_{ik}\)</span>:
 <span class="math display">\[ y_{ik} = \text{sin}(2\pi x_{ik}), \ \ \{ x \in \mathbb{R} \mid 0 \leq x \leq 1 \} \]</span>
 The code was simple enough:</p>
 <pre class="r"><code>set.seed(2024)
@@ -60,7 +60,7 @@ y &lt;- sin(2  * pi * x) + rnorm(n, sd = 0.35)
 dd &lt;- data.table(y, x, cluster)
 dd$cluster &lt;- factor(dd$cluster)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/GPTdata-1.png" width="816" /></p>
-<p>Although the data generation process suggested by ChatGPT was helpful, it had a significant shortcoming. We aimed to model <em>cluster-specific</em> spline curves, but the ChatGPT code generated the same curve for all clusters. To address this, I used the general formulation and added a cluster-specific effect <span class="math inline">\(a_k\)</span>, which stretches the <em>sin</em> curve differently for each cluster:
+<p>Although the data generation process suggested by ChatGPT was helpful, it had a significant shortcoming. I wanted to model <em>cluster-specific</em> spline curves, but the ChatGPT code generated the same curve for all clusters. To address this, I used the general formulation and added a cluster-specific effect <span class="math inline">\(a_k\)</span>, which stretches the <em>sin</em> curve differently for each cluster:
 <span class="math display">\[ y_{ik} = \text{sin}(2\pi a_k x_{ik}), \ \ \{ a \in \mathbb{R} \mid 0.6 \leq a \leq 1.4 \} \]</span></p>
 <pre class="r"><code>k &lt;- 10  # number of clusters
 
@@ -81,20 +81,20 @@ dd[, cluster := factor(cluster)]</code></pre>
 </div>
 <div id="data-modeling" class="section level3">
 <h3>Data modeling</h3>
-<p>The goal is to estimate cluster-specific curves that capture the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span> within each cluster. We aim for these curves to reflect the overall trend without overfitting the data; in other words, we want the function to provide a smooth and interpretable representation of the relationship, balancing flexibility and simplicity. While the purpose of my conversation with ChatGPT was to get a Bayesian version of this random spline model, I started off by asking for it to provide a generalized additive model (GAM):
+<p>The goal is to estimate cluster-specific curves that capture the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span> within each cluster. I am aiming for these curves to reflect the overall trend without overfitting the data; in other words, we want the estimated function to provide a smooth and interpretable representation of the relationship, balancing flexibility and simplicity.</p>
+<p>Although the purpose of my conversation with ChatGPT was to get a Bayesian version of this random spline model, I started off by asking for it to generate a generalized additive model (GAM) to provide a basis for comparison. This is what it came up with:
 <span class="math display">\[ y_{ik} = \beta_0 + s_k(x_{ik}) + \epsilon_{ik}, \ \ \epsilon \sim N(0, \sigma_y) \]</span></p>
-<p>where <span class="math inline">\(s_k(x)\)</span> is a smooth spline function of <span class="math inline">\(x\)</span>. Once the model is estimated, we can obtain predictions to generate a curve that reflects the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span>, which can then be plotted over the raw data:</p>
+<p>where <span class="math inline">\(s_k(x)\)</span> is a smooth spline function of <span class="math inline">\(x\)</span>. The estimated model can be used to provide predictions that can be plotted to describe the relationship between <span class="math inline">\(x\)</span> and <span class="math inline">\(y\)</span>:</p>
 <pre class="r"><code>gam &lt;- gamm(
   y ~ s(x) + s(x, cluster, bs = &quot;fs&quot;, k = 8),
   data = dd, method=&quot;REML&quot;
-)</code></pre>
-<pre><code>## Warning in gam.side(sm, X, tol = .Machine$double.eps^0.5): model has repeated
-## 1-d smooths of same variable.</code></pre>
-<pre class="r"><code>dd$g &lt;- predict(gam$gam)</code></pre>
+)
+
+dd$g &lt;- predict(gam$gam)</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/gamplot-1.png" width="816" /></p>
 <div id="bayesian-spline-model" class="section level4">
 <h4>Bayesian spline model</h4>
-<p>The first model that ChatGPT generated can be described using this notation:</p>
+<p>The first Bayesian model that ChatGPT generated can be described using this notation:</p>
 <p><strong>Data</strong></p>
 <ul>
 <li><span class="math inline">\(N\)</span>: number of individuals</li>
@@ -118,7 +118,7 @@ dd[, cluster := factor(cluster)]</code></pre>
 \sigma_{y} \sim N(0, 1), \ \ \sigma_y \gt 0 \\
 \sigma_{\beta} \sim N(0, 1), \ \ \sigma_{\beta} \gt 0
 \]</span></p>
-<p>The <code>Stan</code> code provided by ChatGPT largely aligns with the description above. I also requested code to generate outcome predictions for each observation, which is implemented in the <em>generated quantities</em> block. My goal was to plot the median of those predictions for each individual <span class="math inline">\(i\)</span> to compare with the GAM plot above.”</p>
+<p>The <code>Stan</code> code provided by ChatGPT aligns with this description. As part of the model, I also requested code to generate outcome predictions for each observation, which is implemented in the <em>generated quantities</em> block. My goal was to plot the median of those predictions for each individual <span class="math inline">\(i\)</span> as a comparison to the GAM plot above.”</p>
 <pre class="stan"><code>data {
   int&lt;lower=1&gt; N;                          // number of observations
   int&lt;lower=1&gt; K;                          // number of clusters
@@ -164,9 +164,9 @@ generated quantities {
 <h4>Spline basis functions</h4>
 <p>In the likelihood, <span class="math inline">\(y_i\)</span> is modeled as a function of the vector <span class="math inline">\(\boldsymbol{X_i}\)</span> rather than the single measurement <span class="math inline">\(x_i\)</span>. While I won’t delve deeply into spline estimation, I want to conceptually outline how this vector is constructed in the context of cubic splines.</p>
 <p>We control the flexibility of the curve by specifying the number of knots. A unique curve is fitted between each pair of knots (as well as at the ends), with constraints ensuring smooth transitions between these curves. The estimation of these curves is performed using basis functions, specifically B-spline basis functions of <span class="math inline">\(x\)</span>.</p>
-<p>The number of basis functions is determined by the number of knots. For instance, the plot below illustrates the <span class="math inline">\(M=9\)</span> basis functions required for <span class="math inline">\(K=5\)</span> knots. Each basis function contributes an element to the vector <span class="math inline">\(\boldsymbol{X}\)</span> for each value of <span class="math inline">\(x\)</span>. In the case of cubic splines, at most four basis functions can be non-zero between any two knots, as indicated by the intervals on the x-axis. Consequently, the vector <span class="math inline">\(X\)</span> consists of the values of each basis function at a given point <span class="math inline">\(x\)</span>, with at most four non-zero entries corresponding to the active basis functions.</p>
+<p>The number of basis functions is determined by the number of knots. For instance, the plot below illustrates the <span class="math inline">\(M=9\)</span> basis functions required for <span class="math inline">\(K=5\)</span> knots. Each basis function contributes an element to the vector <span class="math inline">\(\boldsymbol{X}\)</span> for each value of <span class="math inline">\(x\)</span>. In the case of cubic splines, at most four basis functions can be non-zero between any two knots, as indicated by the intervals on the x-axis. Consequently, the vector <span class="math inline">\(\boldsymbol{X}\)</span> consists of the values of each basis function at a given point <span class="math inline">\(x\)</span>, with at most four non-zero entries corresponding to the active basis functions. (As an example, in the plot below there is a vertical line at a single point <span class="math inline">\(x\)</span> that passes through four basis functions.)</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/basis-1.png" width="816" /></p>
-<p>In this example, I am using <span class="math inline">\(M = 5\)</span> knots to introduce a slight overfitting of the data, which will allow me to apply another model in the next step that will further smooth the curves. In a real-world setting, it may have made more sense to start out with four knots. The <code>bs</code> function (in the <code>splines</code> package) computes the B-spline basis function values for each observed <span class="math inline">\(x\)</span>.</p>
+<p>This example uses <span class="math inline">\(M = 5\)</span> knots to introduce a slight overfitting of the data, which will allow me to apply another model in the next step that will further smooth the curves. (In a real-world setting, it may have made more sense to start out with fewer knots.) The <code>bs</code> function (in the <code>splines</code> package) computes the B-spline basis function values for each observed <span class="math inline">\(x\)</span>.</p>
 <pre class="r"><code>n_knots &lt;- 5
 knot_dist &lt;- 1/(n_knots + 1)
 probs &lt;- seq(knot_dist, 1 - knot_dist, by = knot_dist)
@@ -188,7 +188,7 @@ X_spline &lt;- as.matrix(spline_basis)</code></pre>
 </div>
 <div id="run-stan-model" class="section level4">
 <h4>Run stan model</h4>
-<p>ChatGPT provided code to estimate the model using the <code>rstan</code> package. However, I prefer using the <code>cmdstanr</code> package, as I find it more stable and generally less finicky. I took the prerogative here to preempt ChatGPT. From the plot, you can see that the estimation was quite good. However, the curves are a bit too wiggly, indicating the data may have been slightly overfit, particularly for clusters 1, 3, and 7.</p>
+<p>ChatGPT provided code to estimate the model using the <code>rstan</code> package. However, I prefer using the <code>cmdstanr</code> package, which I find more stable and generally less finicky. From the plot, you can see that the estimation was quite good. However, the curves are a bit too wiggly, indicating the data may have been slightly overfit, particularly for clusters 1, 3, and 7.</p>
 <pre class="r"><code>mod &lt;- cmdstan_model(&quot;code/spline.stan&quot;)
 
 fit &lt;- mod$sample(
@@ -217,8 +217,8 @@ dd$np &lt;- ds[substr(variable, 1, 3) == &quot;y_p&quot;, 2]</code></pre>
 </div>
 <div id="penalized-spline" class="section level3">
 <h3>Penalized spline</h3>
-<p>When I made my initial inquiry to ChatGPT, it provided only a single model and didn’t indicate that there might be other options. To get another model, I had to specifically ask for it. To smooth the estimate provided by the initial model (which admittedly I made too wiggly on purpose), I asked ChatGPT to provide a <em>penalized</em> Bayesian spline model, and it obliged.</p>
-<p>The model is just an extension of the spline model, with a penalization term added to the model that is based on the second derivative of the B-spline basis functions. We can strengthen or weaken the penalization term using a tuning parameter <span class="math inline">\(\lambda\)</span>, that is provided to the model. The <code>Stan</code> model code is unchanged from the original model, except that there is now a penalization term.</p>
+<p>When I made my initial inquiry to ChatGPT, it provided only a single model and didn’t indicate that there might be alternatives. To elicit another option, I had to specifically ask. To smooth the estimate provided by the initial model (which admittedly I made too wiggly on purpose), I asked ChatGPT to provide a <em>penalized</em> Bayesian spline model, and it obliged.</p>
+<p>The model is just an extension of the spline model, with an added penalization term that is based on the second derivative of the B-spline basis functions. We can strengthen or weaken the penalization term using a tuning parameter <span class="math inline">\(\lambda\)</span>, that is provided to the model. The <code>Stan</code> model code is unchanged from the original model, except for the added penalization term.</p>
 <pre class="stan"><code>model {
 
   sigma_y ~ normal(0, 1);
@@ -242,7 +242,7 @@ dd$np &lt;- ds[substr(variable, 1, 3) == &quot;y_p&quot;, 2]</code></pre>
     y[n] ~ normal(X_spline[n] * beta[cluster[n]]&#39;, sigma_y);
   }
 }</code></pre>
-<p>The second derivative of the B-spline basis functions is estimated using the <code>dbs</code> function in the <code>splines2</code> package. Like the matrix <span class="math inline">\(\boldsymbol{X}\)</span>, <span class="math inline">\(\boldsymbol{D_2}\)</span> has dimensions <span class="math inline">\(N \times\ M\)</span>. Both <span class="math inline">\(\boldsymbol{D_2}\)</span> and <span class="math inline">\(\lambda\)</span> are added to the data passed to <code>Stan</code>:</p>
+<p>The second derivatives of the B-spline basis functions are estimated using the <code>dbs</code> function in the <code>splines2</code> package. Like the matrix <span class="math inline">\(\boldsymbol{X}\)</span>, <span class="math inline">\(\boldsymbol{D_2}\)</span> has dimensions <span class="math inline">\(N \times\ M\)</span>. Both <span class="math inline">\(\boldsymbol{D_2}\)</span> and <span class="math inline">\(\lambda\)</span> are added to the data passed to <code>Stan</code>:</p>
 <pre class="r"><code>D2 &lt;- dbs(dd$x, knots = knots, degree = 3, derivs = 2, intercept = TRUE)
 D2_spline &lt;- as.matrix(D2)
 
@@ -257,19 +257,19 @@ stan_data &lt;- list(
   lambda = 0.00005
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...</code></pre>
-<pre><code>## Chain 2 finished in 15.5 seconds.
-## Chain 4 finished in 16.2 seconds.
-## Chain 1 finished in 16.3 seconds.
-## Chain 3 finished in 16.4 seconds.
+<pre><code>## Chain 2 finished in 15.7 seconds.
+## Chain 4 finished in 16.3 seconds.
+## Chain 1 finished in 16.5 seconds.
+## Chain 3 finished in 16.5 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 16.1 seconds.
-## Total execution time: 16.5 seconds.</code></pre>
+## Mean chain execution time: 16.2 seconds.
+## Total execution time: 16.6 seconds.</code></pre>
 <p>The plot directly comparing the penalized Bayesian model with the initial Bayesian model (initial Bayesian model in blue) shows the impact of further smoothing.</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/pen-1.png" width="816" /></p>
-<p>A direct comparison between the GAM and penalized Bayesian models (GAM in green) suggests that there might be some differences in the estimation for at least several clusters, particularly those that change direction twice:</p>
+<p>A direct comparison between the GAM and penalized Bayesian models (GAM in green) suggests that there might be some differences in the estimation for at least several clusters, particularly those that change direction twice. The penalized Bayesian model appears to be smoothing more than the GAM:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/compare%20-1.png" width="816" /></p>
-<p>I was also familiar with another version of the Bayesian spline model that uses a <em>random-walk</em> prior on the <span class="math inline">\(\beta\text{&#39;s}\)</span> to induce additional smoothing. Unprompted, ChatGPT did not mention this. But, upon request it did give me code that I was able to implement successfully. I’ll leave it to you to explore this further—or perhaps ask ChatGPT for assistance.</p>
+<p>I was also aware of a third version of the Bayesian spline model that uses a <em>random-walk</em> prior on the <span class="math inline">\(\beta\text{&#39;s}\)</span> to induce smoothing. Unprompted, ChatGPT did not mention this. But, upon request it did give me code that I was able to implement successfully. I’ll leave it to you to explore this further on your own—or perhaps ask ChatGPT for assistance.</p>
 <p>
 <p><small><font color="darkkhaki">
 Reference:</p>
