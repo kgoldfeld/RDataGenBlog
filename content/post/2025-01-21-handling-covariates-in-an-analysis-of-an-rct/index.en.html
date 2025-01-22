@@ -14,18 +14,221 @@ draft: TRUE
 
 
 
-<p>I was recently discussing the analytic plan for an RCT with a clinical collaborator, and she asked me if it is appropriate to adjust for pre-specified covariates that have been collected at baseline. One of her more seasoned colleagues had suggested that it is in fact <em>not</em> appropriate to make any adjustments in the model. I conveyed to her that this point of view is a bit “old school,” and that indeed it is not just <em>OK</em> to adjust for baseline covariates, but that it really should be standard practice. However, even if the notion of <em>not</em> adjusting seems to me to be out-dated, it doesn’t mean it is not prevalent. This is not the first time a clinical colleage asked me that question.</p>
-<p>After that conversation, I decided to re-read the 1994 <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780131703" target="_blank">paper</a> by Stephen Senn that initially convinced me that it might be a very good idea to adjust for baseline covariates in an RCT. In that paper, Senn suggests that rather than inspecting for covariate imbalances before taking action, “the practical statistician will do well to establish beforehand a limited list of covariates deemed useful and fit them regardless. Such a strategy will <em>usually lead to a gain in power</em>, has no adverse effect on unconditional size and controls conditional size with respect to the covariates identified.”</p>
-<p>In a subsequent <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.1296" target="_blank">paper</a>, Pocock et. al. reiterate/extend Senn’s views. Although “experience shows that for most clinical trials, analyses which adjust for baseline covariates are in close agreement with the simpler unadjusted treatment comparisons”, they argue adjusting for covariates can be justified if it helps: (1) achieve the most appropriate p-value for treatment differences, (2) provide unbiased estimates, and (3) improve precision.</p>
-<p>I believe the traditional concern with covariate adjustment is the worry that flexible modeling could lead to a “fishing” expedition for the the covariates that lead to the most favorable effect estimate. Given this whiff of possible impropriety, it does not seem unreasonable to ask researchers to pre-specify which variables are likely to be prognosticators of the outcome (independent of the intervention under study) and adjust only for those.</p>
-<p>In an RCT, we are interested in estimating the <em>causal</em> effect of the intervention on the outcome. Drawing on the formal theory of causal inference, in order to get an unbiased estimate of the causal effect, we need to ensure that the two groups are balanced with respect to all prognostic factors (there are a million places to learn about causal inference - I’ve tried to write about it over the years, starting with this <a href="https://www.rdatagen.net/post/potential-outcomes-confounding/" target="_blank">post</a>). In a randomized trial, the groups will be more or less balanced, so we can generally expect to get an unbiased estimate of the causal effect withtout making any adjustments. However, there may be chance imbalances, particularly in a study with a smaller sample size. If that is the case, those imbalances need to be addressed.</p>
-<p>While randomization ensures balance on average across baseline covariates in an RCT, some researchers argue against covariate adjustment in the primary analysis due to concerns that it may alter the estimand or complicate interpretability. Unadjusted analyses are often preferred for their transparency and direct reflection of the randomized comparison. However, baseline covariate adjustment can improve the precision of treatment effect estimates by reducing residual variance without introducing bias, particularly when pre-specified.</p>
-<p>However, adjusting for baseline covariates can offer important benefits. When pre-specified, such adjustments can improve the precision of treatment effect estimates by reducing residual variance, without introducing bias. Covariate adjustment may also help account for chance imbalances that can occur despite randomization, particularly in smaller trials. Ultimately, whether to adjust for baseline covariates should be guided by the trial’s predefined objectives, the need for precision, and the clarity of the estimand being targeted.</p>
-<p>Beyond direct adjustment in the outcome model, balancing approaches such as inverse probability weighting (IPW) and overlapping weights (OW) can also address covariate imbalances while preserving the original estimand. These weighting techniques reweight the sample to create balanced pseudo-populations without directly altering the outcome model structure, offering an alternative to regression-based adjustments. Ultimately, the choice of whether and how to adjust for baseline covariates should align with the trial’s predefined objectives and the estimand being targeted.</p>
+<p>I was recently discussing the analytic plan for an RCT with a clinical collaborator when she asked whether it’s appropriate to adjust for pre-specified baseline covariates. Some researchers resist covariate adjustment in the primary analysis, concerned that it might alter the estimand or complicate interpretability. Others favor unadjusted analyses for their transparency and straightforward reflection of the randomized comparison. A longstanding concern with covariate adjustment is the fear that flexible modeling could turn into a fishing expedition—searching for covariates that yield the most favorable effect estimate.</p>
+<p>After that conversation with my colleague, I revisited a 1994 <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.4780131703" target="_blank">paper</a> by Stephen Senn, which argues that instead of checking for chance covariate imbalances before making adjustments, “the practical statistician will do well to establish beforehand a limited list of covariates deemed useful and fit them regardless. Such a strategy will <em>usually lead to a gain in power</em>, has no adverse effect on unconditional size and controls conditional size with respect to the covariates identified.” A subsequent <a href="https://onlinelibrary.wiley.com/doi/abs/10.1002/sim.1296" target="_blank">paper</a> by Pocock et al. reinforces this perspective. Although they note that “experience shows that for most clinical trials, analyses which adjust for baseline covariates are in close agreement with the simpler unadjusted treatment comparisons”, they argue adjusting for covariates can be justified if it helps: (1) achieve the most appropriate p-value for treatment differences, (2) provide unbiased estimates, and (3) improve precision.</p>
+<p>Motivated by Pocock et al., I created some simulations to explore the operational characteristics of covariate adjustment that I’m sharing here. I’ve been distracted more recently with paper writing and manuscript editing, so I am happy to get back to a little <code>R</code> coding.</p>
+<div id="simulations" class="section level3">
+<h3>Simulations</h3>
+<p>To get things started, here are the <code>R</code> packages used in the simulations.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(stargazer)
+library(parallel)</code></pre>
+<div id="data-definitions" class="section level4">
+<h4>Data definitions</h4>
+<p>I am using two sets of data definitions here, splitting up the creation of baseline covariates (<span class="math inline">\(x_1\)</span> and <span class="math inline">\(x_2\)</span>) and group assignment from the outcome <span class="math inline">\(y\)</span>. We are assuming <span class="math inline">\(y\)</span> has a Gaussian (normal) distribution.</p>
+<pre class="r"><code>def_c &lt;- 
+  defData(varname = &quot;x1&quot;, formula = 0, variance = &quot;..s_x1^2&quot;, dist = &quot;normal&quot;) |&gt;
+  defData(varname = &quot;x2&quot;, formula = 0, variance = &quot;..s_x2^2&quot;, dist = &quot;normal&quot;) |&gt;
+  defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+def_y &lt;- defDataAdd(
+  varname = &quot;y&quot;, 
+  formula = &quot;5 + ..delta * A + ..b1 * x1 + ..b2 * x2&quot;, 
+  variance = &quot;..s_y^2&quot;, 
+  dist = &quot;normal&quot;
+)</code></pre>
+</div>
+<div id="initial-parammeters" class="section level4">
+<h4>Initial parammeters</h4>
+<p>Here are the parameters used in the data generation. <span class="math inline">\(x_1\)</span> is highly correlated with the outcome <span class="math inline">\(y\)</span>, whereas <span class="math inline">\(x_2\)</span> is not. In the first set of simulations, we are assuming a true effect size <span class="math inline">\(\delta = 5\)</span>.</p>
+<pre class="r"><code>s_x1 &lt;- 8
+s_x2 &lt;- 9
+s_y &lt;- 12
+b1 &lt;- 1.50
+b2 &lt;- 0.0
+delta &lt;- 5</code></pre>
+</div>
+<div id="single-data-set-generation" class="section level4">
+<h4>Single data set generation</h4>
+<p>We are using the L’Ecuyer’s Combined Multiple Recursive Generator (CMRG) random number generator here, because we are using a parallel process to replicate the data and do the analyses.</p>
+<pre class="r"><code>RNGkind(&quot;L&#39;Ecuyer-CMRG&quot;)
+set.seed(55)
+
+dc &lt;- genData(250, def_c) 
+dd &lt;- addColumns(def_y, dc)
+
+head(dd)</code></pre>
+<pre><code>## Key: &lt;id&gt;
+##       id         x1          x2     A          y
+##    &lt;int&gt;      &lt;num&gt;       &lt;num&gt; &lt;int&gt;      &lt;num&gt;
+## 1:     1  3.4075117 -1.66327988     0  8.1461927
+## 2:     2 -0.3040474 -5.60073657     0 -1.7577859
+## 3:     3 -4.4460516  1.20189340     1 -1.6324336
+## 4:     4  0.6834332  0.09974478     1  9.5938736
+## 5:     5 -4.6324773  7.85745373     0 -0.4782144
+## 6:     6 -6.5650815  0.49812462     0 -3.4082489</code></pre>
+<p>For this single data set, we can see that the means for <span class="math inline">\(x_1\)</span> within each group are slightly different, while the means for <span class="math inline">\(x_2\)</span> are more similar.</p>
+<pre class="r"><code>dd[, .(mu_x1 = mean(x1), mu_x2 = mean(x2)), keyby = A]</code></pre>
+<pre><code>## Key: &lt;A&gt;
+##        A      mu_x1       mu_x2
+##    &lt;int&gt;      &lt;num&gt;       &lt;num&gt;
+## 1:     0  0.3960784 -0.36510184
+## 2:     1 -0.4821337  0.08564994</code></pre>
+<p>These differences are confirmed by calculated the standardized imbalance <span class="math inline">\(Z_x\)</span> and the standardized difference <span class="math inline">\(d\)</span>. (The difference between <span class="math inline">\(Z_x\)</span> and <span class="math inline">\(d\)</span> is that <span class="math inline">\(Z_x\)</span> has an adjustment for the group sample sizes.)</p>
+<pre class="r"><code>calc_diff &lt;- function(dx, rx, v) {
+  
+  mean_diff &lt;- dx[get(rx)==1, mean(get(v))] - dx[get(rx)==0, mean(get(v))]
+  s_pooled &lt;- sqrt(
+    (dx[get(rx)==1, (.N - 1) * var(get(v))] + 
+       dx[get(rx)==0, (.N - 1) * var(get(v))] ) / dx[, .N - 2])
+  
+  Z &lt;- mean_diff / ( s_pooled * sqrt(1/dx[get(rx)==0, .N] + 1/dx[get(rx)==1, .N]) )
+  std_d &lt;- mean_diff / s_pooled
+  
+  return(list(Z_x = Z, d = std_d))
+  
+  }
+
+calc_diff(dd, &quot;A&quot;, &quot;x1&quot;)</code></pre>
+<pre><code>## $Z_x
+## [1] -0.9424664
+## 
+## $d
+## [1] -0.1192136</code></pre>
+<pre class="r"><code>calc_diff(dd, &quot;A&quot;, &quot;x2&quot;)</code></pre>
+<pre><code>## $Z_x
+## [1] 0.3862489
+## 
+## $d
+## [1] 0.04885705</code></pre>
+<p>As designed, <span class="math inline">\(x_1\)</span> is strongly correlated with the outcome <span class="math inline">\(y\)</span>, whereas <span class="math inline">\(x_2\)</span> is weakly correlated.</p>
+<pre class="r"><code>dd[, .(rho_x1.y = cor(x1, y), rho_x2.y = cor(x2, y))]</code></pre>
+<pre><code>##     rho_x1.y     rho_x2.y
+##        &lt;num&gt;        &lt;num&gt;
+## 1: 0.6807215 -0.003174757</code></pre>
+</div>
+<div id="model-estimation" class="section level4">
+<h4>Model estimation</h4>
+<p>We fit four models to this data: (1) no adjustment for the covariates, (2) adjusting for <span class="math inline">\(x_1\)</span> alone, (3) adjusting for <span class="math inline">\(x_2\)</span> alone, and (4) adjusting for both covariates.</p>
+<pre class="r"><code>model_1 &lt;- lm(data = dd, formula = y ~ A)
+model_2 &lt;- lm(data = dd, formula = y ~ A + x1)
+model_3 &lt;- lm(data = dd, formula = y ~ A + x2)
+model_4 &lt;- lm(data = dd, formula = y ~ A + x1 + x2)</code></pre>
+<p>Two key takeaways from this single data set are that (1) since <span class="math inline">\(x_1\)</span> is a weak confounder, failing to adjust for the covariate leads to an underestimation of the treatment effect, and (2) since <span class="math inline">\(x_1\)</span> is so highly correlated with <span class="math inline">\(y\)</span>, the models that adjust for <span class="math inline">\(x_1\)</span> have lower standard errors for the treatment effect estimate (around 2 for models 1 and 3, and closer to 1.5 for models 2 and 4).</p>
+<pre><code>## 
+## ============================================
+##            (1)      (2)      (3)      (4)   
+## --------------------------------------------
+## A         3.040   4.367***  3.044   4.367***
+##          (2.039)  (1.480)  (2.044)  (1.484) 
+##                                             
+## x1                1.512***          1.512***
+##                   (0.101)           (0.101) 
+##                                             
+## x2                          -0.010   0.001  
+##                            (0.111)  (0.081) 
+##                                             
+## Constant 6.237*** 5.638*** 6.234*** 5.639***
+##          (1.442)  (1.046)  (1.446)  (1.048) 
+##                                             
+## ============================================
+## ============================================
+## </code></pre>
+</div>
+<div id="operating-characteristics-based-on-replicated-data-sets" class="section level4">
+<h4>Operating characteristics (based on replicated data sets)</h4>
+<p>In order to understand the relative merits of the different modeling approaches, we need to replicate multiple data sets under the same set of assumptions we used to generate the single data set. In this case, we will generate 2000 data sets and estimate all four models for each data set. For each replication, we use the function <code>est_ancova</code> to calculate a one-sided p-value and to keep track of the point estimate and the standard error estimate.</p>
+<pre class="r"><code>est_ancova &lt;- function(dx, vars) {
+
+  formula &lt;- as.formula(paste(&quot;y ~&quot;, paste(vars, collapse = &quot; + &quot;)))
+  model &lt;- lm(data = dx, formula = formula)
+  
+  coef_summary &lt;- summary(model)$coefficients[&quot;A&quot;, ]
+  t_stat &lt;- coef_summary[&quot;t value&quot;]
+  
+  p_value &lt;- pt(t_stat, df = model$df.residual, lower.tail = FALSE)
+  ests &lt;- data.table(t(coef_summary[1:2]), p_value)
+  setnames(ests, c(&quot;est&quot;, &quot;se&quot;, &quot;pval&quot;))
+  
+  return(ests)
+
+}
+
+replicate &lt;- function() {
+  
+  dc &lt;- genData(250, def_c) 
+  dd &lt;- addColumns(def_y, dc)
+  
+  est_1 &lt;- est_ancova(dd, vars = &quot;A&quot;)
+  est_2 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x1&quot;))
+  est_3 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x2&quot;))
+  est_4 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x1&quot;, &quot;x2&quot;))
+  
+  return(list(est_1 = est_1, est_2 = est_2, est_3 = est_3, est_4 = est_4))
+  
+}</code></pre>
+<pre class="r"><code>res &lt;- mclapply(1:2000, function(x) replicate())</code></pre>
+<p>The bias and variance estimates are shown below. All four models yield relatively unbiased estimates, though the models that adjust for <span class="math inline">\(x_1\)</span> (the potential confounder) result in reduced bias relative to those that d not. However, the clear advantage of models 2 and 4 (those that adjust for <span class="math inline">\(x_1\)</span>) are the reduced variance of the treatment effect estimator:</p>
+<pre class="r"><code>get.field &lt;- function(x, field) {
+  data.table(t(sapply(x, function(x) x[[field]]) ))
+}
+
+ests &lt;- rbindlist(lapply(res, function(x) get.field(x, &quot;est&quot;)))
+sapply(ests, function(x) c(bias = mean(x) - delta, var = var(x)))</code></pre>
+<pre><code>##            est_1       est_2       est_3         est_4
+## bias -0.05513569 -0.00157402 -0.05263476 -0.0002470811
+## var   4.51844704  2.33883113  4.55788040  2.3507163302</code></pre>
+<p>The reduction in variance translates directly to increased power, from about 63% to 90%.</p>
+<pre class="r"><code>pvals &lt;- rbindlist(lapply(res, function(x) get.field(x, &quot;pval&quot;)))
+sapply(pvals, function(x) c(mean(x &lt; 0.025))) </code></pre>
+<pre><code>##  est_1  est_2  est_3  est_4 
+## 0.6255 0.9055 0.6275 0.9035</code></pre>
+</div>
+<div id="exploring-type-1-error-rates" class="section level4">
+<h4>Exploring Type 1 error rates</h4>
+<p>The flip side of statistical power is the Type 1 error - the probability of concluding that there is a treatment effect when in fact there is no treatment effect. We can assess this by setting <span class="math inline">\(\delta = 0\)</span> and running a large number of replications. If we do this 2,000 times by generating a completely new data set each time, we see that the observed error rates are close to 0.025 for all the models, though the models that adjust for <span class="math inline">\(x_1\)</span> are closer to the theoretical value.</p>
+<pre class="r"><code>delta &lt;- 0
+
+res &lt;- mclapply(1:2000, function(x) replicate())
+
+pvals &lt;- rbindlist(lapply(res, function(x) get.field(x, &quot;pval&quot;)))
+sapply(pvals, function(x) c(mean(x &lt; 0.025))) </code></pre>
+<pre><code>##  est_1  est_2  est_3  est_4 
+## 0.0180 0.0265 0.0185 0.0285</code></pre>
+<p>Both Senn and Pocock et al. suggest that a key advantage of adjusting for baseline covariates is that it helps achieve the desired error rates. Assuming that <em>all possible RCTs are conducted with the same level of covariate imbalance</em>, models that include baseline covariate adjustments will yield accurate error rates. In contrast, models that do not adjust for important (highly correlated) covariates will produce deflated error rates. This occurs primarily because the standard errors of the effect estimates are systematically overestimated, reducing the likelihood of rejecting the null hypothesis.</p>
+<p>To mimic the requirement that the dataset is sampled conditional on a fixed level of covariate imbalance, we generate the baseline covariates and treatment assignment only once, while the outcome is generated anew for each dataset. Effectively, under this approach, covariates and treatment assignment are fixed. An alternative approach would be to generate a large number of datasets using the full randomization process—creating new covariate values, treatment assignments, and outcomes for each iteration—and then select datasets that meet the pre-specified covariate imbalance for analysis. Although this approach yields the same results as our chosen method, the sampling process appears overly artificial, further complicating the interpretation of the p-value.</p>
+<pre class="r"><code>replicate_2 &lt;- function() {
+  
+  dd &lt;- addColumns(def_y, dc)
+  
+  est_1 &lt;- est_ancova(dd, vars = &quot;A&quot;)
+  est_2 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x1&quot;))
+  est_3 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x2&quot;))
+  est_4 &lt;- est_ancova(dd, vars = c(&quot;A&quot;, &quot;x1&quot;, &quot;x2&quot;))
+  
+  return(list(est_1 = est_1, est_2 = est_2, est_3 = est_3, est_4 = est_4))
+  
+}
+
+dc &lt;- genData(250, def_c) 
+
+res &lt;- mclapply(1:2000, function(x) replicate_2())
+
+pvals &lt;- rbindlist(lapply(res, function(x) get.field(x, &quot;pval&quot;)))
+sapply(pvals, function(x) c(mean(x &lt; 0.025))) </code></pre>
+<pre><code>##  est_1  est_2  est_3  est_4 
+## 0.0075 0.0285 0.0070 0.0280</code></pre>
+</div>
+</div>
+<div id="causal-inference-methods-for-balancing" class="section level3">
+<h3>Causal inference methods for balancing</h3>
+<p>To me, the strongest argument against adjusting for baseline covariates in the analysis is the risk that investigators may appear overly eager to demonstrate the intervention’s success. Pre-specifying the analysis plan goes a long way toward alleviating such concerns. Additionally, alternative approaches from causal inference methods can further reduce reliance on outcome model assumptions. In particular, balancing methods such as inverse probability weighting (IPW) and overlapping weights (OW) can address covariate imbalances while preserving the original estimand. These techniques re-weight the sample to create balanced pseudo-populations without directly modifying the outcome model, offering a viable alternative to regression-based adjustments. In the context of an RCT, the target pseudo-population corresponds the trial sample itself. I plan to share simulations using these approaches in the future.</p>
 <p>
 <p><small><font color="darkkhaki">
 References:</p>
 <p>Senn, Stephen. “Testing for baseline balance in clinical trials.” Statistics in medicine 13, no. 17 (1994): 1715-1726.</p>
-<p>Pocock, Stuart J., Susan E. Assmann, Laura E. Enos, and Linda E. Kasten. “Subgroup analysis, covariate adjustment and baseline comparisons in clinical trial reporting: current practiceand problems.” Statistics in medicine 21, no. 19 (2002): 2917-2930.</p>
+<p>Pocock, Stuart J., Susan E. Assmann, Laura E. Enos, and Linda E. Kasten. “Subgroup analysis, covariate adjustment and baseline comparisons in clinical trial reporting: current practice and problems.” Statistics in medicine 21, no. 19 (2002): 2917-2930.</p>
 </font></small>
 </p>
+</div>
