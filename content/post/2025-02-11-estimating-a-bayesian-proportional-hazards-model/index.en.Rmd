@@ -13,15 +13,17 @@ image: ''
 draft: TRUE
 ---
 
-Motivation: modeling time-to-event outcomes in the context of a cluster-randomized stepped-wedge design, and it appeared that fitting mixed effect survival models with existing packages was quite difficult if you want to accomdate flexible time patterns.
+Like most of my posts, this one stems from a conversation with a colleague about a large cluster randomized trial that he's innovated with, which uses a [stepped-wedge design](https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/){target="_blank"} (SW-CRT) he is involved with. The challenge here is that the primary outcome of interest is a time-to-event. I was intrigued by how to analyze this kind of data to estimate a hazard ratio while accounting for clustering and potential secular trends that might influence the time to the event. A quick dive into the literature suggested that time-to-event outcomes aren't all that common in SW-CRTs-and that the best analytic approach isn't entirely clear.
 
-Figured I would try to do the modeling using Stan, so I started with trying to implement a simple Proportional Odds model (without clusterin or time-related trends). 
+My first thought, naturally, was: *How would I simulate data to explore different modeling approaches?* My second thought: *Could a Bayesian approach be useful here?*
 
-This was a joint effort between Stan documentation, ChatGPT/DeepSeek, and me.
+I'm getting a little ahead of myself. Generating the complex data (with clustering and secular time trend) turned out to be fairly straightforward (I'll share that in a future post). But here I'm focusing on the early stages of developing a Bayesian model that might eventually accommodate flexible secular trends using splines, something I explored a bit [before](https://www.rdatagen.net/post/2024-10-08-can-chatgpt-help-construct-non-trivial-bayesian-models-with-cluster-specific-splines/){target="_blank"}. I started by generating a simple data set of time-to-event outcomes (without any clustering or time trends) and fitting a proportional hazards model using `Stan`code drawn from the [online guide](https://mc-stan.org/docs/stan-users-guide/survival.html#proportional-hazards-model){target="_blank"}. That model works fine, but it has a serious limitation, which I addressed in subsequent iterations. Getting to the final model turned out to be a bit more challenging than I initially envisioned. In this post, I'll walk through the steps I took along the way, but if you're just here for the final model, feel free to jump to the end.
 
-I am going to present three and 1/2 iteration of models so you can understand how I arrived to where I did.
+My hope is that the final model will be flexible enough to handle the extensions I need for the data structure that sparked this whole exploration.
 
-I am hoping that the final model is flexible enough to handle the extensions I need for the data structure that motivated all of this.
+### Simulating an RCT with time-to-event outcomes
+
+Before we get to the code, here are the `R` packages that are used in this post:
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -30,9 +32,9 @@ library(survival)
 library(cmdstanr)
 ```
 
-```{r}
-##### Definitions #####
+Here are the data definitions for a two-arm randomized controlled trial that is stratified by a variable $M$. Both the treatment $A$ and covariate $M$ are associated with the time-to-event outcome, as defined in `defS`. On average, the treatment speeds up the time-to-event, and $M$ slows things down. (In `simstudy` survival times are [generated](https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/){target="_blank"} using a Weibull data generation process.)
 
+```{r}
 defI <-
   defData(varname = "M", formula = 0.3, dist = "binary") |>
   defData(varname = "A", formula = "1;1", variance = "M", dist = "trtAssign")
@@ -50,25 +52,19 @@ delta_f <- 1.5
 beta_m <- -1.0
 ```
 
+We are generating 1000 independent observations:
+
 ```{r}
 set.seed(123)
 
 dd <- genData(1000, defI)
-dd <- genSurv(dd, defS, timeName = "tte", censorName = "censorTime",
-  eventName = "event", typeName = "eventType", keepEvents = TRUE)
-```
-
-```{r}
-dd <- dd[, .(id, M, A, tte, event)]
+dd <- genSurv(dd, defS, timeName = "tte", censorName = "censorTime", eventName = "event")
 dd
 ```
 
-```{r}
-dd[, mean(A), keyby = M]
-dd[, mean(event), keyby = M]
-```
+Here is a Kaplan-Meier plot showing the "survival" times for each level of $M$ and each treatment arm:
 
-```{r plot1, echo=FALSE, message=FALSE}
+```{r plot1, echo=FALSE, message=FALSE, fig.width=7, fig.height=4}
 library(ggplot2)
 library(survminer)
 
@@ -90,10 +86,48 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   facet_grid(. ~ M, labeller = labeller(M = label_both))
 ```
 
+Fitting a traditional Cox proportional hazards model, we can see that the log hazard ratio for treatment $A$ is greater than 0, suggesting that on average the time-to-event is shorter for those in the treatment arm. Likewise, those with $M=1$ have longer times-to-events and the log hazard ratio is less than zero:
+
 ```{r}
 cox_model <- coxph(Surv(tte, event) ~ A + M, data = dd)
 summary(cox_model)
 ```
+
+### First Bayes model
+
+As I mentioned before, I turned to `Stan` [documentation](https://mc-stan.org/docs/stan-users-guide/survival.html#proportional-hazards-model){target="_blank"} for the code that follows. I won't go into the detailed derivation of the partial likelihood here since that is covered very nicely in the document. However, it is useful to see the final likelihood that is then reflected in the code. 
+
+The likelihood is written as follow - and note that the $n$'s represent only the cases with observed times:
+
+$$
+L(\beta)= \prod_{n=1}^{N^{obs}} \left( \frac{\text{exp}(x_n \cdot\beta)}{\sum_{n'=n}^{N} \text{exp}(x_{n'} \cdot \beta)}\right)
+$$
+
+where:
+
+  * $N^{obs}$ is the number of observed times,
+  * $x_n$ is the covariate for the $n$-th observed time,
+  * $\beta$ is the coefficient (and is interpreted as the log hazard ratio)
+
+
+We want the log likelihood, this gets transformed to sums of logs as
+
+$$
+\begin{aligned}
+\text{log } Pr[\text{obs. fails ordered } 1, \dots N^{obs}|x, \beta] &= \sum_{n=1}^{N^{obs}} \text{log} \left( \frac{\text{exp}(x_n \cdot\beta)}{\sum_{n'=n}^{N} \text{exp}(x_{n'} \cdot \beta)}\right) \\
+\\
+&= \sum_{n=1}^{N^{obs}} \left( \text{exp}(x_n \cdot\beta) - \text{log}\sum_{n'=n}^{N} \text{exp}(x_{n'} \cdot \beta)\right)
+\end{aligned}
+$$
+In `Stan`, the function `logSumExp` can be used to efficiently calculate
+
+$$
+\text{log}\sum_{n'=n}^{N} \text{exp}(x_{n'} \cdot \beta).
+$$
+
+This partial likelihood is implemented below in `Stan`. One confusing aspect (at least to me) is the way censoring is handled. Essentially, all event times for censored cases are assumed to occur *after* the last observed time. In this case, all censored cases are part of the risk set for observed events, which is not an approach I had seen before. This is a pretty big assumption and has implications for data where the actual censoring times are before the last observed event time.
+
+The code is a little confusing, because the data are delivered to `Stan` in reverse order. It is done this way to make calculation of the log likelihood more efficient. But if you are trying to follow along with the code to see how it lines up with the equations above, it is good to keep in mind.
 
 ```{r}
 stan_code <-
@@ -133,6 +167,8 @@ model {
 "
 ```
 
+This code prepares the `R` data for `Stan`:
+
 ```{r}
 dd.o <- dd[event == 1]
 setorder(dd.o, -tte)
@@ -159,9 +195,13 @@ stan_data <- list(
 )
 ```
 
+I'm using `cmdstanr` to interface with `Stan`. First we compile the `Stan` code.
+
 ```{r}
 stan_model <- cmdstan_model(write_stan_file(stan_code))
 ```
+
+And then we fit the model. Even with 1,000 observations, the model estimates in just a couple of seconds on my laptop.
 
 ```{r}
 fit <- stan_model$sample(
@@ -172,9 +212,34 @@ fit <- stan_model$sample(
   parallel_chains = 4,
   refresh = 0
 )
+```
 
+Looking at the log hazard ratios, though, something seems awry. The Bayesian estimates are attenuated relative to the original Cox PH estimates, and this is not due to the prior distribution assumption. Rather, it is the result of assuming that all censored times are longer than the longest observed time-to-event. I'm not showing this here, but the attenuation does largely go away if there is no censoring.
+
+```{r}
 fit$summary(variables = "beta")
 ```
+
+Given this limitation, I decided to try to implement an algorithm that accommodates dynamic risk sets, effectively taking censored cases out of the analysis as soon as they are censored. This is what the model estimated using `coxph` above does.
+
+### Second Bayes model
+
+The partial likelihood for the Cox proportional hazards model is given by:
+
+$$
+L(\beta) = \prod_{i=1}^{n} \left( \frac{\exp x_i \beta}{\sum_{j \in R(t_i)} \exp(x_j\beta)} \right)^{\delta_i}
+$$
+
+where:
+
+  * $n$ is the number of observations (censored or not),
+  * $x_i$ is the covariates for the $i$-th observation,
+  * $\beta$ is the coefficient of interest,
+  * $t_i$ is the observed time for the $i$-th observation,
+  * $R(t_i)$ is the risk set at time $t_i$ (the set of individuals still at risk just before time $t_i$) - which only includes censored cases censored *after* $t_i$,
+  * $\delta_i$ is the event indicator ($\delta_i = 1$ if the event occurred, $\delta_i = 0$ if censored).
+  
+The `Stan` code below codes the log likelihood that follows from this. In contrast to the first version, the data is passed to `Stan` in ascending order. The one major complication is that I needed to create a search function in order to define the "risk" set. Actually, I asked DeepSeek to do this for me, and it obliged. The fundamental difference between this approach and the first approach is calculation of the denominator in the log likelihood.
 
 ```{r}
 stan_code <-
@@ -236,6 +301,8 @@ model {
 "
 ```
 
+Preparing the data is a little different. This time, I am passing the observed data and the full data, both in ascending order:
+
 ```{r}
 dx <- copy(dd)
 setorder(dx, tte)
@@ -275,7 +342,46 @@ fit <- stan_model$sample(
 fit$summary(variables = "beta")
 ```
 
-```{r}
+Two things to note about this model. First, it appears that it worked! The estimates mirror the estimates from the `coxph` model using the `survival` package. Second, the implementation is very inefficient, taking more than a minute to run! This does not bode well for a more complex model that incorporates random effects and splines.
+
+### Final Bayes model
+
+I asked ChatGPT this time to see if it could make my code more efficient. (I've been comparing ChatGPT and DeepSeek - both have been pretty impressive.)  It recognized that my initial brute force approach was calculating each denominator anew for each observed evaluation. This is highly inefficient (on the order of $O(N^2)$). The algorithm is reconfigured so that the denominators are pre-calculated - starting with the last time point (censored or observed), similar to the first approach. It turns out this is much more efficient, $O(N)$.
+
+```{r, eval=FALSE}
+stan_code <-
+"
+...
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  
+    // Likelihood
+  
+  vector[N] theta = x * beta;
+  vector[N] log_sum_exp_theta;
+  
+  // Compute cumulative sum of exp(theta) in log space
+  
+  log_sum_exp_theta[N] = theta[N]; // Initialize the last element
+  
+  for (i in tail(sort_indices_desc(t), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    real log_denom = log_sum_exp_theta[start_risk];
+    target += theta[start_risk] - log_denom;
+  }
+}
+"
+```
+
+```{r, echo = FALSE}
 stan_code <-
 "
 functions {
@@ -343,6 +449,8 @@ model {
 "
 ```
 
+The data requirements for this are the as the second model, so no changes are needed.
+
 ```{r}
 stan_model <- cmdstan_model(write_stan_file(stan_code))
 
@@ -357,3 +465,5 @@ fit <- stan_model$sample(
 
 fit$summary(variables = "beta")
 ```
+
+The model still works, as the estimate is the same as the previous (correct) model. And the computation time is reduced considerably, to about 3 seconds. This gives me hope for a future, more complex model.
