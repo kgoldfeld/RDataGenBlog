@@ -1,5 +1,5 @@
 ---
-title: Estimating a Bayesian Proportional Hazards Model
+title: Estimating a Bayesian proportional hazards model
 author: Package Build
 date: '2025-02-11'
 slug: []
@@ -20,3 +20,360 @@ draft: TRUE
 <p>This was a joint effort between Stan documentation, ChatGPT/DeepSeek, and me.</p>
 <p>I am going to present three and 1/2 iteration of models so you can understand how I arrived to where I did.</p>
 <p>I am hoping that the final model is flexible enough to handle the extensions I need for the data structure that motivated all of this.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(survival)
+library(cmdstanr)</code></pre>
+<pre class="r"><code>##### Definitions #####
+
+defI &lt;-
+  defData(varname = &quot;M&quot;, formula = 0.3, dist = &quot;binary&quot;) |&gt;
+  defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, variance = &quot;M&quot;, dist = &quot;trtAssign&quot;)
+
+defS &lt;- 
+  defSurv(
+    varname = &quot;timeEvent&quot;, 
+    formula = &quot;-11.6 + ..delta_f * A + ..beta_m * M&quot;,
+    shape = 0.30)  |&gt;
+  defSurv(varname = &quot;censorTime&quot;, formula = -11.3, shape = .35)
+
+## Parameters
+
+delta_f &lt;- 1.5
+beta_m &lt;- -1.0</code></pre>
+<pre class="r"><code>set.seed(123)
+
+dd &lt;- genData(1000, defI)
+dd &lt;- genSurv(dd, defS, timeName = &quot;tte&quot;, censorName = &quot;censorTime&quot;,
+  eventName = &quot;event&quot;, typeName = &quot;eventType&quot;, keepEvents = TRUE)</code></pre>
+<pre class="r"><code>dd &lt;- dd[, .(id, M, A, tte, event)]
+dd</code></pre>
+<pre><code>## Key: &lt;id&gt;
+##          id     M     A    tte event
+##       &lt;int&gt; &lt;int&gt; &lt;int&gt;  &lt;num&gt; &lt;num&gt;
+##    1:     1     0     0 26.974     1
+##    2:     2     1     0 38.353     1
+##    3:     3     0     0 32.836     1
+##    4:     4     1     0 28.768     0
+##    5:     5     1     0 54.366     1
+##   ---                               
+##  996:   996     1     1 11.012     0
+##  997:   997     0     0 15.420     1
+##  998:   998     0     0 21.212     1
+##  999:   999     1     0 41.153     0
+## 1000:  1000     0     1 25.659     1</code></pre>
+<pre class="r"><code>dd[, mean(A), keyby = M]</code></pre>
+<pre><code>## Key: &lt;M&gt;
+##        M        V1
+##    &lt;int&gt;     &lt;num&gt;
+## 1:     0 0.4992908
+## 2:     1 0.5016949</code></pre>
+<pre class="r"><code>dd[, mean(event), keyby = M]</code></pre>
+<pre><code>## Key: &lt;M&gt;
+##        M        V1
+##    &lt;int&gt;     &lt;num&gt;
+## 1:     0 0.8539007
+## 2:     1 0.7423729</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot1-1.png" width="672" /></p>
+<pre class="r"><code>cox_model &lt;- coxph(Surv(tte, event) ~ A + M, data = dd)
+summary(cox_model)</code></pre>
+<pre><code>## Call:
+## coxph(formula = Surv(tte, event) ~ A + M, data = dd)
+## 
+##   n= 1000, number of events= 821 
+## 
+##       coef exp(coef) se(coef)      z Pr(&gt;|z|)    
+## A  1.44309   4.23374  0.08018  18.00   &lt;2e-16 ***
+## M -0.92537   0.39638  0.08302 -11.15   &lt;2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+##   exp(coef) exp(-coef) lower .95 upper .95
+## A    4.2337     0.2362    3.6181    4.9542
+## M    0.3964     2.5228    0.3369    0.4664
+## 
+## Concordance= 0.695  (se = 0.009 )
+## Likelihood ratio test= 415.5  on 2 df,   p=&lt;2e-16
+## Wald test            = 389  on 2 df,   p=&lt;2e-16
+## Score (logrank) test = 423.4  on 2 df,   p=&lt;2e-16</code></pre>
+<pre class="r"><code>stan_code &lt;-
+&quot;
+data {
+  int&lt;lower=0&gt; K;          // num covariates
+
+  int&lt;lower=0&gt; N;          // num uncensored obs
+  vector[N] t;             // event time (non-strict decreasing)
+  matrix[N, K] x;          // covariates for uncensored obs
+
+  int N_c;                 // num censored obs
+  real &lt;lower=t[N]&gt; t_c;   // censoring time
+  matrix[N_c, K] x_c;      // covariates for censored obs
+}
+
+parameters {
+  vector[K] beta;          // slopes (no intercept)
+}
+
+transformed parameters {
+  vector[N] log_theta = x * beta;
+  vector[N_c] log_theta_c = x_c * beta;
+}
+
+model {
+  beta ~ normal(0, 4);
+  
+  real log_denom = log_sum_exp(log_theta_c);
+  
+  for (n in 1:N) {
+    log_denom = log_sum_exp(log_denom, log_theta[n]);
+    target += log_theta[n] - log_denom;   // log likelihood
+  }
+  
+}
+&quot;</code></pre>
+<pre class="r"><code>dd.o &lt;- dd[event == 1]
+setorder(dd.o, -tte)
+x.o &lt;- data.frame(dd.o[, .(A, M)])
+N.o &lt;- dd.o[, .N]
+t.o &lt;- dd.o[, tte]
+
+dd.c &lt;- dd[event == 0]
+setorder(dd.c, -tte)
+x.c &lt;- data.frame(dd.c[, .(A, M)])
+N.c &lt;- dd.c[, .N]
+t.c &lt;- dd.c[, tte]
+
+K &lt;- ncol(x.o)          # num covariates
+
+stan_data &lt;- list(
+  K = K,
+  N = N.o,
+  t = t.o,
+  x = x.o,
+  N_c = N.c,
+  t_c = max(t.c),
+  x_c = x.c
+)</code></pre>
+<pre class="r"><code>stan_model &lt;- cmdstan_model(write_stan_file(stan_code))</code></pre>
+<pre class="r"><code>fit &lt;- stan_model$sample(
+  data = stan_data, 
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 3 finished in 1.6 seconds.
+## Chain 1 finished in 1.8 seconds.
+## Chain 2 finished in 1.8 seconds.
+## Chain 4 finished in 1.7 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 1.7 seconds.
+## Total execution time: 1.9 seconds.</code></pre>
+<pre class="r"><code>fit$summary(variables = &quot;beta&quot;)</code></pre>
+<pre><code>## # A tibble: 2 × 10
+##   variable   mean median     sd    mad     q5    q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 beta[1]   1.03   1.03  0.0723 0.0720  0.916  1.15   1.00   14541.   11205.
+## 2 beta[2]  -0.588 -0.588 0.0802 0.0802 -0.721 -0.455  1.00   13062.   10867.</code></pre>
+<pre class="r"><code>stan_code &lt;-
+&quot;
+functions {
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low &lt;= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] &lt; tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  int&lt;lower=0&gt; K;          // Number of covariates
+
+  int&lt;lower=0&gt; N_o;        // Number of uncensored observations
+  vector[N_o] t_o;         // Event times (sorted in decreasing order)
+  matrix[N_o, K] x_o;      // Covariates for uncensored observations
+
+  int&lt;lower=0&gt; N;          // Number of total observations
+  vector[N] t;             // Individual times
+  matrix[N, K] x;          // Covariates for all observations
+}
+
+parameters {
+  vector[K] beta;          // Fixed effects for covariates
+}
+
+model {
+  
+  // Prior
+
+  beta ~ normal(0, 4);
+  
+  // Model
+
+  vector[N] log_theta = x * beta;
+
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    real log_denom = log_sum_exp(log_theta[start_risk:N]);
+    target += log_theta[start_risk] - log_denom;
+  }
+
+}
+&quot;</code></pre>
+<pre class="r"><code>dx &lt;- copy(dd)
+setorder(dx, tte)
+
+dx.o &lt;- dx[event == 1]
+x_o &lt;- data.frame(dx.o[, .(A, M)])
+N_o &lt;- dx.o[, .N]
+t_o &lt;- dx.o[, tte]
+
+x_all &lt;- data.frame(dx[, .(A, M)])
+N_all &lt;- dx[, .N]
+t_all &lt;- dx[, tte]
+
+K &lt;- ncol(x_o)          # num covariates
+
+stan_data &lt;- list(
+  K = K,
+  N_o = N_o,
+  t_o = t_o,
+  x_o = x_o,
+  N = N_all,
+  t = t_all,
+  x = x_all
+)
+
+stan_model &lt;- cmdstan_model(write_stan_file(stan_code))
+
+fit &lt;- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 2 finished in 61.6 seconds.
+## Chain 4 finished in 71.4 seconds.
+## Chain 1 finished in 71.6 seconds.
+## Chain 3 finished in 72.3 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 69.2 seconds.
+## Total execution time: 72.4 seconds.</code></pre>
+<pre class="r"><code>fit$summary(variables = &quot;beta&quot;)</code></pre>
+<pre><code>## # A tibble: 2 × 10
+##   variable   mean median     sd    mad    q5    q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 beta[1]   1.44   1.43  0.0801 0.0801  1.31  1.57   1.00   12604.   10436.
+## 2 beta[2]  -0.925 -0.924 0.0816 0.0817 -1.06 -0.791  1.00   12492.   10436.</code></pre>
+<pre class="r"><code>stan_code &lt;-
+&quot;
+functions {
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low &lt;= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] &lt; tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  int&lt;lower=0&gt; K;          // Number of covariates
+
+  int&lt;lower=0&gt; N_o;        // Number of uncensored observations
+  vector[N_o] t_o;         // Event times (sorted in decreasing order)
+  matrix[N_o, K] x_o;      // Covariates for uncensored observations
+
+  int&lt;lower=0&gt; N;          // Number of total observations
+  vector[N] t;             // Individual times (sorted in decreasing order)
+  matrix[N, K] x;          // Covariates for all observations
+}
+
+parameters {
+  vector[K] beta;          // Fixed effects for covariates
+}
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  
+    // Likelihood
+  
+  vector[N] theta = x * beta;
+  vector[N] log_sum_exp_theta;
+  
+  // Compute cumulative sum of exp(theta) in log space
+  
+  log_sum_exp_theta[N] = theta[N]; // Initialize the last element
+  
+  for (i in tail(sort_indices_desc(t), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    real log_denom = log_sum_exp_theta[start_risk];
+    target += theta[start_risk] - log_denom;
+  }
+}
+&quot;</code></pre>
+<pre class="r"><code>stan_model &lt;- cmdstan_model(write_stan_file(stan_code))
+
+fit &lt;- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...
+## 
+## Chain 3 finished in 2.2 seconds.
+## Chain 2 finished in 2.4 seconds.
+## Chain 4 finished in 2.5 seconds.
+## Chain 1 finished in 2.8 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 2.5 seconds.
+## Total execution time: 2.9 seconds.</code></pre>
+<pre class="r"><code>fit$summary(variables = &quot;beta&quot;)</code></pre>
+<pre><code>## # A tibble: 2 × 10
+##   variable   mean median     sd    mad    q5    q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 beta[1]   1.44   1.44  0.0800 0.0794  1.30  1.57   1.00   12036.   10499.
+## 2 beta[2]  -0.925 -0.925 0.0831 0.0834 -1.06 -0.789  1.00   11887.   10386.</code></pre>

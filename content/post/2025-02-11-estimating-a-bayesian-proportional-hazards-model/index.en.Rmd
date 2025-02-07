@@ -1,5 +1,5 @@
 ---
-title: Estimating a Bayesian Proportional Hazards Model
+title: Estimating a Bayesian proportional hazards model
 author: Package Build
 date: '2025-02-11'
 slug: []
@@ -23,3 +23,337 @@ I am going to present three and 1/2 iteration of models so you can understand ho
 
 I am hoping that the final model is flexible enough to handle the extensions I need for the data structure that motivated all of this.
 
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+library(survival)
+library(cmdstanr)
+```
+
+```{r}
+##### Definitions #####
+
+defI <-
+  defData(varname = "M", formula = 0.3, dist = "binary") |>
+  defData(varname = "A", formula = "1;1", variance = "M", dist = "trtAssign")
+
+defS <- 
+  defSurv(
+    varname = "timeEvent", 
+    formula = "-11.6 + ..delta_f * A + ..beta_m * M",
+    shape = 0.30)  |>
+  defSurv(varname = "censorTime", formula = -11.3, shape = .35)
+
+## Parameters
+
+delta_f <- 1.5
+beta_m <- -1.0
+```
+
+```{r}
+set.seed(123)
+
+dd <- genData(1000, defI)
+dd <- genSurv(dd, defS, timeName = "tte", censorName = "censorTime",
+  eventName = "event", typeName = "eventType", keepEvents = TRUE)
+```
+
+```{r}
+dd <- dd[, .(id, M, A, tte, event)]
+dd
+```
+
+```{r}
+dd[, mean(A), keyby = M]
+dd[, mean(event), keyby = M]
+```
+
+```{r plot1, echo=FALSE, message=FALSE}
+library(ggplot2)
+library(survminer)
+
+dd_surv <- survfit(Surv(tte, event) ~ A + M, data = dd)
+dd_surv_tidy <- data.table(surv_summary(dd_surv, data = dd))
+dd_censor <- dd_surv_tidy[n.censor > 0, ]
+
+ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
+  geom_step() +  # Kaplan-Meier curves
+  geom_point(data = dd_censor, aes(time, surv), shape = 3, size = 1, color = "black")  +
+  labs(x = "Time to event", y = "Probability of no event") +
+  scale_color_manual(
+    values = c("0" = "orange", "1" = "darkgreen"),  
+    labels = c("0" = "control", "1" = "treatment")) + 
+  theme(
+    panel.grid = element_blank(), 
+    legend.title = element_blank(),
+    strip.text = element_text(face = "bold")) +
+  facet_grid(. ~ M, labeller = labeller(M = label_both))
+```
+
+```{r}
+cox_model <- coxph(Surv(tte, event) ~ A + M, data = dd)
+summary(cox_model)
+```
+
+```{r}
+stan_code <-
+"
+data {
+  int<lower=0> K;          // num covariates
+
+  int<lower=0> N;          // num uncensored obs
+  vector[N] t;             // event time (non-strict decreasing)
+  matrix[N, K] x;          // covariates for uncensored obs
+
+  int N_c;                 // num censored obs
+  real <lower=t[N]> t_c;   // censoring time
+  matrix[N_c, K] x_c;      // covariates for censored obs
+}
+
+parameters {
+  vector[K] beta;          // slopes (no intercept)
+}
+
+transformed parameters {
+  vector[N] log_theta = x * beta;
+  vector[N_c] log_theta_c = x_c * beta;
+}
+
+model {
+  beta ~ normal(0, 4);
+  
+  real log_denom = log_sum_exp(log_theta_c);
+  
+  for (n in 1:N) {
+    log_denom = log_sum_exp(log_denom, log_theta[n]);
+    target += log_theta[n] - log_denom;   // log likelihood
+  }
+  
+}
+"
+```
+
+```{r}
+dd.o <- dd[event == 1]
+setorder(dd.o, -tte)
+x.o <- data.frame(dd.o[, .(A, M)])
+N.o <- dd.o[, .N]
+t.o <- dd.o[, tte]
+
+dd.c <- dd[event == 0]
+setorder(dd.c, -tte)
+x.c <- data.frame(dd.c[, .(A, M)])
+N.c <- dd.c[, .N]
+t.c <- dd.c[, tte]
+
+K <- ncol(x.o)          # num covariates
+
+stan_data <- list(
+  K = K,
+  N = N.o,
+  t = t.o,
+  x = x.o,
+  N_c = N.c,
+  t_c = max(t.c),
+  x_c = x.c
+)
+```
+
+```{r}
+stan_model <- cmdstan_model(write_stan_file(stan_code))
+```
+
+```{r}
+fit <- stan_model$sample(
+  data = stan_data, 
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)
+
+fit$summary(variables = "beta")
+```
+
+```{r}
+stan_code <-
+"
+functions {
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low <= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] < tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  int<lower=0> K;          // Number of covariates
+
+  int<lower=0> N_o;        // Number of uncensored observations
+  vector[N_o] t_o;         // Event times (sorted in decreasing order)
+  matrix[N_o, K] x_o;      // Covariates for uncensored observations
+
+  int<lower=0> N;          // Number of total observations
+  vector[N] t;             // Individual times
+  matrix[N, K] x;          // Covariates for all observations
+}
+
+parameters {
+  vector[K] beta;          // Fixed effects for covariates
+}
+
+model {
+  
+  // Prior
+
+  beta ~ normal(0, 4);
+  
+  // Model
+
+  vector[N] log_theta = x * beta;
+
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    real log_denom = log_sum_exp(log_theta[start_risk:N]);
+    target += log_theta[start_risk] - log_denom;
+  }
+
+}
+"
+```
+
+```{r}
+dx <- copy(dd)
+setorder(dx, tte)
+
+dx.o <- dx[event == 1]
+x_o <- data.frame(dx.o[, .(A, M)])
+N_o <- dx.o[, .N]
+t_o <- dx.o[, tte]
+
+x_all <- data.frame(dx[, .(A, M)])
+N_all <- dx[, .N]
+t_all <- dx[, tte]
+
+K <- ncol(x_o)          # num covariates
+
+stan_data <- list(
+  K = K,
+  N_o = N_o,
+  t_o = t_o,
+  x_o = x_o,
+  N = N_all,
+  t = t_all,
+  x = x_all
+)
+
+stan_model <- cmdstan_model(write_stan_file(stan_code))
+
+fit <- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)
+
+fit$summary(variables = "beta")
+```
+
+```{r}
+stan_code <-
+"
+functions {
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low <= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] < tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  int<lower=0> K;          // Number of covariates
+
+  int<lower=0> N_o;        // Number of uncensored observations
+  vector[N_o] t_o;         // Event times (sorted in decreasing order)
+  matrix[N_o, K] x_o;      // Covariates for uncensored observations
+
+  int<lower=0> N;          // Number of total observations
+  vector[N] t;             // Individual times (sorted in decreasing order)
+  matrix[N, K] x;          // Covariates for all observations
+}
+
+parameters {
+  vector[K] beta;          // Fixed effects for covariates
+}
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  
+    // Likelihood
+  
+  vector[N] theta = x * beta;
+  vector[N] log_sum_exp_theta;
+  
+  // Compute cumulative sum of exp(theta) in log space
+  
+  log_sum_exp_theta[N] = theta[N]; // Initialize the last element
+  
+  for (i in tail(sort_indices_desc(t), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    real log_denom = log_sum_exp_theta[start_risk];
+    target += theta[start_risk] - log_denom;
+  }
+}
+"
+```
+
+```{r}
+stan_model <- cmdstan_model(write_stan_file(stan_code))
+
+fit <- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)
+
+fit$summary(variables = "beta")
+```
