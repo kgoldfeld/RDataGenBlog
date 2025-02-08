@@ -15,18 +15,18 @@ draft: TRUE
 
 
 
-<p>Like most of my posts, this one stems from a conversation with a colleague about a large cluster randomized trial that he’s innovated with, which uses a <a href="https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/" target="_blank">stepped-wedge design</a> (SW-CRT) he is involved with. The challenge here is that the primary outcome of interest is a time-to-event. I was intrigued by how to analyze this kind of data to estimate a hazard ratio while accounting for clustering and potential secular trends that might influence the time to the event. A quick dive into the literature suggested that time-to-event outcomes aren’t all that common in SW-CRTs-and that the best analytic approach isn’t entirely clear.</p>
-<p>My first thought, naturally, was: <em>How would I simulate data to explore different modeling approaches?</em> My second thought: <em>Could a Bayesian approach be useful here?</em></p>
-<p>I’m getting a little ahead of myself. Generating the complex data (with clustering and secular time trend) turned out to be fairly straightforward (I’ll share that in a future post). But here I’m focusing on the early stages of developing a Bayesian model that might eventually accommodate flexible secular trends using splines, something I explored a bit <a href="https://www.rdatagen.net/post/2024-10-08-can-chatgpt-help-construct-non-trivial-bayesian-models-with-cluster-specific-splines/" target="_blank">before</a>. I started by generating a simple data set of time-to-event outcomes (without any clustering or time trends) and fitting a proportional hazards model using <code>Stan</code>code drawn from the <a href="https://mc-stan.org/docs/stan-users-guide/survival.html#proportional-hazards-model" target="_blank">online guide</a>. That model works fine, but it has a serious limitation, which I addressed in subsequent iterations. Getting to the final model turned out to be a bit more challenging than I initially envisioned. In this post, I’ll walk through the steps I took along the way, but if you’re just here for the final model, feel free to jump to the end.</p>
-<p>My hope is that the final model will be flexible enough to handle the extensions I need for the data structure that sparked this whole exploration.</p>
+<p>A recent conversation with a colleague about a large <a href="https://www.rdatagen.net/post/2022-12-13-modeling-the-secular-trend-in-a-stepped-wedge-design/" target="_blank">stepped-wedge design</a> (SW-CRT) cluster randomized trial piqued my interest, because the primary outcome is time-to-event. This is not something I’ve seen before. A quick dive into the literature suggested that time-to-event outcomes are uncommon in SW-CRTs-and that the best analytic approach is not obvious. I was intrigued by how to analyze the data to estimate a hazard ratio while accounting for clustering and potential secular trends that might influence the time to the event.</p>
+<p>Of course, my first thought was: <em>How would I simulate data to explore different modeling approaches?</em> And then: <em>Could a Bayesian approach be useful here?</em></p>
+<p>Generating data with clustering and a secular time trend turned out to be quite straightforward, which I’ll share that in a future post. Here, I’m focusing on the my first attempts to implement a Bayesian model that might eventually accommodate cluster-level random effects and flexible secular trends using splines, something I explored more generally in an earlier <a href="https://www.rdatagen.net/post/2024-10-08-can-chatgpt-help-construct-non-trivial-bayesian-models-with-cluster-specific-splines/" target="_blank">post</a>.</p>
+<p>Below, I start by generating a simple set of time-to-event outcomes (without any clustering or time trends) and fit a traditional Cox proportional hazards model to serve as a comparison. I then fit a Bayesian proportional hazards model using <code>Stan</code>code drawn from the <a href="https://mc-stan.org/docs/stan-users-guide/survival.html#proportional-hazards-model" target="_blank">online guide</a>. That model works fine, but it has a key limitation that I try to address, first partially successfully, and then pretty successfully. This post walks through all these steps.</p>
 <div id="simulating-an-rct-with-time-to-event-outcomes" class="section level3">
 <h3>Simulating an RCT with time-to-event outcomes</h3>
-<p>Before we get to the code, here are the <code>R</code> packages that are used in this post:</p>
+<p>Here are the <code>R</code> packages that are used in this post:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(survival)
 library(cmdstanr)</code></pre>
-<p>Here are the data definitions for a two-arm randomized controlled trial that is stratified by a variable <span class="math inline">\(M\)</span>. Both the treatment <span class="math inline">\(A\)</span> and covariate <span class="math inline">\(M\)</span> are associated with the time-to-event outcome, as defined in <code>defS</code>. On average, the treatment speeds up the time-to-event, and <span class="math inline">\(M\)</span> slows things down. (In <code>simstudy</code> survival times are <a href="https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/" target="_blank">generated</a> using a Weibull data generation process.)</p>
+<p>And here are the data definitions for a two-arm randomized controlled trial that is stratified by a variable <span class="math inline">\(M\)</span>. Both the treatment <span class="math inline">\(A\)</span> and covariate <span class="math inline">\(M\)</span> are associated with the time-to-event outcome, as specified in <code>defS</code>. On average, the treatment <span class="math inline">\(A\)</span> speeds up the time-to-event, and <span class="math inline">\(M\)</span> slows things down. (In <code>simstudy</code> survival times are <a href="https://www.rdatagen.net/post/2022-02-08-simulating-survival-outcomes-setting-the-parameters-for-the-desired-distribution/" target="_blank">generated</a> using a Weibull data generation process.)</p>
 <pre class="r"><code>defI &lt;-
   defData(varname = &quot;M&quot;, formula = 0.3, dist = &quot;binary&quot;) |&gt;
   defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, variance = &quot;M&quot;, dist = &quot;trtAssign&quot;)
@@ -34,15 +34,15 @@ library(cmdstanr)</code></pre>
 defS &lt;- 
   defSurv(
     varname = &quot;timeEvent&quot;, 
-    formula = &quot;-11.6 + ..delta_f * A + ..beta_m * M&quot;,
+    formula = &quot;-11.6 + ..delta * A + ..beta_m * M&quot;,
     shape = 0.30)  |&gt;
   defSurv(varname = &quot;censorTime&quot;, formula = -11.3, shape = .35)
 
 ## Parameters
 
-delta_f &lt;- 1.5
+delta &lt;- 1.5
 beta_m &lt;- -1.0</code></pre>
-<p>We are generating 1000 independent observations:</p>
+<p>We are generating 1,000 independent observations:</p>
 <pre class="r"><code>set.seed(123)
 
 dd &lt;- genData(1000, defI)
@@ -91,30 +91,31 @@ summary(cox_model)</code></pre>
 <div id="first-bayes-model" class="section level3">
 <h3>First Bayes model</h3>
 <p>As I mentioned before, I turned to <code>Stan</code> <a href="https://mc-stan.org/docs/stan-users-guide/survival.html#proportional-hazards-model" target="_blank">documentation</a> for the code that follows. I won’t go into the detailed derivation of the partial likelihood here since that is covered very nicely in the document. However, it is useful to see the final likelihood that is then reflected in the code.</p>
-<p>The likelihood is written as follow - and note that the <span class="math inline">\(n\)</span>’s represent only the cases with observed times:</p>
+<p>The likelihood is written as follows (and note that the <span class="math inline">\(j\)</span>’s represent only the cases with observed times, while <span class="math inline">\(j&#39;\)</span> include censored cases):</p>
 <p><span class="math display">\[
-L(\beta)= \prod_{n=1}^{N^{obs}} \left( \frac{\text{exp}(x_n \cdot\beta)}{\sum_{n&#39;=n}^{N} \text{exp}(x_{n&#39;} \cdot \beta)}\right)
+L(\boldsymbol{\beta})= \prod_{j=1}^{N^{obs}} \left( \frac{\exp(\mathbf{x}_j^\top \boldsymbol{\beta})}{\sum_{j&#39;=j}^{N} \exp(\mathbf{x}_{j&#39;}^\top \boldsymbol{\beta})}\right)
 \]</span></p>
 <p>where:</p>
 <ul>
 <li><span class="math inline">\(N^{obs}\)</span> is the number of observed times,</li>
-<li><span class="math inline">\(x_n\)</span> is the covariate for the <span class="math inline">\(n\)</span>-th observed time,</li>
-<li><span class="math inline">\(\beta\)</span> is the coefficient (and is interpreted as the log hazard ratio)</li>
+<li><span class="math inline">\(N\)</span> is the total number of observations (including censored),</li>
+<li><span class="math inline">\(\mathbf{x}_i\)</span> is the vector of covariates for the <span class="math inline">\(i\)</span>-th observation,</li>
+<li><span class="math inline">\(\boldsymbol{\beta}\)</span> is the vector of coefficients,</li>
 </ul>
-<p>We want the log likelihood, this gets transformed to sums of logs as</p>
+<p>We want the log likelihood, which transforms the product to a sum of logs:</p>
 <p><span class="math display">\[
 \begin{aligned}
-\text{log } Pr[\text{obs. fails ordered } 1, \dots N^{obs}|x, \beta] &amp;= \sum_{n=1}^{N^{obs}} \text{log} \left( \frac{\text{exp}(x_n \cdot\beta)}{\sum_{n&#39;=n}^{N} \text{exp}(x_{n&#39;} \cdot \beta)}\right) \\
+\log Pr[\text{obs. fails ordered } 1, \dots N^{obs}|\mathbf{x}, \boldsymbol{\beta}] &amp;= \sum_{j=1}^{N^{obs}} \log \left( \frac{\exp(\mathbf{x}_j^\top \boldsymbol{\beta})}{\sum_{j&#39;=j}^{N} \exp(\mathbf{x}_{j&#39;}^\top \boldsymbol{\beta})}\right) \\
 \\
-&amp;= \sum_{n=1}^{N^{obs}} \left( \text{exp}(x_n \cdot\beta) - \text{log}\sum_{n&#39;=n}^{N} \text{exp}(x_{n&#39;} \cdot \beta)\right)
+&amp;= \sum_{j=1}^{N^{obs}} \left(\mathbf{x}_j^\top \boldsymbol{\beta} - \log \sum_{j&#39;=j}^{N} \exp(\mathbf{x}_{j&#39;}^\top \boldsymbol{\beta})\right)
 \end{aligned}
-\]</span>
-In <code>Stan</code>, the function <code>logSumExp</code> can be used to efficiently calculate</p>
-<p><span class="math display">\[
-\text{log}\sum_{n&#39;=n}^{N} \text{exp}(x_{n&#39;} \cdot \beta).
 \]</span></p>
-<p>This partial likelihood is implemented below in <code>Stan</code>. One confusing aspect (at least to me) is the way censoring is handled. Essentially, all event times for censored cases are assumed to occur <em>after</em> the last observed time. In this case, all censored cases are part of the risk set for observed events, which is not an approach I had seen before. This is a pretty big assumption and has implications for data where the actual censoring times are before the last observed event time.</p>
-<p>The code is a little confusing, because the data are delivered to <code>Stan</code> in reverse order. It is done this way to make calculation of the log likelihood more efficient. But if you are trying to follow along with the code to see how it lines up with the equations above, it is good to keep in mind.</p>
+<p>In <code>Stan</code>, the function <code>logSumExp</code> can be used to efficiently calculate</p>
+<p><span class="math display">\[
+\log \sum_{j&#39;=j}^{N} \exp(\mathbf{x}_{j&#39;}^\top \boldsymbol{\beta}).
+\]</span></p>
+<p>This partial likelihood is implemented below in <code>Stan</code>. One confusing aspect (at least to me) is the way censoring is handled. Essentially, all event times for censored cases are assumed to occur <em>after</em> the last observed time. That is, all censored cases are part of the risk set for observed events, something I had not seen before. This is a pretty big assumption and has implications for data where the actual censoring times occur before the last observed event time.</p>
+<p>The code might be a little confusing, because the data are delivered to <code>Stan</code> in reverse order. It is done this way to make calculation of the log likelihood more efficient. If you are trying to follow along with the code to see how it lines up with the equations above, keep this in mind.</p>
 <pre class="r"><code>stan_code &lt;-
 &quot;
 data {
@@ -188,38 +189,38 @@ stan_data &lt;- list(
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
 ## Chain 3 finished in 1.6 seconds.
-## Chain 1 finished in 1.8 seconds.
 ## Chain 4 finished in 1.7 seconds.
+## Chain 1 finished in 1.8 seconds.
 ## Chain 2 finished in 1.8 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 1.8 seconds.
-## Total execution time: 2.0 seconds.</code></pre>
-<p>Looking at the log hazard ratios, though, something seems awry. The Bayesian estimates are attenuated relative to the original Cox PH estimates, and this is not due to the prior distribution assumption. Rather, it is the result of assuming that all censored times are longer than the longest observed time-to-event. I’m not showing this here, but the attenuation does largely go away if there is no censoring.</p>
+## Mean chain execution time: 1.7 seconds.
+## Total execution time: 1.9 seconds.</code></pre>
+<p>Looking at the log hazard ratios, something seems awry. The Bayesian estimates are attenuated relative to the original Cox PH estimates, and this is not due to the prior distribution assumption. Rather, it is the result of assuming that all censored times are longer than the longest observed time-to-event. I’m not showing this here, but the attenuation does largely go away if there is no censoring.</p>
 <pre class="r"><code>fit$summary(variables = &quot;beta&quot;)</code></pre>
 <pre><code>## # A tibble: 2 × 10
 ##   variable   mean median     sd    mad     q5    q95  rhat ess_bulk ess_tail
 ##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
 ## 1 beta[1]   1.03   1.03  0.0723 0.0720  0.916  1.15   1.00   14541.   11205.
 ## 2 beta[2]  -0.588 -0.588 0.0802 0.0802 -0.721 -0.455  1.00   13062.   10867.</code></pre>
-<p>Given this limitation, I decided to try to implement an algorithm that accommodates dynamic risk sets, effectively taking censored cases out of the analysis as soon as they are censored. This is what the model estimated using <code>coxph</code> above does.</p>
+<p>Given this limitation, I decided to try to implement an algorithm that accommodates dynamic risk sets, effectively taking censored cases out of the analysis as soon as they are censored. This is what the <code>coxph</code> model estimated above does.</p>
 </div>
 <div id="second-bayes-model" class="section level3">
 <h3>Second Bayes model</h3>
-<p>The partial likelihood for the Cox proportional hazards model is given by:</p>
+<p>The partial likelihood for my alternative Cox proportional hazards model is given by:</p>
 <p><span class="math display">\[
-L(\beta) = \prod_{i=1}^{n} \left( \frac{\exp x_i \beta}{\sum_{j \in R(t_i)} \exp(x_j\beta)} \right)^{\delta_i}
+L(\boldsymbol{\beta}) = \prod_{i=1}^{N} \left( \frac{\exp(\mathbf{x}_i^\top \boldsymbol{\beta})}{\sum_{j \in R(t_i)} \exp(\mathbf{x}_j^\top \boldsymbol{\beta})} \right)^{\delta_i}
 \]</span></p>
 <p>where:</p>
 <ul>
-<li><span class="math inline">\(n\)</span> is the number of observations (censored or not),</li>
-<li><span class="math inline">\(x_i\)</span> is the covariates for the <span class="math inline">\(i\)</span>-th observation,</li>
-<li><span class="math inline">\(\beta\)</span> is the coefficient of interest,</li>
+<li><span class="math inline">\(N\)</span> is the number of observations (censored or not),</li>
+<li><span class="math inline">\(\mathbf{x}_i\)</span> is the vector of covariates for the <span class="math inline">\(i\)</span>-th observation,</li>
+<li><span class="math inline">\(\boldsymbol{\beta}\)</span> is the vector of coefficients,</li>
 <li><span class="math inline">\(t_i\)</span> is the observed time for the <span class="math inline">\(i\)</span>-th observation,</li>
 <li><span class="math inline">\(R(t_i)\)</span> is the risk set at time <span class="math inline">\(t_i\)</span> (the set of individuals still at risk just before time <span class="math inline">\(t_i\)</span>) - which only includes censored cases censored <em>after</em> <span class="math inline">\(t_i\)</span>,</li>
 <li><span class="math inline">\(\delta_i\)</span> is the event indicator (<span class="math inline">\(\delta_i = 1\)</span> if the event occurred, <span class="math inline">\(\delta_i = 0\)</span> if censored).</li>
 </ul>
-<p>The <code>Stan</code> code below codes the log likelihood that follows from this. In contrast to the first version, the data is passed to <code>Stan</code> in ascending order. The one major complication is that I needed to create a search function in order to define the “risk” set. Actually, I asked DeepSeek to do this for me, and it obliged. The fundamental difference between this approach and the first approach is calculation of the denominator in the log likelihood.</p>
+<p>The <code>Stan</code> code below implements the log likelihood that follows from this. In contrast to the first version, the data is passed to <code>Stan</code> in ascending order. The one major complication is that I needed to create a search function in order to define the “risk” set. (Actually, I asked DeepSeek to do this for me.) The fundamental difference between this version and the first is the calculation of the denominator in the log likelihood.</p>
 <pre class="r"><code>stan_code &lt;-
 &quot;
 functions {
@@ -314,25 +315,25 @@ fit &lt;- stan_model$sample(
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...
 ## 
-## Chain 2 finished in 58.1 seconds.
-## Chain 4 finished in 66.9 seconds.
-## Chain 1 finished in 67.3 seconds.
-## Chain 3 finished in 67.6 seconds.
+## Chain 2 finished in 56.8 seconds.
+## Chain 4 finished in 65.7 seconds.
+## Chain 1 finished in 66.1 seconds.
+## Chain 3 finished in 66.4 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 65.0 seconds.
-## Total execution time: 67.7 seconds.</code></pre>
+## Mean chain execution time: 63.8 seconds.
+## Total execution time: 66.5 seconds.</code></pre>
 <pre class="r"><code>fit$summary(variables = &quot;beta&quot;)</code></pre>
 <pre><code>## # A tibble: 2 × 10
 ##   variable   mean median     sd    mad    q5    q95  rhat ess_bulk ess_tail
 ##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
 ## 1 beta[1]   1.44   1.43  0.0801 0.0801  1.31  1.57   1.00   12604.   10436.
 ## 2 beta[2]  -0.925 -0.924 0.0816 0.0817 -1.06 -0.791  1.00   12492.   10436.</code></pre>
-<p>Two things to note about this model. First, it appears that it worked! The estimates mirror the estimates from the <code>coxph</code> model using the <code>survival</code> package. Second, the implementation is very inefficient, taking more than a minute to run! This does not bode well for a more complex model that incorporates random effects and splines.</p>
+<p>Two things to note about this model. First, it appears that estimates are spot on! They mirror the estimates from the <code>coxph</code> model using the <code>survival</code> package. That is encouraging. Second, the implementation is very inefficient, taking more than a minute to run! This is less encouraging, and does not bode well for a more complex model that incorporates random effects and splines.</p>
 </div>
 <div id="final-bayes-model" class="section level3">
 <h3>Final Bayes model</h3>
-<p>I asked ChatGPT this time to see if it could make my code more efficient. (I’ve been comparing ChatGPT and DeepSeek - both have been pretty impressive.) It recognized that my initial brute force approach was calculating each denominator anew for each observed evaluation. This is highly inefficient (on the order of <span class="math inline">\(O(N^2)\)</span>). The algorithm is reconfigured so that the denominators are pre-calculated - starting with the last time point (censored or observed), similar to the first approach. It turns out this is much more efficient, <span class="math inline">\(O(N)\)</span>.</p>
+<p>I asked ChatGPT this time to see if it could make my code more efficient. (I’ve been comparing ChatGPT and DeepSeek - both have been pretty impressive.) It recognized that my initial brute force approach was calculating each denominator anew for each observed evaluation. This is highly inefficient, on the order of <span class="math inline">\(O(N^2)\)</span> (Unprompted, ChatGPT provided me with this information). The algorithm is reconfigured so that the denominators are pre-calculated - starting with the last time point (censored or observed), similar to the first approach. It turns out this is much more efficient with <span class="math inline">\(O(N)\)</span>.</p>
 <pre class="r"><code>stan_code &lt;-
 &quot;
 ...
@@ -363,7 +364,7 @@ model {
   }
 }
 &quot;</code></pre>
-<p>The data requirements for this are the as the second model, so no changes are needed.</p>
+<p>The data requirements for this are the same as the second model, so no changes are needed there.</p>
 <pre class="r"><code>stan_model &lt;- cmdstan_model(write_stan_file(stan_code))
 
 fit &lt;- stan_model$sample(
@@ -379,7 +380,7 @@ fit &lt;- stan_model$sample(
 ## Chain 3 finished in 2.2 seconds.
 ## Chain 2 finished in 2.4 seconds.
 ## Chain 4 finished in 2.4 seconds.
-## Chain 1 finished in 2.8 seconds.
+## Chain 1 finished in 2.7 seconds.
 ## 
 ## All 4 chains finished successfully.
 ## Mean chain execution time: 2.4 seconds.
@@ -390,5 +391,5 @@ fit &lt;- stan_model$sample(
 ##   &lt;chr&gt;     &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
 ## 1 beta[1]   1.44   1.44  0.0800 0.0794  1.30  1.57   1.00   12036.   10499.
 ## 2 beta[2]  -0.925 -0.925 0.0831 0.0834 -1.06 -0.789  1.00   11887.   10386.</code></pre>
-<p>The model still works, as the estimate is the same as the previous (correct) model. And the computation time is reduced considerably, to about 3 seconds. This gives me hope for a future, more complex model.</p>
+<p>The model also works well, as the estimate is the same as the previous Bayesian model and the <code>coxph</code> model. More importantly, the computation time is reduced considerably, to about 3 seconds. My hope is that this final model is flexible enough to handle the extensions I need for the data structure that sparked this whole exploration.</p>
 </div>
