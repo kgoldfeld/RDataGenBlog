@@ -1,0 +1,217 @@
+---
+title: A Bayesian proportional hazards model for a cluster randomized trial
+author: Package Build
+date: '2025-03-18'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+  - Bayesian analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>In the two previous posts, I <a href="https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/" target="_blank">introduced</a> a Bayesian approach to proportional hazards modeling and then <a href="https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/" target="_blank">extended</a> it to incorporate a penalized spline. This post describes a second addition to the original model by introducing a random effect to account for clustering in a cluster randomized trial. With this in place, I’ll be ready to tackle the final step: building a model for analyzing a stepped-wedge cluster-randomized trial that incorporates both splines and site-specific random effects.</p>
+<div id="simulating-data-with-a-cluster-specific-random-effect" class="section level3">
+<h3>Simulating data with a cluster-specific random effect</h3>
+<p>Here are the <code>R</code> packages used in the post:</p>
+<pre class="r"><code>library(simstudy)
+library(ggplot2)
+library(data.table)
+library(survival)
+library(survminer)
+library(cmdstanr)</code></pre>
+<p>The dataset simulates a cluster randomized trial where sites are randomized in a <span class="math inline">\(1:1\)</span> ratio to either the treatment group (<span class="math inline">\(A=1\)</span>) or control group (<span class="math inline">\(A=0\)</span>). Patients are affiliated with sites and receive the intervention based on site-level randomization. The time-to-event outcome, <span class="math inline">\(Y\)</span>, is measured at the patient level and depends on both the site’s treatment assignment and unmeasured site effects:</p>
+<pre class="r"><code>defC &lt;- 
+  defData(varname = &quot;b&quot;, formula = 0, variance = &quot;..s2_b&quot;, dist = &quot;normal&quot;) |&gt;
+  defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+defS &lt;-
+  defSurv(
+    varname = &quot;timeEvent&quot;,
+    formula = &quot;-11.6 + ..delta_f * A + b&quot;,
+    shape = 0.30
+  )  |&gt;
+  defSurv(varname = &quot;censorTime&quot;, formula = -11.3, shape = .40)</code></pre>
+<pre class="r"><code>delta_f &lt;- 0.7
+s2_b &lt;- 0.4^2</code></pre>
+<p>I’ve generated a single data set of 50 sites, with 25 in each arm. Each site includes 100 patients. The plot below shows the site-specific Kaplan-Meier curves for each intervention arm.</p>
+<pre class="r"><code>set.seed(7369)
+
+dc &lt;- genData(50, defC, id = &quot;site&quot;)
+dd &lt;- genCluster(dc, &quot;site&quot;, numIndsVar = 100, level1ID = &quot;id&quot;)
+dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTime&quot;,
+             eventName = &quot;event&quot;, typeName = &quot;eventType&quot;, keepEvents = TRUE)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/clusterplot-1.png" width="576" /></p>
+</div>
+<div id="bayesian-model" class="section level3">
+<h3>Bayesian model</h3>
+<p>Since this is the third iteration of the Bayesian proportional hazards model, it naturally also builds directly on the approach from my previous two posts (<a href="https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/" target="_blank">here</a> and <a href="https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/" target="_blank">here</a>). Now, the partial likelihood is a function of the treatment effect and cluster-specific random effects, given by:</p>
+<p><span class="math display">\[
+L(\beta,\mathbf{b}) = \prod_{i=1}^{N} \left( \frac{\exp \left(\beta A_i + b_{s[i]} \right)} {\sum_{j \in R(t_i)} \exp\left(\beta A_j + b_{s[j]} \right) } \right)^{\delta_i}
+\]</span>
+where:</p>
+<ul>
+<li><span class="math inline">\(N\)</span>: number of observations (censored or not)</li>
+<li><span class="math inline">\(A_i\)</span>: binary indicator for treatment</li>
+<li><span class="math inline">\(\delta_i\)</span>: event indicator (<span class="math inline">\(\delta_i = 1\)</span> if the event occurred, <span class="math inline">\(\delta_i = 0\)</span> if censored)</li>
+<li><span class="math inline">\(\beta\)</span>: treatment coefficient</li>
+<li><span class="math inline">\(b_{s[i]}\)</span>: cluster-specific random effect, where <span class="math inline">\(s[i]\)</span> is the cluster of patient <span class="math inline">\(i\)</span></li>
+<li><span class="math inline">\(R(t_i)\)</span>: risk set at time <span class="math inline">\(t_i\)</span> (including only individuals censored <em>after</em> <span class="math inline">\(t_i\)</span>)</li>
+</ul>
+<p>The assumed prior distributions for <span class="math inline">\(\beta\)</span> and the random effects are:</p>
+<p><span class="math display">\[
+\begin{aligned}
+\beta &amp;\sim N(0,4) \\
+b_i &amp;\sim N(0,\sigma_b) \\
+\sigma_b &amp;\sim t_{\text{student}}(df = 3, \mu=0, \sigma = 2)
+\end{aligned}
+\]</span></p>
+<pre class="r"><code>stan_code &lt;- 
+&quot;
+functions {
+
+  // Binary search optimized to return the last index with the target value
+
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low &lt;= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] &lt; tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  
+  int&lt;lower=0&gt; S;                   // Number of clusters
+
+  int&lt;lower=0&gt; K;                   // Number of covariates
+  int&lt;lower=0&gt; N_o;                 // Number of uncensored observations
+  vector[N_o] t_o;                  // Event times (sorted in decreasing order)
+
+  int&lt;lower=0&gt; N;                   // Number of total observations
+  vector[N] t;                      // Individual times (sorted in decreasing order)
+  matrix[N, K] x;                   // Covariates for all observations
+  array[N] int&lt;lower=1,upper=S&gt; s;  // Cluster for each observation
+
+}
+
+parameters {
+  
+  vector[K] beta;          // Fixed effects for covariates
+  vector[S] b;             // Random effects
+  real&lt;lower=0&gt; sigma_b;   // Variance of random effect
+  
+}
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  b ~ normal(0, sigma_b);
+  sigma_b ~ student_t(3, 0, 2);
+  
+  // Calculate theta for each observation to be used in likelihood
+  
+  vector[N] theta;
+  vector[N] log_sum_exp_theta;
+  
+  for (i in 1:N) {
+    theta[i] = dot_product(x[i], beta) + b[s[i]];  
+  }
+  
+  // Compute cumulative sum of log(exp(theta)) from last to first observation
+  
+  log_sum_exp_theta[N] = theta[N];
+  
+  for (i in tail(sort_indices_desc(t), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+  // Likelihood for uncensored observations
+  
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    
+    real log_denom = log_sum_exp_theta[start_risk];
+    target += theta[start_risk] - log_denom;
+  }
+}
+&quot;</code></pre>
+<p>Getting the data ready to pass to <code>Stan</code>, compiling the <code>Stan</code> code, and sampling from the model using <code>cmdstanr</code>:</p>
+<pre class="r"><code>dx &lt;- copy(dd)
+setorder(dx, Y)
+
+dx.obs &lt;- dx[event == 1]
+N_obs &lt;- dx.obs[, .N]
+t_obs &lt;- dx.obs[, Y]
+
+N_all &lt;- dx[, .N]
+t_all &lt;- dx[, Y]
+x_all &lt;- data.frame(dx[, .(A)])
+s_all &lt;- dx[, site]
+
+K &lt;- ncol(x_all)                 # num covariates - in this case just A
+S &lt;- dx[, length(unique(site))]
+
+stan_data &lt;- list(
+  S = S,
+  K = K,
+  N_o = N_obs,
+  t_o = t_obs,
+  N = N_all,
+  t = t_all,
+  x = x_all,
+  s = s_all
+)
+
+# compiling code
+
+stan_model &lt;- cmdstan_model(write_stan_file(stan_code))
+
+# sampling from model
+
+fit &lt;- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...</code></pre>
+<pre><code>## Chain 2 finished in 55.0 seconds.
+## Chain 1 finished in 55.2 seconds.
+## Chain 4 finished in 55.5 seconds.
+## Chain 3 finished in 56.0 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 55.4 seconds.
+## Total execution time: 56.1 seconds.</code></pre>
+<p>The posterior mean for <span class="math inline">\(\beta\)</span>, the treatment effect, is quite close to the “true” value of 0.70, as is the estimate of the standard deviation of the random effect (we used <span class="math inline">\(sd = 0.4\)</span> in the data generating process):</p>
+<pre class="r"><code>fit$summary(variables = c(&quot;beta&quot;, &quot;sigma_b&quot;))</code></pre>
+<pre><code>## # A tibble: 2 × 10
+##   variable  mean median     sd    mad    q5   q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 beta[1]  0.742  0.739 0.117  0.116  0.551 0.934  1.00    1712.    3498.
+## 2 sigma_b  0.399  0.396 0.0451 0.0443 0.331 0.479  1.00   19728.   12151.</code></pre>
+<p>The final post in this series will include code to simulate data from a stepped-wedge cluster-randomized trial with a time-to-event outcome. This model will integrate both the spline and random effect components. I’m curious to see how well it performs, as the required computational resources could be substantial.</p>
+</div>

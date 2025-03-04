@@ -1,0 +1,242 @@
+---
+title: A Bayesian proportional hazards model for a cluster randomized trial
+author: Package Build
+date: '2025-03-18'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+  - Bayesian analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+In the two previous posts, I [introduced](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"} a Bayesian approach to proportional hazards modeling and then [extended](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"} it to incorporate a penalized spline. This post describes a second addition to the original model by introducing a random effect to account for clustering in a cluster randomized trial. With this in place, I'll be ready to tackle the final step: building a model for analyzing a stepped-wedge cluster-randomized trial that incorporates both splines and site-specific random effects.
+
+### Simulating data with a cluster-specific random effect
+
+Here are the `R` packages used in the post:
+
+```{r, message = FALSE}
+library(simstudy)
+library(ggplot2)
+library(data.table)
+library(survival)
+library(survminer)
+library(cmdstanr)
+```
+
+The dataset simulates a cluster randomized trial where sites are randomized in a $1:1$ ratio to either the treatment group ($A=1$) or control group ($A=0$). Patients are affiliated with sites and receive the intervention based on site-level randomization. The time-to-event outcome, $Y$, is measured at the patient level and depends on both the site’s treatment assignment and unmeasured site effects:
+
+```{r}
+defC <- 
+  defData(varname = "b", formula = 0, variance = "..s2_b", dist = "normal") |>
+  defData(varname = "A", formula = "1;1", dist = "trtAssign")
+
+defS <-
+  defSurv(
+    varname = "timeEvent",
+    formula = "-11.6 + ..delta_f * A + b",
+    shape = 0.30
+  )  |>
+  defSurv(varname = "censorTime", formula = -11.3, shape = .40)
+```
+
+```{r}
+delta_f <- 0.7
+s2_b <- 0.4^2
+```
+
+I’ve generated a single data set of 50 sites, with 25 in each arm. Each site includes 100 patients. The plot below shows the site-specific Kaplan-Meier curves for each intervention arm.
+
+```{r}
+set.seed(7369)
+
+dc <- genData(50, defC, id = "site")
+dd <- genCluster(dc, "site", numIndsVar = 100, level1ID = "id")
+dd <- genSurv(dd, defS, timeName = "Y", censorName = "censorTime",
+             eventName = "event", typeName = "eventType", keepEvents = TRUE)
+```
+
+
+```{r clusterplot, echo=FALSE, fig.width = 6, fig.height = 4}
+dd_surv <- survfit(Surv(Y, event) ~ A + site, data = dd)
+dd_surv_tidy <- data.table(surv_summary(dd_surv, data = dd))
+dd_censor <- dd_surv_tidy[n.censor > 0, ]
+
+ggplot(dd_surv_tidy, aes(time, surv, color = site)) +
+  geom_step() +  # Kaplan-Meier curves
+  geom_point(data = dd_censor, aes(time, surv), shape = 3, size = 1, color = "black")  +
+  labs(x = "Time to event", y = "Probability of no event") +
+  theme(panel.grid = element_blank(), legend.position = "none") +
+  facet_grid(A ~ ., labeller = labeller( A = label_both))
+```
+
+### Bayesian model
+
+Since this is the third iteration of the Bayesian proportional hazards model, it naturally also builds directly on the approach from my previous two posts ([here](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"} and [here](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"}). Now, the partial likelihood is a function of the treatment effect and cluster-specific random effects, given by:
+
+$$
+L(\beta,\mathbf{b}) = \prod_{i=1}^{N} \left( \frac{\exp \left(\beta A_i + b_{s[i]} \right)} {\sum_{j \in R(t_i)} \exp\left(\beta A_j + b_{s[j]} \right) } \right)^{\delta_i}
+$$
+where:
+
+  * $N$: number of observations (censored or not)
+  * $A_i$: binary indicator for treatment
+  * $\delta_i$: event indicator ($\delta_i = 1$ if the event occurred, $\delta_i = 0$ if censored)
+  * $\beta$: treatment coefficient
+  * $b_{s[i]}$: cluster-specific random effect, where $s[i]$ is the cluster of patient $i$
+  * $R(t_i)$: risk set at time $t_i$ (including only individuals censored *after* $t_i$)
+  
+The assumed prior distributions for $\beta$ and the random effects are:
+
+$$
+\begin{aligned}
+\beta &\sim N(0,4) \\
+b_i &\sim N(0,\sigma_b) \\
+\sigma_b &\sim t_{\text{student}}(df = 3, \mu=0, \sigma = 2)
+\end{aligned}
+$$
+
+```{r}
+stan_code <- 
+"
+functions {
+
+  // Binary search optimized to return the last index with the target value
+
+  int binary_search(vector v, real tar_val) {
+    int low = 1;
+    int high = num_elements(v);
+    int result = -1;
+
+    while (low <= high) {
+      int mid = (low + high) %/% 2;
+      if (v[mid] == tar_val) {
+        result = mid; // Store the index
+        high = mid - 1; // Look for earlier occurrences
+      } else if (v[mid] < tar_val) {
+        low = mid + 1;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return result;
+  }
+}
+
+data {
+  
+  int<lower=0> S;                   // Number of clusters
+
+  int<lower=0> K;                   // Number of covariates
+  int<lower=0> N_o;                 // Number of uncensored observations
+  vector[N_o] t_o;                  // Event times (sorted in decreasing order)
+
+  int<lower=0> N;                   // Number of total observations
+  vector[N] t;                      // Individual times (sorted in decreasing order)
+  matrix[N, K] x;                   // Covariates for all observations
+  array[N] int<lower=1,upper=S> s;  // Cluster for each observation
+
+}
+
+parameters {
+  
+  vector[K] beta;          // Fixed effects for covariates
+  vector[S] b;             // Random effects
+  real<lower=0> sigma_b;   // Variance of random effect
+  
+}
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  b ~ normal(0, sigma_b);
+  sigma_b ~ student_t(3, 0, 2);
+  
+  // Calculate theta for each observation to be used in likelihood
+  
+  vector[N] theta;
+  vector[N] log_sum_exp_theta;
+  
+  for (i in 1:N) {
+    theta[i] = dot_product(x[i], beta) + b[s[i]];  
+  }
+  
+  // Compute cumulative sum of log(exp(theta)) from last to first observation
+  
+  log_sum_exp_theta[N] = theta[N];
+  
+  for (i in tail(sort_indices_desc(t), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+  // Likelihood for uncensored observations
+  
+  for (n_o in 1:N_o) {
+    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
+    
+    real log_denom = log_sum_exp_theta[start_risk];
+    target += theta[start_risk] - log_denom;
+  }
+}
+"
+```
+
+Getting the data ready to pass to `Stan`, compiling the `Stan` code, and sampling from the model using `cmdstanr`:
+
+```{r, message=FALSE}
+dx <- copy(dd)
+setorder(dx, Y)
+
+dx.obs <- dx[event == 1]
+N_obs <- dx.obs[, .N]
+t_obs <- dx.obs[, Y]
+
+N_all <- dx[, .N]
+t_all <- dx[, Y]
+x_all <- data.frame(dx[, .(A)])
+s_all <- dx[, site]
+
+K <- ncol(x_all)                 # num covariates - in this case just A
+S <- dx[, length(unique(site))]
+
+stan_data <- list(
+  S = S,
+  K = K,
+  N_o = N_obs,
+  t_o = t_obs,
+  N = N_all,
+  t = t_all,
+  x = x_all,
+  s = s_all
+)
+
+# compiling code
+
+stan_model <- cmdstan_model(write_stan_file(stan_code))
+
+# sampling from model
+
+fit <- stan_model$sample(
+  data = stan_data,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)
+```
+
+The posterior mean for $\beta$, the treatment effect, is quite close to the "true" value of 0.70, as is the estimate of the standard deviation of the random effect (we used $sd = 0.4$ in the data generating process):
+
+```{r}
+fit$summary(variables = c("beta", "sigma_b"))
+```
+
+The final post in this series will include code to simulate data from a stepped-wedge cluster-randomized trial with a time-to-event outcome. This model will integrate both the spline and random effect components. I’m curious to see how well it performs, as the required computational resources could be substantial.
