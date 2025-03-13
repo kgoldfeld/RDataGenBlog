@@ -1,0 +1,183 @@
+---
+title: Accounting for ties in a Bayesian proportional hazards model
+author: Package Build
+date: '2025-03-18'
+slug: []
+categories: []
+tags:
+  - R
+  - survival analysis
+  - Bayesian analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>Over my past few posts, I’ve been progressively building towards a Bayesian model for a stepped-wedge cluster randomized trial with a time-to-event outcome, where time will be modeled using a spline function. I started with a simple Cox proportional hazards model for a traditional RCT, ignoring time as a factor. In the next post, I introduced a nonlinear time effect. For the third post—one I initially thought was ready to publish—I extended the model to a cluster randomized trial without explicitly incorporating time. I was then working on the grand finale, the full model, when I ran into an issue: I couldn’t recover the effect-size parameter used to generate the data.</p>
+<p>After an embarrassingly long debugging process, I finally realized the problem—many events shared the same event times, and my model failed to account for ties. This issue hadn’t been apparent in the earlier models, but the final version was particularly sensitive to it. So, I decided to step back and first implement a model that properly handles ties before moving ahead.</p>
+<p>This <a href="https://www.google.com/url?sa=t&amp;source=web&amp;rct=j&amp;opi=89978449&amp;url=https://myweb.uiowa.edu/pbreheny/7210/f15/notes/11-5.pdf" target="_blank">set of lecture notes</a> prepared by Patrick Breheny provides a nice explanation of algorithms for handling tied survival times.</p>
+<p><span class="math display">\[
+\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j} x_i^\top \beta - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j} \exp(x_k^\top \beta) - r \cdot \bar{w} \right) \right] \\
+\]</span></p>
+<ul>
+<li><span class="math inline">\(D_j\)</span>: set of individuals (or observations) that experience an event at time <span class="math inline">\(t_j\)</span> (i.e., the event time for the <span class="math inline">\(j^\text{th}\)</span> event).</li>
+<li><span class="math inline">\(R_j\)</span>: risk set at time <span class="math inline">\(t_j\)</span>, which includes all individuals who are still at risk (i.e., those who have not yet experienced the event and are still being followed at <span class="math inline">\(t_j\)</span>).</li>
+<li><span class="math inline">\(d_j\)</span>: the number of individuals who experience the event at time <span class="math inline">\(t_j\)</span>.</li>
+<li><span class="math inline">\(r\)</span> ranges from 0 to <span class="math inline">\(d_j - 1\)</span>, where <span class="math inline">\(d_j\)</span> is the number of events at time <span class="math inline">\(t_j\)</span>.</li>
+</ul>
+<p>And</p>
+<p><span class="math display">\[
+\bar{w} = \frac{1}{d_j} \sum_{i \in D_j} \exp(x_i^\top \beta)
+\]</span></p>
+<p><img src="figures/efron.png" width="90%" /></p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(survival)
+library(survminer)
+library(cmdstanr)</code></pre>
+<pre class="r"><code>#### Simulation
+
+def &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+defS &lt;-
+  defSurv(
+    varname = &quot;timeEvent&quot;,
+    formula = &quot;-11.6 + ..delta_f * A&quot;,
+    shape = 0.30
+  )  |&gt;
+  defSurv(varname = &quot;censorTime&quot;, formula = -11.3, shape = .35)
+
+## Parameters
+
+delta_f &lt;- log(1.5)
+
+##### Generate single data set #####
+
+set.seed(7398)
+
+dd &lt;- genData(1000, def)
+dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTime&quot;, digits = 0,
+              eventName = &quot;event&quot;, typeName = &quot;eventType&quot;, keepEvents  = TRUE)</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/km_plot-1.png" width="576" /></p>
+<pre class="r"><code>stan_code &lt;-
+&quot;
+data {
+
+  int&lt;lower=0&gt; N_o;        // Number of uncensored observations
+  array[N_o] int i_o;      // Index in data set
+
+  int&lt;lower=0&gt; N;          // Number of total observations
+  vector[N] x;             // Covariates for all observations
+  
+  array[N] int index;
+  
+  int&lt;lower=0&gt; T;            // Number of records as ties
+  int&lt;lower=1&gt; G;            // Number of groups of ties
+  array[T] int t_grp;        // Indicating tie group
+  array[T] int t_index;      // Index in data set
+  vector[T] t_adj;           // Adjustment for ties (efron)
+}
+
+parameters {
+  
+  real beta;          // Fixed effects for covariates
+
+}
+
+model {
+  
+  // Prior
+  
+  beta ~ normal(0, 4);
+  
+  // Calculate theta for each observation to be used in likelihood
+  
+  vector[N] theta;
+  vector[N] log_sum_exp_theta;
+  vector[G] exp_theta_grp = rep_vector(0, G);
+  
+  int first_in_grp;
+  
+  for (i in 1:N) {
+    theta[i] = x[i] * beta;  
+  }
+
+  // Computing cumulative sum of log(exp(theta)) from last to first observation
+  
+  log_sum_exp_theta[N] = theta[N];
+  
+  for (i in tail(sort_indices_desc(index), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+  
+  // Adjusting cumulative sum for ties
+  
+  for (i in 1:T) {
+    exp_theta_grp[t_grp[i]] += exp(theta[t_index[i]]);
+  }
+
+  for (i in 1:T) {
+  
+    if (t_adj[i] == 0) {
+      first_in_grp = t_index[i];
+    }
+
+    log_sum_exp_theta[t_index[i]] =
+      log( exp(log_sum_exp_theta[first_in_grp]) - t_adj[i] * exp_theta_grp[t_grp[i]]);
+  }
+  
+  // Likelihood for uncensored observations
+
+  for (n_o in 1:N_o) {
+    target += theta[i_o[n_o]] - log_sum_exp_theta[i_o[n_o]];
+  }
+  
+}
+
+generated quantities {
+  real exp_beta = exp(beta);
+}
+&quot;</code></pre>
+<pre class="r"><code>stan_model &lt;- cmdstan_model(write_stan_file(stan_code))</code></pre>
+<pre class="r"><code>dx &lt;- copy(dd)
+setorder(dx, Y)
+dx[, index := .I]
+
+dx.obs &lt;- dx[event == 1]
+N_obs &lt;- dx.obs[, .N]
+i_obs &lt;- dx.obs[, index]
+
+N_all &lt;- dx[, .N]
+x_all &lt;- dx[, A]
+
+ties &lt;- dx[, .N, keyby = Y][N&gt;1, .(grp = .I, Y)]
+ties &lt;- merge(ties, dx, by = &quot;Y&quot;)
+ties &lt;- ties[, order := 1:.N, keyby = grp][, .(grp, index)]
+ties[, adj := 0:(.N-1)/.N, keyby = grp]
+
+stan_data &lt;- list(
+  N_o = N_obs,
+  i_o = i_obs,
+  N = N_all,
+  x = x_all,
+  index = dx$index,
+  T = nrow(ties),
+  G = max(ties$grp),
+  t_grp = ties$grp,
+  t_index = ties$index,
+  t_adj = ties$adj
+)</code></pre>
+<pre class="r"><code>fit_mle &lt;- stan_model$optimize(data=stan_data, jacobian = FALSE)
+fit_mle$draws(format=&quot;df&quot;)[1,c(&quot;beta&quot;, &quot;exp_beta&quot;)]</code></pre>
+<pre><code>## # A tibble: 1 × 2
+##    beta exp_beta
+##   &lt;dbl&gt;    &lt;dbl&gt;
+## 1 0.401     1.49</code></pre>
+<pre class="r"><code>cox_model &lt;- coxph(Surv(Y, event) ~ A , data = dd, ties = &quot;efron&quot;)</code></pre>
+<pre><code>## # A tibble: 1 × 5
+##   term  estimate std.error statistic      p.value
+##   &lt;chr&gt;    &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;        &lt;dbl&gt;
+## 1 A        0.401    0.0715      5.62 0.0000000194</code></pre>
