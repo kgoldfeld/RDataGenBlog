@@ -14,7 +14,7 @@ image: ''
 draft: TRUE
 ---
 
-In the two previous posts, I [introduced](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"} a Bayesian approach to proportional hazards modeling and then [extended](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"} it to incorporate a penalized spline. This post describes a second addition to the original model by introducing a random effect to account for clustering in a cluster randomized trial. With this in place, I'll be ready to tackle the final step: building a model for analyzing a stepped-wedge cluster-randomized trial that incorporates both splines and site-specific random effects.
+In recent posts, I [introduced](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"} a Bayesian approach to proportional hazards modeling and then [extended](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"} it to incorporate a penalized spline. (There was also a third [post](https://www.rdatagen.net/post/2025-03-20-bayesian-survival-model-that-can-appropriately-handle-ties/){target="_blank"} on handling ties when multiple individuals share the same event time.) This post describes another extension: a random effect to account for clustering in a cluster randomized trial. With this in place, I'll be ready to tackle the final step---building a model for analyzing a stepped-wedge cluster-randomized trial that incorporates both splines and site-specific random effects.
 
 ### Simulating data with a cluster-specific random effect
 
@@ -53,7 +53,7 @@ s2_b <- 0.4^2
 I’ve generated a single data set of 50 sites, with 25 in each arm. Each site includes 100 patients. The plot below shows the site-specific Kaplan-Meier curves for each intervention arm.
 
 ```{r}
-set.seed(7369)
+set.seed(1821)
 
 dc <- genData(50, defC, id = "site")
 dd <- genCluster(dc, "site", numIndsVar = 100, level1ID = "id")
@@ -77,11 +77,20 @@ ggplot(dd_surv_tidy, aes(time, surv, color = site)) +
 
 ### Bayesian model
 
-Since this is the third iteration of the Bayesian proportional hazards model, it naturally also builds directly on the approach from my previous two posts ([here](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"} and [here](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"}). Now, the partial likelihood is a function of the treatment effect and cluster-specific random effects, given by:
+Since this is the fourth iteration of the Bayesian proportional hazards model I've been working on, it naturally  builds directly on the approach from my previous three posts ([here](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}. [here](https://www.rdatagen.net/post/2025-03-04-a-bayesian-proportional-hazards-model-with-splines/){target="_blank"}, and [here](https://www.rdatagen.net/post/2025-03-20-bayesian-survival-model-that-can-appropriately-handle-ties/){target="_blank"}). Now, the partial log likelihood is a function of the treatment effect and cluster-specific random effects, given by:
 
 $$
-L(\beta,\mathbf{b}) = \prod_{i=1}^{N} \left( \frac{\exp \left(\beta A_i + b_{s[i]} \right)} {\sum_{j \in R(t_i)} \exp\left(\beta A_j + b_{s[j]} \right) } \right)^{\delta_i}
+\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] \\
 $$
+
+* $D_j$ is the set of individuals who experience an event at time $t_j$.
+* $R_j$ is the risk set at time $t_j$, including all individuals who are still at risk at that time.
+* $d_j$ is the number of events occurring at time $t_j$.
+* $r$ ranges from 0 to $d_j - 1$, iterating over the tied events.
+* $\bar{w}_j$ represents the average risk weight of individuals experiencing an event at $t_j$:
+
+$$\bar{w}_j = \frac{1}{d_j} \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right)$$
+
 where:
 
   * $N$: number of observations (censored or not)
@@ -104,42 +113,25 @@ $$
 ```{r}
 stan_code <- 
 "
-functions {
-
-  // Binary search optimized to return the last index with the target value
-
-  int binary_search(vector v, real tar_val) {
-    int low = 1;
-    int high = num_elements(v);
-    int result = -1;
-
-    while (low <= high) {
-      int mid = (low + high) %/% 2;
-      if (v[mid] == tar_val) {
-        result = mid; // Store the index
-        high = mid - 1; // Look for earlier occurrences
-      } else if (v[mid] < tar_val) {
-        low = mid + 1;
-      } else {
-        high = mid - 1;
-      }
-    }
-    return result;
-  }
-}
-
 data {
   
   int<lower=0> S;                   // Number of clusters
 
   int<lower=0> K;                   // Number of covariates
   int<lower=0> N_o;                 // Number of uncensored observations
-  vector[N_o] t_o;                  // Event times (sorted in decreasing order)
+  array[N_o] int i_o;               // Index in data set
 
   int<lower=0> N;                   // Number of total observations
-  vector[N] t;                      // Individual times (sorted in decreasing order)
   matrix[N, K] x;                   // Covariates for all observations
   array[N] int<lower=1,upper=S> s;  // Cluster for each observation
+  
+  array[N] int index;
+  
+  int<lower=0> T;            // Number of records as ties
+  int<lower=1> G;            // Number of groups of ties
+  array[T] int t_grp;        // Indicating tie group
+  array[T] int t_index;      // Index in data set
+  vector[T] t_adj;           // Adjustment for ties (efron)
 
 }
 
@@ -163,26 +155,43 @@ model {
   
   vector[N] theta;
   vector[N] log_sum_exp_theta;
+  vector[G] exp_theta_grp = rep_vector(0, G);
+  
+  int first_in_grp;
+
   
   for (i in 1:N) {
     theta[i] = dot_product(x[i], beta) + b[s[i]];  
   }
   
-  // Compute cumulative sum of log(exp(theta)) from last to first observation
+  // Computing cumulative sum of log(exp(theta)) from last to first observation
   
   log_sum_exp_theta[N] = theta[N];
   
-  for (i in tail(sort_indices_desc(t), N-1)) {
+  for (i in tail(sort_indices_desc(index), N-1)) {
     log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
   }
 
-  // Likelihood for uncensored observations
+  // Efron algorithm - adjusting cumulative sum for ties
   
+  for (i in 1:T) {
+    exp_theta_grp[t_grp[i]] += exp(theta[t_index[i]]);
+  }
+
+  for (i in 1:T) {
+  
+    if (t_adj[i] == 0) {
+      first_in_grp = t_index[i];
+    }
+
+    log_sum_exp_theta[t_index[i]] =
+      log( exp(log_sum_exp_theta[first_in_grp]) - t_adj[i] * exp_theta_grp[t_grp[i]]);
+  }
+  
+  // Likelihood for uncensored observations
+
   for (n_o in 1:N_o) {
-    int start_risk = binary_search(t, t_o[n_o]); // Use binary search
-    
-    real log_denom = log_sum_exp_theta[start_risk];
-    target += theta[start_risk] - log_denom;
+    target += theta[i_o[n_o]] - log_sum_exp_theta[i_o[n_o]];
   }
 }
 "
@@ -193,28 +202,38 @@ Getting the data ready to pass to `Stan`, compiling the `Stan` code, and samplin
 ```{r, message=FALSE}
 dx <- copy(dd)
 setorder(dx, Y)
+dx[, index := .I]
 
 dx.obs <- dx[event == 1]
 N_obs <- dx.obs[, .N]
-t_obs <- dx.obs[, Y]
+i_obs <- dx.obs[, index]
 
 N_all <- dx[, .N]
-t_all <- dx[, Y]
 x_all <- data.frame(dx[, .(A)])
 s_all <- dx[, site]
 
 K <- ncol(x_all)                 # num covariates - in this case just A
 S <- dx[, length(unique(site))]
 
+ties <- dx[, .N, keyby = Y][N>1, .(grp = .I, Y)]
+ties <- merge(ties, dx, by = "Y")
+ties <- ties[, order := 1:.N, keyby = grp][, .(grp, index)]
+ties[, adj := 0:(.N-1)/.N, keyby = grp]
+
 stan_data <- list(
   S = S,
   K = K,
   N_o = N_obs,
-  t_o = t_obs,
+  i_o = i_obs,
   N = N_all,
-  t = t_all,
   x = x_all,
-  s = s_all
+  s = s_all,
+  index = dx$index,
+  T = nrow(ties),
+  G = max(ties$grp),
+  t_grp = ties$grp,
+  t_index = ties$index,
+  t_adj = ties$adj
 )
 
 # compiling code
@@ -225,6 +244,7 @@ stan_model <- cmdstan_model(write_stan_file(stan_code))
 
 fit <- stan_model$sample(
   data = stan_data,
+  seed = 1234, 
   iter_warmup = 1000,
   iter_sampling = 4000,
   chains = 4,
