@@ -34,7 +34,7 @@ Finally, these [lecture notes](https://www.google.com/url?sa=t&source=web&rct=j&
 
 ### Implementing the Efron method
 
-Since *Efron* method generally provides better estimates, I chose to incorporate this into the Bayesian model. The partial likelihood under this approach is
+Since the *Efron* method generally provides better estimates, I chose to incorporate this into the Bayesian model. The partial likelihood under this approach is
 
 $$
 \log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j} x_i^\top \beta - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j} \exp(x_k^\top \beta) - r \cdot \bar{w} \right) \right] \\
@@ -50,7 +50,7 @@ $$\bar{w} = \frac{1}{d_j} \sum_{i \in D_j} \exp(x_i^\top \beta)$$
  
 The key idea here is that instead of treating all tied events as occurring simultaneously with the full risk set (as in Breslow’s method), *Efron* gradually reduces the risk set as each tied event is considered. This provides a more refined approximation of the true likelihood, particularly when ties are common.
 
-In case a simple numerical example is helpful, here is a toy example of 15 individuals, where three share a common event time of 14 days (show as $Y$), and two share an event time of 25 days. The critical feature of the *Efron* correction is that $\bar{w}$ is computed by averaging $\text{exp}(\theta)$ across the group experiencing the event at a given time. 
+In case a simple numerical example is helpful, here is a toy example of 15 individuals, where three share a common event time of 14 days (shown as $Y$), and two share an event time of 25 days. The critical feature of the *Efron* correction is that $\bar{w}$ is computed by averaging $\text{exp}(\theta)$ across the group experiencing the event at a given time. 
 
 Initially, the cumulative sum of $\text{exp}(\theta)$ for each individual in the group is identical. However, as each event in the tied group is processed sequentially, the risk set is dynamically updated, and the contribution from individuals who have already been accounted for is gradually reduced. This is reflected in the term $Z = U-V$, where $U$ represents the initial total risk weight and $V$ accounts for the incremental reduction as ties are processed.
 
@@ -62,7 +62,9 @@ knitr::include_graphics("figures/efron.png")
 
 ### Simulating data
 
-To generate data for testing the Bayesian model, I am simulating an RCT with 1,000 individuals randomized 1:1 to one of two groups (represented by $A$). The treatment effect is defined by the hazard ratio $\delta_f$. The data includes censoring and ties. We start with loading the necessary libraries:
+To generate data for testing the Bayesian model, I am simulating an RCT with 1,000 individuals randomized 1:1 to one of two groups (represented by $A$). The treatment effect is defined by the hazard ratio $\delta_f$. The data includes censoring and ties. 
+
+We start with loading the necessary libraries:
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -72,7 +74,7 @@ library(survminer)
 library(cmdstanr)
 ```
 
-Here is the simulation - definitions, parameters, and the data generation. The Kaplan-Meier plot shows the two arms - red is intervention, and green is control, and the black crosses are the censoring times.
+Here is the simulation - definitions, parameters, and the data generation. 
 
 ```{r}
 #### Data definitions
@@ -101,6 +103,7 @@ dd <- genSurv(dd, defS, timeName = "Y", censorName = "censorTime", digits = 0,
 
 ```
 
+The Kaplan-Meier plot shows the two arms - red is intervention, and green is control, and the black crosses are the censoring times.
 
 ```{r km_plot, echo=FALSE, fig.width = 6, fig.height = 4}
 library(ggplot2)
@@ -132,7 +135,7 @@ ggplot(data = dhist, aes(x = Y, y = N)) +
 
 ### Stan model
 
-The Stan code below extends the model to analyze survival data that I presented [earlier](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}, so much of the model remains the same. I've removed the binary search function that appeared in the earlier model, replacing it with an index field that is passed from `R`. There are additional data requirements that must also be sent calculated in `R` to provide information about the ties. The model does not have additional parameters. The adjustment of the likelihood for the ties takes place in the "model" block.
+The Stan code below extends the model to analyze survival data that I presented [earlier](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}, so much of the model remains the same. I've removed the binary search function that appeared in the earlier model, replacing it with an index field that is passed from `R`. There are additional data requirements that must also be sent from `R` to provide information about the ties. The model does not have additional parameters. The adjustment of the likelihood for the ties takes place in the "model" block.
 
 This Stan code extends the survival model I described [earlier](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}, with much of the structure remaining unchanged. The binary search function from the previous model has been removed and replaced with an index field passed from `R`. New data fields related to ties are also required, which must be calculated in `R` and provided to the model. There are no additional parameters, and the likelihood adjustment for ties is handled in the "model" block.
 
