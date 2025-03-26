@@ -54,7 +54,9 @@ dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTi
 <p><span class="math display">\[
 \log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] \\
 \]</span></p>
+<p>where</p>
 <ul>
+<li><span class="math inline">\(J\)</span>: number of unique event times</li>
 <li><span class="math inline">\(D_j\)</span> is the set of individuals who experience an event at time <span class="math inline">\(t_j\)</span>.</li>
 <li><span class="math inline">\(R_j\)</span> is the risk set at time <span class="math inline">\(t_j\)</span>, including all individuals who are still at risk at that time.</li>
 <li><span class="math inline">\(d_j\)</span> is the number of events occurring at time <span class="math inline">\(t_j\)</span>.</li>
@@ -62,13 +64,13 @@ dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTi
 <li><span class="math inline">\(\bar{w}_j\)</span> represents the average risk weight of individuals experiencing an event at <span class="math inline">\(t_j\)</span>:</li>
 </ul>
 <p><span class="math display">\[\bar{w}_j = \frac{1}{d_j} \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right)\]</span></p>
-<p>where:</p>
 <ul>
-<li><span class="math inline">\(N\)</span>: number of observations (censored or not)</li>
-<li><span class="math inline">\(A_i\)</span>: binary indicator for treatment</li>
+<li><span class="math inline">\(A_i\)</span>: binary indicator for treatment for patient <span class="math inline">\(i\)</span>.</li>
+</ul>
+<p>The parameters of the model are</p>
+<ul>
 <li><span class="math inline">\(\beta\)</span>: treatment coefficient</li>
 <li><span class="math inline">\(b_{s[i]}\)</span>: cluster-specific random effect, where <span class="math inline">\(s[i]\)</span> is the cluster of patient <span class="math inline">\(i\)</span></li>
-<li><span class="math inline">\(R(t_i)\)</span>: risk set at time <span class="math inline">\(t_i\)</span> (including only individuals censored <em>after</em> <span class="math inline">\(t_i\)</span>)</li>
 </ul>
 <p>The assumed prior distributions for <span class="math inline">\(\beta\)</span> and the random effects are:</p>
 <p><span class="math display">\[
@@ -95,7 +97,7 @@ data {
   array[N] int index;
   
   int&lt;lower=0&gt; T;            // Number of records as ties
-  int&lt;lower=1&gt; G;            // Number of groups of ties
+  int&lt;lower=1&gt; J;            // Number of groups of ties
   array[T] int t_grp;        // Indicating tie group
   array[T] int t_index;      // Index in data set
   vector[T] t_adj;           // Adjustment for ties (efron)
@@ -122,7 +124,7 @@ model {
   
   vector[N] theta;
   vector[N] log_sum_exp_theta;
-  vector[G] exp_theta_grp = rep_vector(0, G);
+  vector[J] exp_theta_grp = rep_vector(0, J);
   
   int first_in_grp;
 
@@ -193,7 +195,7 @@ stan_data &lt;- list(
   s = s_all,
   index = dx$index,
   T = nrow(ties),
-  G = max(ties$grp),
+  J = max(ties$grp),
   t_grp = ties$grp,
   t_index = ties$index,
   t_adj = ties$adj
@@ -215,14 +217,14 @@ fit &lt;- stan_model$sample(
   refresh = 0
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...</code></pre>
-<pre><code>## Chain 2 finished in 39.2 seconds.
-## Chain 3 finished in 39.3 seconds.
-## Chain 1 finished in 39.6 seconds.
-## Chain 4 finished in 39.8 seconds.
+<pre><code>## Chain 3 finished in 39.0 seconds.
+## Chain 2 finished in 39.1 seconds.
+## Chain 1 finished in 39.5 seconds.
+## Chain 4 finished in 39.5 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 39.5 seconds.
-## Total execution time: 40.0 seconds.</code></pre>
+## Mean chain execution time: 39.3 seconds.
+## Total execution time: 39.7 seconds.</code></pre>
 <p>The posterior mean for <span class="math inline">\(\beta\)</span>, the treatment effect, is quite close to the “true” value of 0.70, as is the estimate of the standard deviation of the random effect (we used <span class="math inline">\(sd = 0.4\)</span> in the data generating process):</p>
 <pre class="r"><code>fit$summary(variables = c(&quot;beta&quot;, &quot;sigma_b&quot;))</code></pre>
 <pre><code>## # A tibble: 2 × 10

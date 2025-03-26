@@ -82,6 +82,9 @@ $$
 \log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] \\
 $$
 
+where
+
+* $J$: number of unique event times
 * $D_j$ is the set of individuals who experience an event at time $t_j$.
 * $R_j$ is the risk set at time $t_j$, including all individuals who are still at risk at that time.
 * $d_j$ is the number of events occurring at time $t_j$.
@@ -90,14 +93,13 @@ $$
 
 $$\bar{w}_j = \frac{1}{d_j} \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right)$$
 
-where:
+* $A_i$: binary indicator for treatment for patient $i$.
 
-  * $N$: number of observations (censored or not)
-  * $A_i$: binary indicator for treatment
+The parameters of the model are
+
   * $\beta$: treatment coefficient
   * $b_{s[i]}$: cluster-specific random effect, where $s[i]$ is the cluster of patient $i$
-  * $R(t_i)$: risk set at time $t_i$ (including only individuals censored *after* $t_i$)
-  
+
 The assumed prior distributions for $\beta$ and the random effects are:
 
 $$
@@ -126,7 +128,7 @@ data {
   array[N] int index;
   
   int<lower=0> T;            // Number of records as ties
-  int<lower=1> G;            // Number of groups of ties
+  int<lower=1> J;            // Number of groups of ties
   array[T] int t_grp;        // Indicating tie group
   array[T] int t_index;      // Index in data set
   vector[T] t_adj;           // Adjustment for ties (efron)
@@ -153,7 +155,7 @@ model {
   
   vector[N] theta;
   vector[N] log_sum_exp_theta;
-  vector[G] exp_theta_grp = rep_vector(0, G);
+  vector[J] exp_theta_grp = rep_vector(0, J);
   
   int first_in_grp;
 
@@ -228,7 +230,7 @@ stan_data <- list(
   s = s_all,
   index = dx$index,
   T = nrow(ties),
-  G = max(ties$grp),
+  J = max(ties$grp),
   t_grp = ties$grp,
   t_index = ties$index,
   t_adj = ties$adj

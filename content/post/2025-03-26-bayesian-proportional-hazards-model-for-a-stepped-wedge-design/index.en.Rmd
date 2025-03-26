@@ -16,7 +16,7 @@ draft: TRUE
 
 We've finally reached the end of the road. This is the fifth and last post in a series building up to a Bayesian proportional hazards model for analyzing a stepped-wedge cluster-randomized trial. If you are just joining in, you may want to start at the [beginning](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}. 
 
-The model presented here integrates non-linear time trends and cluster-specific random effects---elements we've previously explored in islolation. There's nothing fundamentally new in this post; it brings everything together. Given that the groundwork has already been laid, I'll keep the commentary brief and focus on providing the code.
+The model presented here integrates non-linear time trends and cluster-specific random effects---elements we've previously explored in isolation. There's nothing fundamentally new in this post; it brings everything together. Given that the groundwork has already been laid, I'll keep the commentary brief and focus on providing the code.
 
 ### Simulating data from a stepped-wedge CRT
 
@@ -40,7 +40,7 @@ library(cmdstanr)
 #### Definitions
 
 ```{r}
-def <- defData(varname = "b", formula = 0, variance = .5^2)  # mean for random site effect
+def <- defData(varname = "b", formula = 0, variance = 0.5^2)
 
 defS <-
   defSurv(
@@ -48,7 +48,7 @@ defS <-
     formula = 
       "..int + ..delta_f * A + ..beta_1 * k + ..beta_2 * k^2 + ..beta_3 * k^3 + b",
     shape = 0.30)  |>
-  defSurv(varname = "censorTime", formula = -11.3, shape = .36)
+  defSurv(varname = "censorTime", formula = -11.3, shape = 0.36)
 ```
 
 #### Parameters
@@ -115,10 +115,19 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
 
 ### Model estimation
 
+The integrated model has quite a few parts relative to the earlier models, but nothing is really new. There is a penalized spline for the effect of time and a random effect for each site. The primary parameter of interest is still $\beta$.
+
+For completeness, here is the model specification:
+
 $$
-\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] \\
+\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] - \lambda \sum_{m=1}^{M} \left( Q^{(2)} \gamma \right)_m^2
+\\
 $$
 
+where
+
+* $J$: number of unique event times
+* $M$: number of spline basis functions
 * $D_j$ is the set of individuals who experience an event at time $t_j$.
 * $R_j$ is the risk set at time $t_j$, including all individuals who are still at risk at that time.
 * $d_j$ is the number of events occurring at time $t_j$.
@@ -127,17 +136,17 @@ $$
 
 $$\bar{w}_j = \frac{1}{d_j} \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right)$$
 
-where:
+* $A_i$: binary indicator for treatment
+* $X_{m_i}$: value of the $m^{\text{th}}$ spline basis function for the $i^{\text{th}}$ observation
+* $Q^{(2)}$: the second-difference matrix of the spline function
 
-  * $M$: number of spline basis functions
-  * $N$: number of observations (censored or not)
-  * $A_i$: binary indicator for treatment
-  * $X_{m_i}$: value of the $m^{\text{th}}$ spline basis function for the $i^{\text{th}}$ observation
-  * $\beta$: treatment coefficient
-  * $\gamma_m$: spline coefficient for the $m^\text{th}$ spline basis function
-  * $b_{s[i]}$: cluster-specific random effect, where $s[i]$ is the cluster of patient $i$
-  * $R(t_i)$: risk set at time $t_i$ (including only individuals censored *after* $t_i$)
-  
+The parameters of the model are
+
+* $\beta$: treatment coefficient
+* $\gamma_m$: spline coefficient for the $m^\text{th}$ spline basis function
+* $b_{s[i]}$: cluster-specific random effect, where $s[i]$ is the cluster of patient $i$
+* $\lambda$: the penalization term; this will not be estimated but provided by the user
+
 The assumed prior distributions for $\beta$ and the random effects are:
 
 $$
@@ -148,6 +157,8 @@ b_i &\sim N(0,\sigma_b) \\
 \gamma_m &\sim N(0,2)
 \end{aligned}
 $$
+
+And here is the implementation of the model in Stan:
 
 ```{r}
 stan_code <- 
@@ -168,13 +179,13 @@ data {
   
   int<lower=1> Q;          // Number of basis functions
   matrix[N, Q] B;          // Spline basis matrix
-  matrix[N, Q] D2_spline;  // 2nd derivative for penalization
+  matrix[N, Q] Q2_spline;  // 2nd derivative for penalization
   real<lower=0> lambda;    // penalization term
   
   array[N] int index;
 
   int<lower=0> T;            // Number of records as ties
-  int<lower=1> G;            // Number of groups of ties
+  int<lower=1> J;            // Number of groups of ties
   array[T] int t_grp;        // Indicating tie group
   array[T] int t_index;      // Index in data set
   vector[T] t_adj;           // Adjustment for ties (efron)
@@ -210,13 +221,13 @@ model {
   
   // Penalization term for spline second derivative
   
-  target += -lambda * sum(square(D2_spline * gamma));
+  target += -lambda * sum(square(Q2_spline * gamma));
   
   // Compute cumulative sum of exp(theta) in log space (more efficient)
   
   vector[N] theta;
   vector[N] log_sum_exp_theta;
-  vector[G] exp_theta_grp = rep_vector(0, G);
+  vector[J] exp_theta_grp = rep_vector(0, J);
   
   int first_in_grp;
   
@@ -260,9 +271,13 @@ model {
 "
 ```
 
+Compiling the model:
+
 ```{r}
 stan_model <- cmdstan_model(write_stan_file(stan_code))
 ```
+
+Getting the data from `R` to `Stan`:
 
 ```{r}
 dx <- copy(dd)
@@ -290,8 +305,8 @@ knots <- quantile(dx$k, probs = probs)
 spline_basis <- bs(dx$k, knots = knots, degree = spline_degree, intercept = TRUE)
 B <- as.matrix(spline_basis)
 
-D2 <- dbs(dx$k, knots = knots, degree = spline_degree, derivs = 2, intercept = TRUE)
-D2_spline <- as.matrix(D2)
+Q2 <- dbs(dx$k, knots = knots, degree = spline_degree, derivs = 2, intercept = TRUE)
+Q2_spline <- as.matrix(Q2)
 
 ties <- dx[, .N, keyby = Y][N>1, .(grp = .I, Y)]
 ties <- merge(ties, dx, by = "Y")
@@ -308,23 +323,29 @@ stan_data <- list(
   s = s_all,
   Q = ncol(B),
   B = B,
-  D2_spline = D2_spline,
+  Q2_spline = Q2_spline,
   lambda = 0.15,
   index = dx$index,
   T = nrow(ties),
-  G = max(ties$grp),
+  J = max(ties$grp),
   t_grp = ties$grp,
   t_index = ties$index,
   t_adj = ties$adj
 )
 ```
 
-```{r}
-fit_opt <- stan_model$optimize(data=stan_data, jacobian = FALSE)
-fit_opt$draws(variables = c("beta[1]", "sigma_b"), format = "df")
+I am using the MLE estimation of `cmdstanr` to see if we can recover the parameters of interest. I am also providing the code to sample from the posterior, but am not running here, because it takes about 30 minutes on my laptop. (I did run the MCMC sampling, and the posterior means and medians were quite close to MLE estimates.)
+
+```{r, results="hide", message=FALSE, warning=FALSE}
+fit_mle <- stan_model$optimize(data=stan_data, jacobian = FALSE)
+fit_mle$draws(variables = c("beta[1]", "sigma_b"), format = "df")
 ```
 
-```{r, eval=FALSE, warning=FALSE,message=FALSE}
+```{r, echo=FALSE, message=FALSE,warning=FALSE}
+fit_mle$draws(variables = c("beta[1]", "sigma_b"), format = "df")
+```
+
+```{r, echo=FALSE, eval=FALSE, warning=FALSE,message=FALSE}
 fit_mcmc <- stan_model$sample(
   data = stan_data,
   seed = 1234,
@@ -339,12 +360,15 @@ fit_mcmc$summary(variables = c("beta", "sigma_b"))
 ```
 
 
-### Estimate a "frequenist" random-effects model
+### Estimating a "frequentist" random-effects model
 
-Fit a frailty model with random effects for site and a spline for time period k (though no
-site-specific time effect - possibly use a GAM or Bayesian model for that)
+After all that, it turns out you can just fit a frailty model with random effects for site and a spline for time period $k$ using the `coxmme` package. This is obviously much simpler then everything I have presented here. 
 
 ```{r}
 frailty_model <- coxme(Surv(Y, event) ~ A + ns(k, df = 3) + (1 | site), data = dd)
 summary(frailty_model)
 ```
+
+However, the advantage of the Bayesian model is its flexibility. For example, if you wanted to include site-specific spline curves---analogous to site-specific time effects---you could extend the Bayesian approach to do so. The current Bayesian model implements a study-wide time spline, but incorporating site-specific splines would be a natural extension.
+
+I initially hoped to implement site-specific splines using the `mgcv` package, but the models did not converge. I am quite confident that a Bayesian extension would work, though it would likely require substantial computing resources. If someone wants me to try that, I certainly could, but for now, I'll stop here.
