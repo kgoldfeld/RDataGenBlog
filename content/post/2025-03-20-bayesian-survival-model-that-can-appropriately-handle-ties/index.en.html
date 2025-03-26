@@ -34,9 +34,11 @@ Finally, these <a href="https://www.google.com/url?sa=t&amp;source=web&amp;rct=j
 <h3>Implementing the Efron method</h3>
 <p>Since the <em>Efron</em> method generally provides better estimates, I chose to incorporate this into the Bayesian model. The partial likelihood under this approach is</p>
 <p><span class="math display">\[
-\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j} x_i^\top \beta - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j} \exp(x_k^\top \beta) - r \cdot \bar{w}_j \right) \right] \\
+\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j} \mathbf{x}_i^\top \beta - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j} \exp(\mathbf{x}_k^\top \beta) - r \cdot \bar{w}_j \right) \right] \\
 \]</span></p>
 <ul>
+<li><span class="math inline">\(\mathbf{x}_i\)</span>: vector of covariates for individual <span class="math inline">\(i\)</span>.</li>
+<li><span class="math inline">\(J\)</span>: number of unique event times.</li>
 <li><span class="math inline">\(D_j\)</span> is the set of individuals who experience an event at time <span class="math inline">\(t_j\)</span>.</li>
 <li><span class="math inline">\(R_j\)</span> is the risk set at time <span class="math inline">\(t_j\)</span>, including all individuals who are still at risk at that time.</li>
 <li><span class="math inline">\(d_j\)</span> is the number of events occurring at time <span class="math inline">\(t_j\)</span>.</li>
@@ -105,7 +107,7 @@ data {
   array[N] int index;
   
   int&lt;lower=0&gt; T;            // Number of records as ties
-  int&lt;lower=1&gt; G;            // Number of groups of ties
+  int&lt;lower=1&gt; J;            // Number of groups of ties
   array[T] int t_grp;        // Indicating tie group
   array[T] int t_index;      // Index in data set
   vector[T] t_adj;           // Adjustment for ties (efron)
@@ -127,7 +129,7 @@ model {
   
   vector[N] theta;
   vector[N] log_sum_exp_theta;
-  vector[G] exp_theta_grp = rep_vector(0, G);
+  vector[J] exp_theta_grp = rep_vector(0, J);
   
   int first_in_grp;
   
@@ -200,7 +202,7 @@ stan_data &lt;- list(
   x = x_all,
   index = dx$index,
   T = nrow(ties),
-  G = max(ties$grp),
+  J = max(ties$grp),
   t_grp = ties$grp,
   t_index = ties$index,
   t_adj = ties$adj
