@@ -1,0 +1,326 @@
+---
+title: Bayesian proportional hazards model for a stepped-wedge design
+author: Package Build
+date: '2025-03-26'
+slug: []
+categories: []
+tags:
+  - R
+  - Bayesian model
+  - survival analysis
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>We’ve finally reached the end of the road. This is the fifth and last post in a series building up to a Bayesian proportional hazards model for analyzing a stepped-wedge cluster-randomized trial. If you are just joining in, you may want to start at the <a href="https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/" target="_blank">beginning</a>.</p>
+<p>The model presented here integrates non-linear time trends and cluster-specific random effects—elements we’ve previously explored in islolation. There’s nothing fundamentally new in this post; it brings everything together. Given that the groundwork has already been laid, I’ll keep the commentary brief and focus on providing the code.</p>
+<div id="simulating-data-from-a-stepped-wedge-crt" class="section level3">
+<h3>Simulating data from a stepped-wedge CRT</h3>
+<p>I’ll generate a single data set for 25 sites, each site enrolling study participants over a 30-month period. Sites will transition from control to intervention sequentially, with one new site starting each month. Each site will enroll 40 patients each month.</p>
+<p>The outcome (<span class="math inline">\(Y\)</span>) is the number of days to an event, with each participant followed for up to 90 days. The treatment (<span class="math inline">\(A\)</span>) reduces the time to event. Survival times also depend on the enrollment month—an effect I’ve exaggerated for illustration. Additionally, each site <span class="math inline">\(i\)</span> has a site-specific effect <span class="math inline">\(b_i\)</span>, which influences the time to event among its participants.</p>
+<p>Here are the libraries needed for the code shown here:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(splines)
+library(splines2)
+library(survival)
+library(survminer)
+library(coxme)
+library(cmdstanr)</code></pre>
+<div id="definitions" class="section level4">
+<h4>Definitions</h4>
+<pre class="r"><code>def &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = .5^2)  # mean for random site effect
+
+defS &lt;-
+  defSurv(
+    varname = &quot;eventTime&quot;,
+    formula = 
+      &quot;..int + ..delta_f * A + ..beta_1 * k + ..beta_2 * k^2 + ..beta_3 * k^3 + b&quot;,
+    shape = 0.30)  |&gt;
+  defSurv(varname = &quot;censorTime&quot;, formula = -11.3, shape = .36)</code></pre>
+</div>
+<div id="parameters" class="section level4">
+<h4>Parameters</h4>
+<pre class="r"><code>int &lt;- -11.6
+delta_f &lt;-  0.80
+
+beta_1 &lt;-  0.05
+beta_2 &lt;-  -0.025
+beta_3 &lt;- 0.001</code></pre>
+</div>
+<div id="data-generation" class="section level4">
+<h4>Data generation</h4>
+<pre class="r"><code>set.seed(28271)
+
+### Site level data
+
+ds &lt;- genData(25, def, id = &quot;site&quot;)                 
+ds &lt;- addPeriods(ds, 30, &quot;site&quot;, perName = &quot;k&quot;) 
+
+# Each site has a unique starting point, site 1 starts period 3, site 2 period 4, etc.
+
+ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 25,     
+                   lenWaves = 1, startPer = 3, 
+                   grpName = &quot;A&quot;, perName = &quot;k&quot;)
+
+### Individual level data
+
+dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 40, level1ID = &quot;id&quot;) 
+dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTime&quot;, digits = 0,
+              eventName = &quot;event&quot;, typeName = &quot;eventType&quot;)
+
+### Final observed data set
+
+dd &lt;- dd[, .(id, site, k, A, Y, event)]</code></pre>
+<p>Here is a set of Kaplan-Meier plots for each site and enrollment period. When a site is in the intervention condition, the K-M curve is red. For simplicity, censoring is not shown, though about 20% of cases in this dataset are censored.</p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/swplot-1.png" width="672" /></p>
+</div>
+</div>
+<div id="model-estimation" class="section level3">
+<h3>Model estimation</h3>
+<p><span class="math display">\[
+\log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] \\
+\]</span></p>
+<ul>
+<li><span class="math inline">\(D_j\)</span> is the set of individuals who experience an event at time <span class="math inline">\(t_j\)</span>.</li>
+<li><span class="math inline">\(R_j\)</span> is the risk set at time <span class="math inline">\(t_j\)</span>, including all individuals who are still at risk at that time.</li>
+<li><span class="math inline">\(d_j\)</span> is the number of events occurring at time <span class="math inline">\(t_j\)</span>.</li>
+<li><span class="math inline">\(r\)</span> ranges from 0 to <span class="math inline">\(d_j - 1\)</span>, iterating over the tied events.</li>
+<li><span class="math inline">\(\bar{w}_j\)</span> represents the average risk weight of individuals experiencing an event at <span class="math inline">\(t_j\)</span>:</li>
+</ul>
+<p><span class="math display">\[\bar{w}_j = \frac{1}{d_j} \sum_{i \in D_j}  \left(\beta A_i + b_{s[i]} \right)\]</span></p>
+<p>where:</p>
+<ul>
+<li><span class="math inline">\(M\)</span>: number of spline basis functions</li>
+<li><span class="math inline">\(N\)</span>: number of observations (censored or not)</li>
+<li><span class="math inline">\(A_i\)</span>: binary indicator for treatment</li>
+<li><span class="math inline">\(X_{m_i}\)</span>: value of the <span class="math inline">\(m^{\text{th}}\)</span> spline basis function for the <span class="math inline">\(i^{\text{th}}\)</span> observation</li>
+<li><span class="math inline">\(\beta\)</span>: treatment coefficient</li>
+<li><span class="math inline">\(\gamma_m\)</span>: spline coefficient for the <span class="math inline">\(m^\text{th}\)</span> spline basis function</li>
+<li><span class="math inline">\(b_{s[i]}\)</span>: cluster-specific random effect, where <span class="math inline">\(s[i]\)</span> is the cluster of patient <span class="math inline">\(i\)</span></li>
+<li><span class="math inline">\(R(t_i)\)</span>: risk set at time <span class="math inline">\(t_i\)</span> (including only individuals censored <em>after</em> <span class="math inline">\(t_i\)</span>)</li>
+</ul>
+<p>The assumed prior distributions for <span class="math inline">\(\beta\)</span> and the random effects are:</p>
+<p><span class="math display">\[
+\begin{aligned}
+\beta &amp;\sim N(0,4) \\
+b_i &amp;\sim N(0,\sigma_b) \\
+\sigma_b &amp;\sim t_{\text{student}}(df = 3, \mu=0, \sigma = 2) \\
+\gamma_m &amp;\sim N(0,2)
+\end{aligned}
+\]</span></p>
+<pre class="r"><code>stan_code &lt;- 
+&quot;
+data {
+  
+  int&lt;lower=1&gt; S;          // Number of clusters
+  int&lt;lower=1&gt; K;          // Number of covariates
+  
+  int&lt;lower=1&gt; N_o;        // Number of uncensored observations
+  array[N_o] int i_o;      // Event times (sorted in decreasing order)
+
+  int&lt;lower=1&gt; N;          // Number of total observations
+  matrix[N, K] x;          // Covariates for all observations
+  array[N] int&lt;lower=1,upper=S&gt; s;          // Cluster
+  
+  // Spline-related data
+  
+  int&lt;lower=1&gt; Q;          // Number of basis functions
+  matrix[N, Q] B;          // Spline basis matrix
+  matrix[N, Q] D2_spline;  // 2nd derivative for penalization
+  real&lt;lower=0&gt; lambda;    // penalization term
+  
+  array[N] int index;
+
+  int&lt;lower=0&gt; T;            // Number of records as ties
+  int&lt;lower=1&gt; G;            // Number of groups of ties
+  array[T] int t_grp;        // Indicating tie group
+  array[T] int t_index;      // Index in data set
+  vector[T] t_adj;           // Adjustment for ties (efron)
+  
+}
+
+parameters {
+  
+  vector[K] beta;          // Fixed effects for covariates
+  
+  vector[S] b;             // Random effects
+  real&lt;lower=0&gt; sigma_b;   // SD of random effect
+  
+  vector[Q] gamma;         // Spline coefficients
+  
+}
+
+model {
+  
+  // Priors
+  
+  beta ~ normal(0, 1);
+  
+  // Random effects
+  
+  b ~ normal(0, sigma_b);
+  sigma_b ~ normal(0, 0.5);
+
+  
+  // Spline coefficients prior
+  
+  gamma ~ normal(0, 2);
+  
+  // Penalization term for spline second derivative
+  
+  target += -lambda * sum(square(D2_spline * gamma));
+  
+  // Compute cumulative sum of exp(theta) in log space (more efficient)
+  
+  vector[N] theta;
+  vector[N] log_sum_exp_theta;
+  vector[G] exp_theta_grp = rep_vector(0, G);
+  
+  int first_in_grp;
+  
+  // Calculate theta for each observation
+  
+  for (i in 1:N) {
+    theta[i] = dot_product(x[i], beta) + dot_product(B[i], gamma) + b[s[i]];
+  }
+  
+  // Compute cumulative sum of log(exp(theta)) from last to first observation
+  
+  log_sum_exp_theta = rep_vector(0.0, N);
+  log_sum_exp_theta[N] = theta[N];
+  
+  for (i in tail(sort_indices_desc(index), N-1)) {
+    log_sum_exp_theta[i] = log_sum_exp(theta[i], log_sum_exp_theta[i + 1]);
+  }
+
+   // Efron algorithm - adjusting cumulative sum for ties
+  
+  for (i in 1:T) {
+    exp_theta_grp[t_grp[i]] += exp(theta[t_index[i]]);
+  }
+
+  for (i in 1:T) {
+  
+    if (t_adj[i] == 0) {
+      first_in_grp = t_index[i];
+    }
+
+    log_sum_exp_theta[t_index[i]] =
+      log( exp(log_sum_exp_theta[first_in_grp]) - t_adj[i] * exp_theta_grp[t_grp[i]]);
+  }
+  
+  // Likelihood for uncensored observations
+
+  for (n_o in 1:N_o) {
+    target += theta[i_o[n_o]] - log_sum_exp_theta[i_o[n_o]];
+  }
+}
+&quot;</code></pre>
+<pre class="r"><code>stan_model &lt;- cmdstan_model(write_stan_file(stan_code))</code></pre>
+<pre class="r"><code>dx &lt;- copy(dd)
+setorder(dx, Y)
+dx[, index := .I]
+
+dx.obs &lt;- dx[event == 1]
+N_obs &lt;- dx.obs[, .N]
+i_obs &lt;- dx.obs[, index]
+
+N_all &lt;- dx[, .N]
+x_all &lt;- data.frame(dx[, .(A)])
+s_all &lt;- dx[, site]
+
+K &lt;- ncol(x_all)                 # num covariates - in this case just A
+S &lt;- dx[, length(unique(site))]
+
+# Spline-related info
+
+n_knots &lt;- 5
+spline_degree &lt;- 3
+knot_dist &lt;- 1/(n_knots + 1)
+probs &lt;- seq(knot_dist, 1 - knot_dist, by = knot_dist)
+knots &lt;- quantile(dx$k, probs = probs)
+spline_basis &lt;- bs(dx$k, knots = knots, degree = spline_degree, intercept = TRUE)
+B &lt;- as.matrix(spline_basis)
+
+D2 &lt;- dbs(dx$k, knots = knots, degree = spline_degree, derivs = 2, intercept = TRUE)
+D2_spline &lt;- as.matrix(D2)
+
+ties &lt;- dx[, .N, keyby = Y][N&gt;1, .(grp = .I, Y)]
+ties &lt;- merge(ties, dx, by = &quot;Y&quot;)
+ties &lt;- ties[, order := 1:.N, keyby = grp][, .(grp, index)]
+ties[, adj := 0:(.N-1)/.N, keyby = grp]
+
+stan_data &lt;- list(
+  S = S,
+  K = K,
+  N_o = N_obs,
+  i_o = i_obs,
+  N = N_all,
+  x = x_all,
+  s = s_all,
+  Q = ncol(B),
+  B = B,
+  D2_spline = D2_spline,
+  lambda = 0.15,
+  index = dx$index,
+  T = nrow(ties),
+  G = max(ties$grp),
+  t_grp = ties$grp,
+  t_index = ties$index,
+  t_adj = ties$adj
+)</code></pre>
+<pre class="r"><code>fit_opt &lt;- stan_model$optimize(data=stan_data, jacobian = FALSE)</code></pre>
+<pre><code>## Initial log joint probability = -248997 
+##     Iter      log prob        ||dx||      ||grad||       alpha      alpha0  # evals  Notes  
+##       49       -209525   0.000677281      0.724244       0.542       0.542       54    
+## Optimization terminated normally:  
+##   Convergence detected: relative gradient magnitude is below tolerance 
+## Finished in  0.6 seconds.</code></pre>
+<pre class="r"><code>fit_opt$draws(variables = c(&quot;beta[1]&quot;, &quot;sigma_b&quot;), format = &quot;df&quot;)</code></pre>
+<pre><code>## # A draws_df: 1 iterations, 1 chains, and 2 variables
+##   beta[1] sigma_b
+## 1     0.8    0.51
+## # ... hidden reserved variables {&#39;.chain&#39;, &#39;.iteration&#39;, &#39;.draw&#39;}</code></pre>
+<pre class="r"><code>fit_mcmc &lt;- stan_model$sample(
+  data = stan_data,
+  seed = 1234,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)
+
+fit_mcmc$summary(variables = c(&quot;beta&quot;, &quot;sigma_b&quot;))</code></pre>
+</div>
+<div id="estimate-a-frequenist-random-effects-model" class="section level3">
+<h3>Estimate a “frequenist” random-effects model</h3>
+<p>Fit a frailty model with random effects for site and a spline for time period k (though no
+site-specific time effect - possibly use a GAM or Bayesian model for that)</p>
+<pre class="r"><code>frailty_model &lt;- coxme(Surv(Y, event) ~ A + ns(k, df = 3) + (1 | site), data = dd)
+summary(frailty_model)</code></pre>
+<pre><code>## Mixed effects coxme model
+##  Formula: Surv(Y, event) ~ A + ns(k, df = 3) + (1 | site) 
+##     Data: dd 
+## 
+##   events, n = 23897, 30000
+## 
+## Random effects:
+##   group  variable       sd  variance
+## 1  site Intercept 0.534326 0.2855043
+##                   Chisq    df p   AIC   BIC
+## Integrated loglik 28945  5.00 0 28935 28894
+##  Penalized loglik 29103 27.91 0 29047 28822
+## 
+## Fixed effects:
+##                    coef exp(coef) se(coef)      z      p
+## A               0.79200   2.20780  0.02346  33.76 &lt;2e-16
+## ns(k, df = 3)1 -2.69034   0.06786  0.03511 -76.62 &lt;2e-16
+## ns(k, df = 3)2  1.19665   3.30900  0.06178  19.37 &lt;2e-16
+## ns(k, df = 3)3  4.54958  94.59267  0.03784 120.22 &lt;2e-16</code></pre>
+</div>
