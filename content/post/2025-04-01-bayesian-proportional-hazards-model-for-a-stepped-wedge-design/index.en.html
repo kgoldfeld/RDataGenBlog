@@ -284,13 +284,31 @@ stan_data &lt;- list(
   t_index = ties$index,
   t_adj = ties$adj
 )</code></pre>
-<p>I am using the MLE estimation of <code>cmdstanr</code> to see if we can recover the parameters of interest. I am also providing the code to sample from the posterior, but am not running here, because it takes about 30 minutes on my laptop. (I did run the MCMC sampling, and the posterior means and medians were quite close to MLE estimates.)</p>
-<pre class="r"><code>fit_mle &lt;- stan_model$optimize(data=stan_data, jacobian = FALSE)
-fit_mle$draws(variables = c(&quot;beta[1]&quot;, &quot;sigma_b&quot;), format = &quot;df&quot;)</code></pre>
-<pre><code>## # A draws_df: 1 iterations, 1 chains, and 2 variables
-##   beta[1] sigma_b
-## 1     0.8    0.51
-## # ... hidden reserved variables {&#39;.chain&#39;, &#39;.iteration&#39;, &#39;.draw&#39;}</code></pre>
+<p>Now we sample from the posterior - you can see that it takes quite a while to run, at least on my 2020 MacBook Pro M1 with 8GB RAM:</p>
+<pre class="r"><code>fit_mcmc &lt;- stan_model$sample(
+  data = stan_data,
+  seed = 1234,
+  iter_warmup = 1000,
+  iter_sampling = 4000,
+  chains = 4,
+  parallel_chains = 4,
+  refresh = 0
+)</code></pre>
+<pre><code>## Running MCMC with 4 parallel chains...</code></pre>
+<pre><code>## Chain 2 finished in 4332.8 seconds.
+## Chain 4 finished in 6617.2 seconds.
+## Chain 3 finished in 6866.8 seconds.
+## Chain 1 finished in 7127.5 seconds.
+## 
+## All 4 chains finished successfully.
+## Mean chain execution time: 6236.1 seconds.
+## Total execution time: 7128.0 seconds.</code></pre>
+<pre class="r"><code>fit_mcmc$summary(variables = c(&quot;beta&quot;, &quot;sigma_b&quot;))</code></pre>
+<pre><code>## # A tibble: 2 × 10
+##   variable  mean median     sd    mad    q5   q95  rhat ess_bulk ess_tail
+##   &lt;chr&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
+## 1 beta[1]  0.796  0.796 0.0237 0.0233 0.757 0.835  1.00    5128.    6782.
+## 2 sigma_b  0.549  0.540 0.0814 0.0757 0.433 0.695  1.00    4533.    5262.</code></pre>
 </div>
 <div id="estimating-a-frequentist-random-effects-model" class="section level3">
 <h3>Estimating a “frequentist” random-effects model</h3>
