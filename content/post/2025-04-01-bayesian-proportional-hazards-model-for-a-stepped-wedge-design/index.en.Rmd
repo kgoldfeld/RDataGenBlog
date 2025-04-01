@@ -1,7 +1,7 @@
 ---
 title: Bayesian proportional hazards model for a stepped-wedge design
 author: Package Build
-date: '2025-03-26'
+date: '2025-04-01'
 slug: []
 categories: []
 tags:
@@ -11,7 +11,6 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 We've finally reached the end of the road. This is the fifth and last post in a series building up to a Bayesian proportional hazards model for analyzing a stepped-wedge cluster-randomized trial. If you are just joining in, you may want to start at the [beginning](https://www.rdatagen.net/post/2025-02-11-estimating-a-bayesian-proportional-hazards-model/){target="_blank"}. 
@@ -20,9 +19,9 @@ The model presented here integrates non-linear time trends and cluster-specific 
 
 ### Simulating data from a stepped-wedge CRT
 
-I'll generate a single data set for 25 sites, each site enrolling study participants over a 30-month period. Sites will transition from control to intervention sequentially, with one new site starting each month. Each site will enroll 40 patients each month. 
+I'll generate a single data set for 25 sites, each site enrolling study participants over a 30-month period. Sites will transition from control to intervention sequentially, with one new site starting each month. Each site will enroll 25 patients each month. 
 
-The outcome ($Y$) is the number of days to an event, with each participant followed for up to 90 days. The treatment ($A$) reduces the time to event. Survival times also depend on the enrollment month---an effect I've exaggerated for illustration. Additionally, each site $i$ has a site-specific effect $b_i$, which influences the time to event among its participants.
+The outcome ($Y$) is the number of days to an event. The treatment ($A$) reduces the time to event. Survival times also depend on the enrollment month---an effect I've exaggerated for illustration. Additionally, each site $i$ has a site-specific effect $b_i \sim N(\mu=0, \sigma = 0.5)$, which influences the time to event among its participants.
 
 Here are the libraries needed for the code shown here:
 
@@ -80,7 +79,7 @@ ds <- trtStepWedge(ds, "site", nWaves = 25,
 
 ### Individual level data
 
-dd <- genCluster(ds, "timeID", numIndsVar = 40, level1ID = "id") 
+dd <- genCluster(ds, "timeID", numIndsVar = 25, level1ID = "id") 
 dd <- genSurv(dd, defS, timeName = "Y", censorName = "censorTime", digits = 0,
               eventName = "event", typeName = "eventType")
 
@@ -115,7 +114,7 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
 
 ### Model estimation
 
-The integrated model has quite a few parts relative to the earlier models, but nothing is really new. There is a penalized spline for the effect of time and a random effect for each site. The primary parameter of interest is still $\beta$.
+This model has quite a few components relative to the earlier models, but nothing is really new. There is a penalized spline for the effect of time and a random effect for each site. The primary parameter of interest is still $\beta$.
 
 For completeness, here is the model specification:
 
@@ -360,6 +359,4 @@ frailty_model <- coxme(Surv(Y, event) ~ A + ns(k, df = 3) + (1 | site), data = d
 summary(frailty_model)
 ```
 
-However, the advantage of the Bayesian model is its flexibility. For example, if you wanted to include site-specific spline curves---analogous to site-specific time effects---you could extend the Bayesian approach to do so. The current Bayesian model implements a study-wide time spline, but incorporating site-specific splines would be a natural extension.
-
-I initially hoped to implement site-specific splines using the `mgcv` package, but the models did not converge. I am quite confident that a Bayesian extension would work, though it would likely require substantial computing resources. If someone wants me to try that, I certainly could, but for now, I'll stop here.
+However, the advantage of the Bayesian model is its flexibility. For example, if you wanted to include site-specific spline curves---analogous to site-specific time effects---you could extend the Bayesian approach to do so. The current Bayesian model implements a study-wide time spline, but incorporating site-specific splines would be a natural extension. I initially hoped to implement site-specific splines using the `mgcv` package, but the models did not converge. I am quite confident that a Bayesian extension would, though it would likely require substantial computing resources. If someone wants me to try that, I certainly could, but for now, I'll stop here.

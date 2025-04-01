@@ -1,7 +1,7 @@
 ---
 title: Bayesian proportional hazards model for a stepped-wedge design
 author: Package Build
-date: '2025-03-26'
+date: '2025-04-01'
 slug: []
 categories: []
 tags:
@@ -11,7 +11,6 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 
@@ -20,8 +19,8 @@ draft: TRUE
 <p>The model presented here integrates non-linear time trends and cluster-specific random effects—elements we’ve previously explored in isolation. There’s nothing fundamentally new in this post; it brings everything together. Given that the groundwork has already been laid, I’ll keep the commentary brief and focus on providing the code.</p>
 <div id="simulating-data-from-a-stepped-wedge-crt" class="section level3">
 <h3>Simulating data from a stepped-wedge CRT</h3>
-<p>I’ll generate a single data set for 25 sites, each site enrolling study participants over a 30-month period. Sites will transition from control to intervention sequentially, with one new site starting each month. Each site will enroll 40 patients each month.</p>
-<p>The outcome (<span class="math inline">\(Y\)</span>) is the number of days to an event, with each participant followed for up to 90 days. The treatment (<span class="math inline">\(A\)</span>) reduces the time to event. Survival times also depend on the enrollment month—an effect I’ve exaggerated for illustration. Additionally, each site <span class="math inline">\(i\)</span> has a site-specific effect <span class="math inline">\(b_i\)</span>, which influences the time to event among its participants.</p>
+<p>I’ll generate a single data set for 25 sites, each site enrolling study participants over a 30-month period. Sites will transition from control to intervention sequentially, with one new site starting each month. Each site will enroll 25 patients each month.</p>
+<p>The outcome (<span class="math inline">\(Y\)</span>) is the number of days to an event. The treatment (<span class="math inline">\(A\)</span>) reduces the time to event. Survival times also depend on the enrollment month—an effect I’ve exaggerated for illustration. Additionally, each site <span class="math inline">\(i\)</span> has a site-specific effect <span class="math inline">\(b_i \sim N(\mu=0, \sigma = 0.5)\)</span>, which influences the time to event among its participants.</p>
 <p>Here are the libraries needed for the code shown here:</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
@@ -69,7 +68,7 @@ ds &lt;- trtStepWedge(ds, &quot;site&quot;, nWaves = 25,
 
 ### Individual level data
 
-dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 40, level1ID = &quot;id&quot;) 
+dd &lt;- genCluster(ds, &quot;timeID&quot;, numIndsVar = 25, level1ID = &quot;id&quot;) 
 dd &lt;- genSurv(dd, defS, timeName = &quot;Y&quot;, censorName = &quot;censorTime&quot;, digits = 0,
               eventName = &quot;event&quot;, typeName = &quot;eventType&quot;)
 
@@ -82,7 +81,7 @@ dd &lt;- dd[, .(id, site, k, A, Y, event)]</code></pre>
 </div>
 <div id="model-estimation" class="section level3">
 <h3>Model estimation</h3>
-<p>The integrated model has quite a few parts relative to the earlier models, but nothing is really new. There is a penalized spline for the effect of time and a random effect for each site. The primary parameter of interest is still <span class="math inline">\(\beta\)</span>.</p>
+<p>This model has quite a few components relative to the earlier models, but nothing is really new. There is a penalized spline for the effect of time and a random effect for each site. The primary parameter of interest is still <span class="math inline">\(\beta\)</span>.</p>
 <p>For completeness, here is the model specification:</p>
 <p><span class="math display">\[
 \log L(\beta) = \sum_{j=1}^{J} \left[ \sum_{i \in D_j}  \left(\beta A_i + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[i]} \right) - \sum_{r=0}^{d_j-1} \log \left( \sum_{k \in R_j}  \left(\beta A_k + \sum_{m=1} ^ M \gamma_m X_{m_i} + b_{s[k]} \right) - r \cdot \bar{w}_j \right) \right] - \lambda \sum_{m=1}^{M} \left( Q^{(2)} \gamma \right)_m^2
@@ -295,20 +294,20 @@ stan_data &lt;- list(
   refresh = 0
 )</code></pre>
 <pre><code>## Running MCMC with 4 parallel chains...</code></pre>
-<pre><code>## Chain 2 finished in 4332.8 seconds.
-## Chain 4 finished in 6617.2 seconds.
-## Chain 3 finished in 6866.8 seconds.
-## Chain 1 finished in 7127.5 seconds.
+<pre><code>## Chain 4 finished in 1847.8 seconds.
+## Chain 1 finished in 2202.8 seconds.
+## Chain 3 finished in 2311.8 seconds.
+## Chain 2 finished in 2414.9 seconds.
 ## 
 ## All 4 chains finished successfully.
-## Mean chain execution time: 6236.1 seconds.
-## Total execution time: 7128.0 seconds.</code></pre>
+## Mean chain execution time: 2194.3 seconds.
+## Total execution time: 2415.3 seconds.</code></pre>
 <pre class="r"><code>fit_mcmc$summary(variables = c(&quot;beta&quot;, &quot;sigma_b&quot;))</code></pre>
 <pre><code>## # A tibble: 2 × 10
 ##   variable  mean median     sd    mad    q5   q95  rhat ess_bulk ess_tail
 ##   &lt;chr&gt;    &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt;  &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt; &lt;dbl&gt;    &lt;dbl&gt;    &lt;dbl&gt;
-## 1 beta[1]  0.796  0.796 0.0237 0.0233 0.757 0.835  1.00    5128.    6782.
-## 2 sigma_b  0.549  0.540 0.0814 0.0757 0.433 0.695  1.00    4533.    5262.</code></pre>
+## 1 beta[1]  0.815  0.815 0.0298 0.0298 0.767 0.865  1.00    3513.    5077.
+## 2 sigma_b  0.543  0.535 0.0775 0.0739 0.432 0.683  1.00    3146.    5110.</code></pre>
 </div>
 <div id="estimating-a-frequentist-random-effects-model" class="section level3">
 <h3>Estimating a “frequentist” random-effects model</h3>
@@ -319,21 +318,20 @@ summary(frailty_model)</code></pre>
 ##  Formula: Surv(Y, event) ~ A + ns(k, df = 3) + (1 | site) 
 ##     Data: dd 
 ## 
-##   events, n = 23897, 30000
+##   events, n = 14989, 18750
 ## 
 ## Random effects:
-##   group  variable       sd  variance
-## 1  site Intercept 0.534326 0.2855043
+##   group  variable        sd  variance
+## 1  site Intercept 0.5306841 0.2816256
 ##                   Chisq    df p   AIC   BIC
-## Integrated loglik 28945  5.00 0 28935 28894
-##  Penalized loglik 29103 27.91 0 29047 28822
+## Integrated loglik 18038  5.00 0 18028 17990
+##  Penalized loglik 18185 27.85 0 18129 17917
 ## 
 ## Fixed effects:
 ##                    coef exp(coef) se(coef)      z      p
-## A               0.79200   2.20780  0.02346  33.76 &lt;2e-16
-## ns(k, df = 3)1 -2.69034   0.06786  0.03511 -76.62 &lt;2e-16
-## ns(k, df = 3)2  1.19665   3.30900  0.06178  19.37 &lt;2e-16
-## ns(k, df = 3)3  4.54958  94.59267  0.03784 120.22 &lt;2e-16</code></pre>
-<p>However, the advantage of the Bayesian model is its flexibility. For example, if you wanted to include site-specific spline curves—analogous to site-specific time effects—you could extend the Bayesian approach to do so. The current Bayesian model implements a study-wide time spline, but incorporating site-specific splines would be a natural extension.</p>
-<p>I initially hoped to implement site-specific splines using the <code>mgcv</code> package, but the models did not converge. I am quite confident that a Bayesian extension would work, though it would likely require substantial computing resources. If someone wants me to try that, I certainly could, but for now, I’ll stop here.</p>
+## A               0.80966   2.24714  0.02959  27.36 &lt;2e-16
+## ns(k, df = 3)1 -2.71392   0.06628  0.04428 -61.29 &lt;2e-16
+## ns(k, df = 3)2  1.04004   2.82933  0.07851  13.25 &lt;2e-16
+## ns(k, df = 3)3  4.48430  88.61492  0.04729  94.83 &lt;2e-16</code></pre>
+<p>However, the advantage of the Bayesian model is its flexibility. For example, if you wanted to include site-specific spline curves—analogous to site-specific time effects—you could extend the Bayesian approach to do so. The current Bayesian model implements a study-wide time spline, but incorporating site-specific splines would be a natural extension. I initially hoped to implement site-specific splines using the <code>mgcv</code> package, but the models did not converge. I am quite confident that a Bayesian extension would, though it would likely require substantial computing resources. If someone wants me to try that, I certainly could, but for now, I’ll stop here.</p>
 </div>
