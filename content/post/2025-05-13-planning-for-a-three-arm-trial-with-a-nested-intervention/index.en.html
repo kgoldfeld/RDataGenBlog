@@ -1,0 +1,169 @@
+---
+title: Planning for a 3-arm cluster randomized trial with a nested intervention and a time-to-event outcome
+author: Package Build
+date: '2025-05-13'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>A researcher recently approached me for advice on a cluster-randomized trial he was developing. He was interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.</p>
+<p>As we discussed the interventions (I’ll call them <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>), it became clear that <span class="math inline">\(A\)</span> was the primary focus. Intervention <span class="math inline">\(B\)</span> might enhance the effectiveness of <span class="math inline">\(A\)</span>, but on its own, <span class="math inline">\(B\)</span> was not expected to have much impact. (It’s also possible that <span class="math inline">\(A\)</span> alone doesn’t work, but once <span class="math inline">\(B\)</span> is in place, the combination may reap benefits.) Given this, it didn’t seem worthwhile to randomize clinics or providers to receive B alone. We agreed that a three-arm cluster-randomized trial—with (1) control, (2) <span class="math inline">\(A\)</span> alone, and (3) <span class="math inline">\(A + B\)</span>—would be a more efficient and relevant design.</p>
+<p>A while ago, I <a href="https://www.rdatagen.net/post/2023-12-19-a-three-arm-trial-using-two-step-randomization/" target="_blank">wrote about</a> a proposal to conduct a three-arm trial using a two-step randomization scheme. That design assumes that outcomes in the enhanced arm (<span class="math inline">\(A + B\)</span>) are uncorrelated with those in the standalone arm <span class="math inline">\(A\)</span> within the same cluster. For this project, that assumption didn’t seem plausible, so I recommended sticking with a standard cluster-level randomization.</p>
+<p>The study has three goals:</p>
+<ul>
+<li>Assess the effectiveness of <span class="math inline">\(A\)</span> versus control</li>
+<li>Compare <span class="math inline">\(A + B\)</span> versus <span class="math inline">\(A\)</span> alone</li>
+<li>If <span class="math inline">\(A\)</span> alone is ineffective, compare <span class="math inline">\(A + B\)</span> versus control</li>
+</ul>
+<p>In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we used a <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463" target="_blank">gatekeeping</a> strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at <span class="math inline">\(\alpha = 0.05\)</span>.</p>
+<p>This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple datasets and applied the gatekeeping hypothesis tests to estimate statistical power.</p>
+<div id="preliminaries" class="section level3">
+<h3>Preliminaries</h3>
+<p>Before getting started, here are the <code>R</code> packages used in this post. In addition, I’ve set a randomization seed to that if you attempt to replicate the approach taken here, our results should align.</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(survival)
+library(coxme)
+library(broom)
+
+set.seed(8271)</code></pre>
+</div>
+<div id="generating-time-to-event-data" class="section level3">
+<h3>Generating time-to-event data</h3>
+<div id="get-parameters-that-define-survival-curve" class="section level4">
+<h4>Get parameters that define survival curve</h4>
+<pre class="r"><code>mq &lt;- c(1.44, 4.68, 8.69, 15.32)
+
+points &lt;- list(c(mq[1], 0.80), c(mq[2], 0.60), c(mq[3], .40), c(mq[4], .2))
+r &lt;- survGetParams(points)
+
+survParamPlot(f = r[1], shape = r[2], points, limits = c(0,50))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_parameters-1.png" width="672" /></p>
+</div>
+</div>
+<div id="generating-data-for-a-simpler-two-arm-rct" class="section level3">
+<h3>Generating data for a simpler two-arm RCT</h3>
+<div id="visualize-curve-and-assess-its-properties" class="section level4">
+<h4>Visualize curve and assess its properties</h4>
+<pre class="r"><code>def &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
+
+defS &lt;- 
+  defSurv(varname = &quot;time&quot;, formula = &quot;..int + A * ..eff&quot;, shape = &quot;..shape&quot;) |&gt;
+  defSurv(varname = &quot;censor&quot;, formula = -40, scale = 0.5, shape = .10)</code></pre>
+<pre class="r"><code>int &lt;- r[1]
+shape &lt;- r[2]
+
+eff &lt;- log(2)
+
+dd &lt;- genData(100000, def)
+dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
+
+dd[A==0, quantile(time, probs = c(0.20, 0.50, 0.80))]</code></pre>
+<pre><code>##     20%     50%     80% 
+##  1.5778  6.0790 16.3860</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_ideal_curves-1.png" width="672" /></p>
+</div>
+<div id="model-fit" class="section level4">
+<h4>Model fit</h4>
+<pre class="r"><code>fit &lt;- coxph(Surv(time, event) ~  factor(A), data = dd)
+tidy(fit, exponentiate = TRUE)</code></pre>
+<pre><code>## # A tibble: 1 × 5
+##   term       estimate std.error statistic p.value
+##   &lt;chr&gt;         &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;   &lt;dbl&gt;
+## 1 factor(A)1     1.99   0.00665      103.       0</code></pre>
+</div>
+<div id="relationship-of-hr-to-median-time-to-event" class="section level4">
+<h4>Relationship of HR to median time to event</h4>
+<pre class="r"><code>getmedian &lt;- function(eff = 0) {
+  
+  dd &lt;- genData(100000, def)
+  dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
+  dd[A == 1, round(median(time), 1)]
+  
+}
+
+sapply(log(seq(1, 2, by = .1)), function(x) getmedian(x))</code></pre>
+<pre><code>##  [1] 6.0 5.4 4.8 4.5 4.0 3.7 3.5 3.2 3.0 2.8 2.6</code></pre>
+</div>
+</div>
+<div id="simulating-three-arm-study-data" class="section level3">
+<h3>Simulating three-arm study data</h3>
+<div id="data-definititions" class="section level4">
+<h4>Data definititions</h4>
+<pre class="r"><code>defC &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = &quot;..v_clinic&quot;)
+
+defP &lt;- 
+  defDataAdd(varname = &quot;g&quot;, formula = 0, variance = &quot;..v_prov&quot;) |&gt;
+  defDataAdd(varname = &quot;A&quot;, formula = &quot;1;1;1&quot;, variance = &quot;clinic&quot;, dist = &quot;trtAssign&quot;)
+
+defS &lt;- defSurv(
+  varname = &quot;eventTime&quot;, 
+  formula = &quot;..int + b + g + (A==2)*..eff_A + (A==3)*..eff_AB&quot;, 
+  shape = &quot;..shape&quot;) </code></pre>
+</div>
+<div id="parameters-for-data-generation" class="section level4">
+<h4>Parameters for data generation</h4>
+<pre class="r"><code>nC &lt;- 16               # number of clinics (clusters)
+nP &lt;- 6                # number of providers per clinic
+nI &lt;- 48               # number of patients per provider
+v_clinic &lt;- 0.10       # variation across clinics
+v_prov &lt;- 0.25         # variation across providers
+eff_A &lt;- log(c(1.4))   # log HR of intervention A (compared to control)
+eff_AB &lt;- log(c(1.6))  # log HR of combined A+B (compared to control)</code></pre>
+</div>
+<div id="data-generation" class="section level4">
+<h4>Data generation</h4>
+<pre class="r"><code>ds &lt;- genData(nC, defC, id = &quot;clinic&quot;)
+dp &lt;- genCluster(ds, &quot;clinic&quot;, nP, &quot;provider&quot;)
+dp &lt;- addColumns(defP, dp)
+dd &lt;- genCluster(dp, &quot;provider&quot;, nI, &quot;id&quot;)
+dd &lt;- genSurv(dd, defS)
+dd &lt;- trtAssign(dd, nTrt = 12, strata = &quot;provider&quot;, grpName = &quot;month&quot;)
+  
+dd[, event := as.integer(eventTime &lt;= 18 - month)]
+dd[, obsTime := pmin(eventTime, 18 - month)]</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_provider_km-1.png" width="672" /></p>
+<pre class="r"><code>me.fit &lt;- coxme(
+  Surv(eventTime, event) ~ factor(A) + (1|provider) + (1|clinic), 
+  data = dd
+)
+
+summary(me.fit)</code></pre>
+<pre><code>## Mixed effects coxme model
+##  Formula: Surv(eventTime, event) ~ factor(A) + (1 | provider) + (1 | clinic) 
+##     Data: dd 
+## 
+##   events, n = 3411, 4608
+## 
+## Random effects:
+##      group  variable        sd   variance
+## 1 provider Intercept 0.5437050 0.29561511
+## 2   clinic Intercept 0.3051615 0.09312354
+##                    Chisq    df p    AIC   BIC
+## Integrated loglik  919.4  4.00 0  911.4 886.9
+##  Penalized loglik 1251.0 86.81 0 1077.3 544.8
+## 
+## Fixed effects:
+##              coef exp(coef) se(coef)    z       p
+## factor(A)2 0.3207    1.3781   0.1493 2.15 0.03173
+## factor(A)3 0.4650    1.5921   0.1472 3.16 0.00158</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_provider-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_clinic_1-1.png" width="672" /></p>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_clinic_2-1.png" width="672" /></p>
+<p>
+<p><small><font color="darkkhaki">
+References:</p>
+<p>Proschan, M.A. and Brittain, E.H., 2020. A primer on strong vs weak control of familywise error rate. Statistics in medicine, 39(9), pp.1407-1413.</p>
+</font></small>
+</p>
+</div>
+</div>

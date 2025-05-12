@@ -1,0 +1,254 @@
+---
+title: Planning for a 3-arm cluster randomized trial with a nested intervention and a time-to-event outcome
+author: Package Build
+date: '2025-05-13'
+slug: []
+categories: []
+tags:
+  - R
+  - Cluster randomized trials
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+A researcher recently approached me for advice on a cluster-randomized trial he was developing. He was interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.
+
+As we discussed the interventions (I'll call them $A$ and $B$), it became clear that $A$ was the primary focus. Intervention $B$ might enhance the effectiveness of $A$, but on its own, $B$ was not expected to have much impact. (It's also possible that $A$ alone doesn't work, but once $B$ is in place, the combination may reap benefits.) Given this, it didn’t seem worthwhile to randomize clinics or providers to receive B alone. We agreed that a three-arm cluster-randomized trial---with (1) control, (2) $A$ alone, and (3) $A + B$---would be a more efficient and relevant design.
+
+A while ago, I [wrote about](https://www.rdatagen.net/post/2023-12-19-a-three-arm-trial-using-two-step-randomization/){target="_blank"} a proposal to conduct a three-arm trial using a two-step randomization scheme. That design assumes that outcomes in the enhanced arm ($A + B$) are uncorrelated with those in the standalone arm  $A$ within the same cluster. For this project, that assumption didn’t seem plausible, so I recommended sticking with a standard cluster-level randomization.
+
+The study has three goals:
+
+* Assess the effectiveness of $A$ versus control
+* Compare $A + B$ versus $A$ alone
+* If $A$ alone is ineffective, compare $A + B$ versus control
+
+In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we used a [gatekeeping](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463){target="_blank"} strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at $\alpha = 0.05$.
+
+This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple datasets and applied the gatekeeping hypothesis tests to estimate statistical power.
+
+### Preliminaries
+
+Before getting started, here are the `R` packages used in this post. In addition, I've set a randomization seed to that if you attempt to replicate the approach taken here, our results should align.
+
+```{r, message=FALSE}
+library(simstudy)
+library(data.table)
+library(survival)
+library(coxme)
+library(broom)
+
+set.seed(8271)
+```
+
+### Generating time-to-event data
+
+#### Get parameters that define survival curve
+
+```{r plot_parameters, fig.height = 4, fig.width = 7}
+mq <- c(1.44, 4.68, 8.69, 15.32)
+
+points <- list(c(mq[1], 0.80), c(mq[2], 0.60), c(mq[3], .40), c(mq[4], .2))
+r <- survGetParams(points)
+
+survParamPlot(f = r[1], shape = r[2], points, limits = c(0,50))
+```
+
+### Generating data for a simpler two-arm RCT
+
+#### Visualize curve and assess its properties
+
+```{r}
+def <- defData(varname = "A", formula = "1;1", dist = "trtAssign")
+
+defS <- 
+  defSurv(varname = "time", formula = "..int + A * ..eff", shape = "..shape") |>
+  defSurv(varname = "censor", formula = -40, scale = 0.5, shape = .10)
+```
+
+
+```{r, warning=FALSE}
+int <- r[1]
+shape <- r[2]
+
+eff <- log(2)
+
+dd <- genData(100000, def)
+dd <- genSurv(dd, defS, timeName = "time", censorName = "censor")
+
+dd[A==0, quantile(time, probs = c(0.20, 0.50, 0.80))]
+```
+
+
+```{r plot_ideal_curves, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
+library(survminer)
+library(ggplot2)
+
+dd_surv <- survfit(Surv(time, event) ~ A, data = dd)
+dd_surv_tidy <- data.table(surv_summary(dd_surv, data = dd))
+
+ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
+  geom_step() +  # Kaplan-Meier curves
+  labs(x = "Time to event", y = "Probability of no event") +
+  scale_color_manual(values = c("#ce9995", "#95aece")) +
+  theme(legend.position = "none",
+        panel.grid = element_blank()) +
+  xlim(0, 20)
+```
+
+#### Model fit
+
+```{r}
+fit <- coxph(Surv(time, event) ~  factor(A), data = dd)
+tidy(fit, exponentiate = TRUE)
+```
+
+#### Relationship of HR to median time to event
+
+```{r}
+getmedian <- function(eff = 0) {
+  
+  dd <- genData(100000, def)
+  dd <- genSurv(dd, defS, timeName = "time", censorName = "censor")
+  dd[A == 1, round(median(time), 1)]
+  
+}
+
+sapply(log(seq(1, 2, by = .1)), function(x) getmedian(x))
+```
+
+### Simulating three-arm study data
+
+#### Data definititions
+
+```{r}
+defC <- defData(varname = "b", formula = 0, variance = "..v_clinic")
+
+defP <- 
+  defDataAdd(varname = "g", formula = 0, variance = "..v_prov") |>
+  defDataAdd(varname = "A", formula = "1;1;1", variance = "clinic", dist = "trtAssign")
+
+defS <- defSurv(
+  varname = "eventTime", 
+  formula = "..int + b + g + (A==2)*..eff_A + (A==3)*..eff_AB", 
+  shape = "..shape") 
+```
+
+#### Parameters for data generation
+
+```{r}
+nC <- 16               # number of clinics (clusters)
+nP <- 6                # number of providers per clinic
+nI <- 48               # number of patients per provider
+v_clinic <- 0.10       # variation across clinics
+v_prov <- 0.25         # variation across providers
+eff_A <- log(c(1.4))   # log HR of intervention A (compared to control)
+eff_AB <- log(c(1.6))  # log HR of combined A+B (compared to control)
+```
+
+#### Data generation
+
+```{r}
+ds <- genData(nC, defC, id = "clinic")
+dp <- genCluster(ds, "clinic", nP, "provider")
+dp <- addColumns(defP, dp)
+dd <- genCluster(dp, "provider", nI, "id")
+dd <- genSurv(dd, defS)
+dd <- trtAssign(dd, nTrt = 12, strata = "provider", grpName = "month")
+  
+dd[, event := as.integer(eventTime <= 18 - month)]
+dd[, obsTime := pmin(eventTime, 18 - month)]
+```
+
+```{r plot_provider_km, echo=FALSE}
+dq <- copy(dd)
+dq$clinic <- factor(dq$clinic)
+dq$provider <- factor(dq$provider)
+dd_surv <- survfit(Surv(obsTime, event) ~ clinic + provider + A, data = dq)
+dd_surv_tidy <- data.table(surv_summary(dd_surv, data = dq))
+
+ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
+  geom_step(aes(group=provider)) +  # Kaplan-Meier curves
+  facet_wrap(~ clinic, scales = "free_y") +
+  labs(x = "Time to event", y = "Probability of no event") +
+  scale_color_manual(values = c("#cbce95", "#ce9995", "#95aece")) +
+  theme(legend.position = "none",
+        panel.grid = element_blank()) +
+  xlim(0, 17)
+```
+
+```{r}
+me.fit <- coxme(
+  Surv(eventTime, event) ~ factor(A) + (1|provider) + (1|clinic), 
+  data = dd
+)
+
+summary(me.fit)
+```
+
+```{r plot_provider, echo=FALSE, fig.width=7, fig.height=4}
+load("data/power.rda")
+
+ggplot(data = pdata_provider, aes(x = eff_A, y = power, group = diff)) +
+  geom_hline(yintercept = 0.8, color = "white") +
+  geom_line(color = "grey75") +
+  geom_point(aes(color = factor(diff))) +
+  scale_color_manual(
+    values = c("#ff4500", "#00baff"), 
+    name = "HR difference for\ncombined intervention") +
+  xlab("Hazard ratio for provider intervention alone") +
+  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Estimated power: randomization by provider") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold"),
+        legend.title = element_text(size = 8, family = "Verdana"),
+        legend.position = "inside",
+        legend.position.inside = c(.75, .25),
+        legend.box.just = "center"
+  )
+```
+
+```{r plot_clinic_1, echo=FALSE, fig.width=7, fig.height=4}
+ggplot(data = pdata_clinic_1, aes(x = eff_A, y = power, group = diff)) +
+  geom_hline(yintercept = 0.8, color = "white") +
+  geom_line(color = "grey75") +
+  geom_point(aes(color = factor(diff))) +
+  scale_color_manual(
+    values = c("#ff4500", "#00baff"), 
+    name = "HR difference for\ncombined intervention") +
+  xlab("Hazard ratio for provider intervention alone") +
+  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Estimated power: randomization by clinic") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold"),
+        legend.title = element_text(size = 8, family = "Verdana"),
+        legend.position = "inside",
+        legend.position.inside = c(.75, .25),
+        legend.box.just = "center"
+  )
+```
+
+```{r plot_clinic_2, echo=FALSE, fig.width=7, fig.height=4}
+ggplot(data = pdata_clinic_2, aes(x = nC, y = power)) +
+  geom_hline(yintercept = 0.8, color = "white") +
+  geom_line(color = "grey75") +
+  geom_point() +
+  xlab("Number of clinics") +
+  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
+  ggtitle("Estimated power: randomization by clinic") +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(size = 10, face = "bold"))
+```
+
+
+<p><small><font color="darkkhaki">
+References:
+
+Proschan, M.A. and Brittain, E.H., 2020. A primer on strong vs weak control of familywise error rate. Statistics in medicine, 39(9), pp.1407-1413.
+
+</font></small></p>
