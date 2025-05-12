@@ -39,41 +39,48 @@ set.seed(8271)</code></pre>
 </div>
 <div id="generating-time-to-event-data" class="section level3">
 <h3>Generating time-to-event data</h3>
-<div id="get-parameters-that-define-survival-curve" class="section level4">
-<h4>Get parameters that define survival curve</h4>
-<pre class="r"><code>mq &lt;- c(1.44, 4.68, 8.69, 15.32)
+<p>When simulating time-to-event outcomes, one of the first decisions is what the underlying survival curves should look like. I typically start by defining a curve for the control (baseline) condition, and then generate curves for the intervention arms relative to that baseline.</p>
+<div id="getting-parameters-that-define-survival-curve" class="section level4">
+<h4>Getting parameters that define survival curve</h4>
+<p>We identified a comparable study that reported quintiles for the time-to-event outcome. Specifically, 20% of participants had a follow-up within 1.4 months, 40% by 4.7 months, 60% by 8.7 months, and 80% by just over 15 months. We used the <code>survGetParams</code> function from the <code>simstudy</code> package to estimate the Weibull distribution parameters—the intercept in the Weibull formula and the shape—that characterize this baseline survival curve.</p>
+<pre class="r"><code>q20 &lt;- c(1.44, 4.68, 8.69, 15.32)
 
-points &lt;- list(c(mq[1], 0.80), c(mq[2], 0.60), c(mq[3], .40), c(mq[4], .2))
-r &lt;- survGetParams(points)
+points &lt;- list(c(q20[1], 0.80), c(q20[2], 0.60), c(q20[3], 0.40), c(q20[4], 0.20))
+s &lt;- survGetParams(points)
 
-survParamPlot(f = r[1], shape = r[2], points, limits = c(0,50))</code></pre>
+s</code></pre>
+<pre><code>## [1] -1.868399  1.194869</code></pre>
+<p>We can visualize the idealized survival curve that will be generated using these parameters stored in the vector <code>s</code>:</p>
+<pre class="r"><code>survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 100))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_parameters-1.png" width="672" /></p>
 </div>
 </div>
 <div id="generating-data-for-a-simpler-two-arm-rct" class="section level3">
 <h3>Generating data for a simpler two-arm RCT</h3>
-<div id="visualize-curve-and-assess-its-properties" class="section level4">
-<h4>Visualize curve and assess its properties</h4>
+<p>Before getting into the more complicated three-armed cluster randomized trial, I first simulated data from a much simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator <span class="math inline">\(A\)</span> which takes on values of <span class="math inline">\(0\)</span> and <span class="math inline">\(1\)</span>. The time-to-event outcom is a function of the Weibull parameters we just generated based on the quintiles as well as the treatment indicator.</p>
+<div id="visualizing-the-curve-and-assessing-its-properties" class="section level4">
+<h4>Visualizing the curve and assessing its properties</h4>
 <pre class="r"><code>def &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
 
 defS &lt;- 
   defSurv(varname = &quot;time&quot;, formula = &quot;..int + A * ..eff&quot;, shape = &quot;..shape&quot;) |&gt;
-  defSurv(varname = &quot;censor&quot;, formula = -40, scale = 0.5, shape = .10)</code></pre>
-<pre class="r"><code>int &lt;- r[1]
-shape &lt;- r[2]
+  defSurv(varname = &quot;censor&quot;, formula = -40, scale = 0.5, shape = 0.10)</code></pre>
+<p>I generated a very large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):</p>
+<pre class="r"><code>int &lt;- s[1]
+shape &lt;- s[2]
 
 eff &lt;- log(2)
 
 dd &lt;- genData(100000, def)
-dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)
-
-dd[A==0, quantile(time, probs = c(0.20, 0.50, 0.80))]</code></pre>
-<pre><code>##     20%     50%     80% 
-##  1.5778  6.0790 16.3860</code></pre>
+dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)</code></pre>
+<p>Here are the quintiles (and median) from the control arm:</p>
+<pre class="r"><code>dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 2)]</code></pre>
+<pre><code>##   20%   40%   50%   60%   80% 
+##  1.58  4.25  6.08  8.48 16.39</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_ideal_curves-1.png" width="672" /></p>
 </div>
-<div id="model-fit" class="section level4">
-<h4>Model fit</h4>
+<div id="modeling-fit" class="section level4">
+<h4>Modeling fit</h4>
 <pre class="r"><code>fit &lt;- coxph(Surv(time, event) ~  factor(A), data = dd)
 tidy(fit, exponentiate = TRUE)</code></pre>
 <pre><code>## # A tibble: 1 × 5

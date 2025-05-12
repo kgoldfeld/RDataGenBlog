@@ -45,40 +45,57 @@ set.seed(8271)
 
 ### Generating time-to-event data
 
-#### Get parameters that define survival curve
+When simulating time-to-event outcomes, one of the first decisions is what the underlying survival curves should look like. I typically start by defining a curve for the control (baseline) condition, and then generate curves for the intervention arms relative to that baseline.
+
+#### Getting parameters that define survival curve
+
+We identified a comparable study that reported quintiles for the time-to-event outcome. Specifically, 20\% of participants had a follow-up within 1.4 months, 40\% by 4.7 months, 60\% by 8.7 months, and 80\% by just over 15 months. We used the `survGetParams` function from the `simstudy` package to estimate the Weibull distribution parameters---the intercept in the Weibull formula and the shape---that characterize this baseline survival curve.
+
+```{r}
+q20 <- c(1.44, 4.68, 8.69, 15.32)
+
+points <- list(c(q20[1], 0.80), c(q20[2], 0.60), c(q20[3], 0.40), c(q20[4], 0.20))
+s <- survGetParams(points)
+
+s
+```
+
+We can visualize the idealized survival curve that will be generated using these parameters stored in the vector `s`:
 
 ```{r plot_parameters, fig.height = 4, fig.width = 7}
-mq <- c(1.44, 4.68, 8.69, 15.32)
-
-points <- list(c(mq[1], 0.80), c(mq[2], 0.60), c(mq[3], .40), c(mq[4], .2))
-r <- survGetParams(points)
-
-survParamPlot(f = r[1], shape = r[2], points, limits = c(0,50))
+survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 100))
 ```
 
 ### Generating data for a simpler two-arm RCT
 
-#### Visualize curve and assess its properties
+Before getting into the more complicated three-armed cluster randomized trial, I first simulated data from a much simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator $A$ which takes on values of $0$ and $1$. The time-to-event outcom is a function of the Weibull parameters we just generated based on the quintiles as well as the treatment indicator. 
+
+#### Visualizing the curve and assessing its properties
 
 ```{r}
 def <- defData(varname = "A", formula = "1;1", dist = "trtAssign")
 
 defS <- 
   defSurv(varname = "time", formula = "..int + A * ..eff", shape = "..shape") |>
-  defSurv(varname = "censor", formula = -40, scale = 0.5, shape = .10)
+  defSurv(varname = "censor", formula = -40, scale = 0.5, shape = 0.10)
 ```
 
+I generated a very large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):
 
 ```{r, warning=FALSE}
-int <- r[1]
-shape <- r[2]
+int <- s[1]
+shape <- s[2]
 
 eff <- log(2)
 
 dd <- genData(100000, def)
 dd <- genSurv(dd, defS, timeName = "time", censorName = "censor")
+```
 
-dd[A==0, quantile(time, probs = c(0.20, 0.50, 0.80))]
+Here are the quintiles (and median) from the control arm:
+
+```{r}
+dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 2)]
 ```
 
 
@@ -98,7 +115,7 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   xlim(0, 20)
 ```
 
-#### Model fit
+#### Modeling fit
 
 ```{r}
 fit <- coxph(Surv(time, event) ~  factor(A), data = dd)
