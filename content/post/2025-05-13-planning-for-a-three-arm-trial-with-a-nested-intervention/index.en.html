@@ -51,15 +51,13 @@ s &lt;- survGetParams(points)
 s</code></pre>
 <pre><code>## [1] -1.868399  1.194869</code></pre>
 <p>We can visualize the idealized survival curve that will be generated using these parameters stored in the vector <code>s</code>:</p>
-<pre class="r"><code>survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 100))</code></pre>
+<pre class="r"><code>survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 20))</code></pre>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_parameters-1.png" width="672" /></p>
 </div>
 </div>
 <div id="generating-data-for-a-simpler-two-arm-rct" class="section level3">
 <h3>Generating data for a simpler two-arm RCT</h3>
-<p>Before getting into the more complicated three-armed cluster randomized trial, I first simulated data from a much simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator <span class="math inline">\(A\)</span> which takes on values of <span class="math inline">\(0\)</span> and <span class="math inline">\(1\)</span>. The time-to-event outcom is a function of the Weibull parameters we just generated based on the quintiles as well as the treatment indicator.</p>
-<div id="visualizing-the-curve-and-assessing-its-properties" class="section level4">
-<h4>Visualizing the curve and assessing its properties</h4>
+<p>Before getting into the more complicated three-armed cluster randomized trial, I started with a simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator <span class="math inline">\(A\)</span> which takes on values of <span class="math inline">\(0\)</span> (control) and <span class="math inline">\(1\)</span> (treatment). The time-to-event outcome is a function of the Weibull parameters we just generated based on the quintiles, along with the treatment indicator.</p>
 <pre class="r"><code>def &lt;- defData(varname = &quot;A&quot;, formula = &quot;1;1&quot;, dist = &quot;trtAssign&quot;)
 
 defS &lt;- 
@@ -73,14 +71,18 @@ eff &lt;- log(2)
 
 dd &lt;- genData(100000, def)
 dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censor&quot;)</code></pre>
-<p>Here are the quintiles (and median) from the control arm:</p>
-<pre class="r"><code>dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 2)]</code></pre>
-<pre><code>##   20%   40%   50%   60%   80% 
-##  1.58  4.25  6.08  8.48 16.39</code></pre>
+<p>Here are the quintiles (and median) from the control arm, which are fairly close to the quintiles from the study:</p>
+<pre class="r"><code>dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 1)]</code></pre>
+<pre><code>##  20%  40%  50%  60%  80% 
+##  1.6  4.2  6.1  8.5 16.4</code></pre>
+<div id="visualizing-the-curve-and-assessing-its-properties" class="section level4">
+<h4>Visualizing the curve and assessing its properties</h4>
+<p>A plot of the survival curves from the two arms is shown below, with the control arm in red and the intervention arm in blue:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_ideal_curves-1.png" width="672" /></p>
 </div>
-<div id="modeling-fit" class="section level4">
-<h4>Modeling fit</h4>
+<div id="fitting-a-model" class="section level4">
+<h4>Fitting a model</h4>
+<p>I fit a Cox proportional hazards model just to make sure I could recover the hazard ratio I used in generating the data:</p>
 <pre class="r"><code>fit &lt;- coxph(Surv(time, event) ~  factor(A), data = dd)
 tidy(fit, exponentiate = TRUE)</code></pre>
 <pre><code>## # A tibble: 1 × 5
@@ -89,7 +91,8 @@ tidy(fit, exponentiate = TRUE)</code></pre>
 ## 1 factor(A)1     1.99   0.00665      103.       0</code></pre>
 </div>
 <div id="relationship-of-hr-to-median-time-to-event" class="section level4">
-<h4>Relationship of HR to median time to event</h4>
+<h4>Relationship of HR to median time-to-event</h4>
+<p>My collaborator is especially interested in how the interventions might shift the <em>median</em> time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of datasets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. This helps illustrate the relationship. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.</p>
 <pre class="r"><code>getmedian &lt;- function(eff = 0) {
   
   dd &lt;- genData(100000, def)
@@ -98,8 +101,11 @@ tidy(fit, exponentiate = TRUE)</code></pre>
   
 }
 
-sapply(log(seq(1, 2, by = .1)), function(x) getmedian(x))</code></pre>
-<pre><code>##  [1] 6.0 5.4 4.8 4.5 4.0 3.7 3.5 3.2 3.0 2.8 2.6</code></pre>
+dm &lt;- rbindlist(lapply(
+  log(seq(1, 2, by = .1)), 
+  function(x) data.table(HR = exp(x), median = getmedian(x))
+))</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_median-1.png" width="528" /></p>
 </div>
 </div>
 <div id="simulating-three-arm-study-data" class="section level3">

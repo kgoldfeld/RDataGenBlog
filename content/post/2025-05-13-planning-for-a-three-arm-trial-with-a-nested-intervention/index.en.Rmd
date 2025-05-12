@@ -63,14 +63,12 @@ s
 We can visualize the idealized survival curve that will be generated using these parameters stored in the vector `s`:
 
 ```{r plot_parameters, fig.height = 4, fig.width = 7}
-survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 100))
+survParamPlot(f = s[1], shape = s[2], points, limits = c(0, 20))
 ```
 
 ### Generating data for a simpler two-arm RCT
 
-Before getting into the more complicated three-armed cluster randomized trial, I first simulated data from a much simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator $A$ which takes on values of $0$ and $1$. The time-to-event outcom is a function of the Weibull parameters we just generated based on the quintiles as well as the treatment indicator. 
-
-#### Visualizing the curve and assessing its properties
+Before getting into the more complicated three-armed cluster randomized trial, I started with a simpler, two-armed randomized controlled trial. The only covariate at the individual level is the binary treatment indicator $A$ which takes on values of $0$ (control) and $1$ (treatment). The time-to-event outcome is a function of the Weibull parameters we just generated based on the quintiles, along with the treatment indicator. 
 
 ```{r}
 def <- defData(varname = "A", formula = "1;1", dist = "trtAssign")
@@ -92,12 +90,15 @@ dd <- genData(100000, def)
 dd <- genSurv(dd, defS, timeName = "time", censorName = "censor")
 ```
 
-Here are the quintiles (and median) from the control arm:
+Here are the quintiles (and median) from the control arm, which are fairly close to the quintiles from the study:
 
 ```{r}
-dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 2)]
+dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 1)]
 ```
 
+#### Visualizing the curve and assessing its properties
+
+A plot of the survival curves from the two arms is shown below, with the control arm in red and the intervention arm in blue:
 
 ```{r plot_ideal_curves, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
 library(survminer)
@@ -115,14 +116,18 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   xlim(0, 20)
 ```
 
-#### Modeling fit
+#### Fitting a model
+
+I fit a Cox proportional hazards model just to make sure I could recover the hazard ratio I used in generating the data:
 
 ```{r}
 fit <- coxph(Surv(time, event) ~  factor(A), data = dd)
 tidy(fit, exponentiate = TRUE)
 ```
 
-#### Relationship of HR to median time to event
+#### Relationship of HR to median time-to-event
+
+My collaborator is especially interested in how the interventions might shift the *median* time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of datasets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. This helps illustrate the relationship. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.
 
 ```{r}
 getmedian <- function(eff = 0) {
@@ -133,7 +138,18 @@ getmedian <- function(eff = 0) {
   
 }
 
-sapply(log(seq(1, 2, by = .1)), function(x) getmedian(x))
+dm <- rbindlist(lapply(
+  log(seq(1, 2, by = .1)), 
+  function(x) data.table(HR = exp(x), median = getmedian(x))
+))
+```
+
+```{r plot_median, echo=FALSE, fig.width=5.5, fig.height=4}
+ggplot(data = dm, aes(x = HR, y = median)) +
+  geom_line() +
+  geom_point() +
+  ylim(2, 6.1) +
+  theme(panel.grid = element_blank())
 ```
 
 ### Simulating three-arm study data
