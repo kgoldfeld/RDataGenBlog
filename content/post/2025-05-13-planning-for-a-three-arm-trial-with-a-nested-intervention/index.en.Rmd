@@ -78,7 +78,7 @@ defS <-
   defSurv(varname = "censor", formula = -40, scale = 0.5, shape = 0.10)
 ```
 
-I generated a very large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):
+I generated a large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):
 
 ```{r, warning=FALSE}
 int <- s[1]
@@ -98,7 +98,7 @@ dd[A==0, round(quantile(time, probs = c(0.20, 0.40, 0.50, 0.60, 0.80)), 1)]
 
 #### Visualizing the curve and assessing its properties
 
-A plot of the survival curves from the two arms is shown below, with the control arm in red and the intervention arm in blue:
+A plot of the survival curves from the two arms is shown below, with the control arm in yellow and the intervention arm in red:
 
 ```{r plot_ideal_curves, echo=FALSE, message=FALSE, warning=FALSE, fig.width=7, fig.height=4}
 library(survminer)
@@ -110,7 +110,7 @@ dd_surv_tidy <- data.table(surv_summary(dd_surv, data = dd))
 ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   geom_step() +  # Kaplan-Meier curves
   labs(x = "Time to event", y = "Probability of no event") +
-  scale_color_manual(values = c("#ce9995", "#95aece")) +
+  scale_color_manual(values = c("#DDAA33", "#BB5566")) +
   theme(legend.position = "none",
         panel.grid = element_blank()) +
   xlim(0, 20)
@@ -146,21 +146,37 @@ dm <- rbindlist(lapply(
 
 ```{r plot_median, echo=FALSE, fig.width=5.5, fig.height=4}
 ggplot(data = dm, aes(x = HR, y = median)) +
-  geom_line() +
-  geom_point() +
+  geom_line(color = "#DDAA33") +
+  geom_point(size = 1, color = "#DDAA33") +
   ylim(2, 6.1) +
   theme(panel.grid = element_blank())
 ```
 
 ### Simulating three-arm study data
 
+In this three-arm cluster randomized trial there are three levels of measurement: the patient, the provider, and the clinic. Randomization will be conducted at the provider level, stratified by clinic. The hazard for individual $i$, treated by provider $j$ in clinic $k$, can be modeled as:
+
+$$
+h_{ijk}(t) = h_0(t) \exp\left( \beta_1 A_{ijk} + \beta_2 AB_{ijk} + b_j + g_k \right)
+$$
+
+where:
+
+* $h_0(t)$ is the baseline hazard function,
+* $\beta_1$ is the effect of $A$ alone,
+* $\beta_2$ is the effect of the combination of $A + B$,
+* $b_j \sim N(0, \sigma^2_b)$ is the random effect for provider $j$,
+* $g_k \sim N(0, \sigma^2_g)$ is the random effect for clinic $k$,
+* $A_{ijk}$ is a treatment indicator for patient $i$ seeing provider $j$ in clinic $k$: $A_{ijk} = 1$ whe provider $j$ has been randomized to treatment $A$, and $0$ otherwise.
+* $AB_{ijk}$ is a treatment indicator for patient $i$ seeing provider $j$ in clinic $k$: $AB_{ijk} = 1$ when provider $j$ has been randomized to treatment $A + B$, and 0 otherwise.
+
 #### Data definititions
 
 ```{r}
-defC <- defData(varname = "b", formula = 0, variance = "..v_clinic")
+defC <- defData(varname = "g", formula = 0, variance = "..v_clinic")
 
 defP <- 
-  defDataAdd(varname = "g", formula = 0, variance = "..v_prov") |>
+  defDataAdd(varname = "b", formula = 0, variance = "..v_prov") |>
   defDataAdd(varname = "A", formula = "1;1;1", variance = "clinic", dist = "trtAssign")
 
 defS <- defSurv(
@@ -206,7 +222,7 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   geom_step(aes(group=provider)) +  # Kaplan-Meier curves
   facet_wrap(~ clinic, scales = "free_y") +
   labs(x = "Time to event", y = "Probability of no event") +
-  scale_color_manual(values = c("#cbce95", "#ce9995", "#95aece")) +
+  scale_color_manual(values = c("#004488", "#DDAA33", "#BB5566")) +
   theme(legend.position = "none",
         panel.grid = element_blank()) +
   xlim(0, 17)
@@ -229,7 +245,7 @@ ggplot(data = pdata_provider, aes(x = eff_A, y = power, group = diff)) +
   geom_line(color = "grey75") +
   geom_point(aes(color = factor(diff))) +
   scale_color_manual(
-    values = c("#ff4500", "#00baff"), 
+    values = c("#004488", "#BB5566"), 
     name = "HR difference for\ncombined intervention") +
   xlab("Hazard ratio for provider intervention alone") +
   guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
@@ -250,7 +266,7 @@ ggplot(data = pdata_clinic_1, aes(x = eff_A, y = power, group = diff)) +
   geom_line(color = "grey75") +
   geom_point(aes(color = factor(diff))) +
   scale_color_manual(
-    values = c("#ff4500", "#00baff"), 
+    values = c("#004488", "#BB5566"), 
     name = "HR difference for\ncombined intervention") +
   xlab("Hazard ratio for provider intervention alone") +
   guides(color = guide_legend(reverse = TRUE, title.position = "left")) +

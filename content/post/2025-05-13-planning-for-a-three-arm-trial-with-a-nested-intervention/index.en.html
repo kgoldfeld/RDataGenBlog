@@ -63,7 +63,7 @@ s</code></pre>
 defS &lt;- 
   defSurv(varname = &quot;time&quot;, formula = &quot;..int + A * ..eff&quot;, shape = &quot;..shape&quot;) |&gt;
   defSurv(varname = &quot;censor&quot;, formula = -40, scale = 0.5, shape = 0.10)</code></pre>
-<p>I generated a very large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):</p>
+<p>I generated a large data set to that we can recreate the idealized curve from above. I assumed a hazard ratio of 2 (which is actually parameterized on the log scale):</p>
 <pre class="r"><code>int &lt;- s[1]
 shape &lt;- s[2]
 
@@ -77,7 +77,7 @@ dd &lt;- genSurv(dd, defS, timeName = &quot;time&quot;, censorName = &quot;censo
 ##  1.6  4.2  6.1  8.5 16.4</code></pre>
 <div id="visualizing-the-curve-and-assessing-its-properties" class="section level4">
 <h4>Visualizing the curve and assessing its properties</h4>
-<p>A plot of the survival curves from the two arms is shown below, with the control arm in red and the intervention arm in blue:</p>
+<p>A plot of the survival curves from the two arms is shown below, with the control arm in yellow and the intervention arm in red:</p>
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_ideal_curves-1.png" width="672" /></p>
 </div>
 <div id="fitting-a-model" class="section level4">
@@ -110,12 +110,26 @@ dm &lt;- rbindlist(lapply(
 </div>
 <div id="simulating-three-arm-study-data" class="section level3">
 <h3>Simulating three-arm study data</h3>
+<p>In this three-arm cluster randomized trial there are three levels of measurement: the patient, the provider, and the clinic. Randomization will be conducted at the provider level, stratified by clinic. The hazard for individual <span class="math inline">\(i\)</span>, treated by provider <span class="math inline">\(j\)</span> in clinic <span class="math inline">\(k\)</span>, can be modeled as:</p>
+<p><span class="math display">\[
+h_{ijk}(t) = h_0(t) \exp\left( \beta_1 A_{ijk} + \beta_2 AB_{ijk} + b_j + g_k \right)
+\]</span></p>
+<p>where:</p>
+<ul>
+<li><span class="math inline">\(h_0(t)\)</span> is the baseline hazard function,</li>
+<li><span class="math inline">\(\beta_1\)</span> is the effect of <span class="math inline">\(A\)</span> alone,</li>
+<li><span class="math inline">\(\beta_2\)</span> is the effect of the combination of <span class="math inline">\(A + B\)</span>,</li>
+<li><span class="math inline">\(b_j \sim N(0, \sigma^2_b)\)</span> is the random effect for provider <span class="math inline">\(j\)</span>,</li>
+<li><span class="math inline">\(g_k \sim N(0, \sigma^2_g)\)</span> is the random effect for clinic <span class="math inline">\(k\)</span>,</li>
+<li><span class="math inline">\(A_{ijk}\)</span> is a treatment indicator for patient <span class="math inline">\(i\)</span> seeing provider <span class="math inline">\(j\)</span> in clinic <span class="math inline">\(k\)</span>: <span class="math inline">\(A_{ijk} = 1\)</span> whe provider <span class="math inline">\(j\)</span> has been randomized to treatment <span class="math inline">\(A\)</span>, and <span class="math inline">\(0\)</span> otherwise.</li>
+<li><span class="math inline">\(AB_{ijk}\)</span> is a treatment indicator for patient <span class="math inline">\(i\)</span> seeing provider <span class="math inline">\(j\)</span> in clinic <span class="math inline">\(k\)</span>: <span class="math inline">\(AB_{ijk} = 1\)</span> when provider <span class="math inline">\(j\)</span> has been randomized to treatment <span class="math inline">\(A + B\)</span>, and 0 otherwise.</li>
+</ul>
 <div id="data-definititions" class="section level4">
 <h4>Data definititions</h4>
-<pre class="r"><code>defC &lt;- defData(varname = &quot;b&quot;, formula = 0, variance = &quot;..v_clinic&quot;)
+<pre class="r"><code>defC &lt;- defData(varname = &quot;g&quot;, formula = 0, variance = &quot;..v_clinic&quot;)
 
 defP &lt;- 
-  defDataAdd(varname = &quot;g&quot;, formula = 0, variance = &quot;..v_prov&quot;) |&gt;
+  defDataAdd(varname = &quot;b&quot;, formula = 0, variance = &quot;..v_prov&quot;) |&gt;
   defDataAdd(varname = &quot;A&quot;, formula = &quot;1;1;1&quot;, variance = &quot;clinic&quot;, dist = &quot;trtAssign&quot;)
 
 defS &lt;- defSurv(
