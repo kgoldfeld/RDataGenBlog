@@ -148,13 +148,14 @@ dm <- rbindlist(lapply(
 ggplot(data = dm, aes(x = HR, y = median)) +
   geom_line(color = "#DDAA33") +
   geom_point(size = 1, color = "#DDAA33") +
-  ylim(2, 6.1) +
+  scale_y_continuous(name = "median time-to-event", limits = c(2, 6.1)) +
+  scale_x_continuous(name = "hazard ratio", limits = c(1,2), breaks = seq(1, 2, by = .2)) +
   theme(panel.grid = element_blank())
 ```
 
 ### Simulating three-arm study data
 
-In this three-arm cluster randomized trial there are three levels of measurement: the patient, the provider, and the clinic. Randomization will be conducted at the provider level, stratified by clinic. The hazard for individual $i$, treated by provider $j$ in clinic $k$, can be modeled as:
+In the proposed three-arm cluster randomized trial, there are three levels of measurement: patient, provider, and clinic. Randomization is conducted at the provider level, stratified by clinic. The hazard for individual $i$, treated by provider $j$ in clinic $k$, is modeled as:
 
 $$
 h_{ijk}(t) = h_0(t) \exp\left( \beta_1 A_{ijk} + \beta_2 AB_{ijk} + b_j + g_k \right)
@@ -163,20 +164,30 @@ $$
 where:
 
 * $h_0(t)$ is the baseline hazard function,
-* $\beta_1$ is the effect of $A$ alone,
+* $\beta_1$ is the effect of treatment $A$ alone,
 * $\beta_2$ is the effect of the combination of $A + B$,
 * $b_j \sim N(0, \sigma^2_b)$ is the random effect for provider $j$,
 * $g_k \sim N(0, \sigma^2_g)$ is the random effect for clinic $k$,
-* $A_{ijk}$ is a treatment indicator for patient $i$ seeing provider $j$ in clinic $k$: $A_{ijk} = 1$ whe provider $j$ has been randomized to treatment $A$, and $0$ otherwise.
-* $AB_{ijk}$ is a treatment indicator for patient $i$ seeing provider $j$ in clinic $k$: $AB_{ijk} = 1$ when provider $j$ has been randomized to treatment $A + B$, and 0 otherwise.
+* $A_{ijk} = 1$ if provider $j$ is randomized to treatment $A$, and $0$ otherwise,
+* $AB_{ijk} = 1$ if provider $j$ is randomized to treatment $A + B$, and 0 otherwise.
 
 #### Data definititions
 
+While the model is semi-parametric (i.e., it does not assume a specific distribution for event times), the data generation process is fully parametric, based on the Weibull distribution. Despite this difference, the two are closely aligned: if all goes well, we should be able to recover the parameters used for data generation when fitting the semi-parametric model.
+
+Data generation occurs in three broad steps:
+
+1. Clinic-level: generate the clinic-specific random effect $g$,
+2. Provider-level: generate the provider-specific random effect $b$ and assign treatment,
+3. Patient-level: generate individual time-to-event outcomes.
+
+These steps are implemented using the following definitions:
+
 ```{r}
-defC <- defData(varname = "g", formula = 0, variance = "..v_clinic")
+defC <- defData(varname = "g", formula = 0, variance = "..s2_clinic")
 
 defP <- 
-  defDataAdd(varname = "b", formula = 0, variance = "..v_prov") |>
+  defDataAdd(varname = "b", formula = 0, variance = "..s2_prov") |>
   defDataAdd(varname = "A", formula = "1;1;1", variance = "clinic", dist = "trtAssign")
 
 defS <- defSurv(
@@ -185,31 +196,36 @@ defS <- defSurv(
   shape = "..shape") 
 ```
 
-#### Parameters for data generation
+#### Data generation
+
+For this simulation, we assumed 16 clinics, each with 6 providers, and 48 patients per provider. A key element of the study is that recruitment occurs over 12 months, and patients are followed for up to 6 months after their recruitment period ends. Thus, follow-up duration varies depending on when a patient enters the study: patients recruited earlier have longer potential follow-up, while those recruited later are more likely to be censored.
+
+This staggered follow-up is implemented in the final step of data generation:
 
 ```{r}
 nC <- 16               # number of clinics (clusters)
 nP <- 6                # number of providers per clinic
 nI <- 48               # number of patients per provider
-v_clinic <- 0.10       # variation across clinics
-v_prov <- 0.25         # variation across providers
+s2_clinic <- 0.10      # variation across clinics (g)
+s2_prov <- 0.25        # variation across providers (b)
 eff_A <- log(c(1.4))   # log HR of intervention A (compared to control)
 eff_AB <- log(c(1.6))  # log HR of combined A+B (compared to control)
-```
 
-#### Data generation
-
-```{r}
 ds <- genData(nC, defC, id = "clinic")
 dp <- genCluster(ds, "clinic", nP, "provider")
 dp <- addColumns(defP, dp)
 dd <- genCluster(dp, "provider", nI, "id")
 dd <- genSurv(dd, defS)
+
+# assign a patient to a particular month - 4 per month
+
 dd <- trtAssign(dd, nTrt = 12, strata = "provider", grpName = "month")
   
 dd[, event := as.integer(eventTime <= 18 - month)]
 dd[, obsTime := pmin(eventTime, 18 - month)]
 ```
+
+Below is a Kaplan-Meier plot showing survival curves for each provider within each clinic, color-coded by study arm:
 
 ```{r plot_provider_km, echo=FALSE}
 dq <- copy(dd)
@@ -222,11 +238,14 @@ ggplot(dd_surv_tidy, aes(time, surv, color = factor(A))) +
   geom_step(aes(group=provider)) +  # Kaplan-Meier curves
   facet_wrap(~ clinic, scales = "free_y") +
   labs(x = "Time to event", y = "Probability of no event") +
-  scale_color_manual(values = c("#004488", "#DDAA33", "#BB5566")) +
-  theme(legend.position = "none",
-        panel.grid = element_blank()) +
+  scale_color_manual(values = c("#004488", "#DDAA33", "#BB5566"), 
+                     labels = c("Control", "A", "A+B")) +
+  theme(panel.grid = element_blank(),
+        legend.title = element_blank()) +
   xlim(0, 17)
 ```
+
+The mixed-effects Cox model recovers the variance components and coefficients used in data generation:
 
 ```{r}
 me.fit <- coxme(
@@ -237,62 +256,66 @@ me.fit <- coxme(
 summary(me.fit)
 ```
 
-```{r plot_provider, echo=FALSE, fig.width=7, fig.height=4}
-load("data/power.rda")
+Typically, I would use this data generation and model fitting code to estimate power or sample size requirements. While I did carry out those steps, I’ve left them out here so that you can try them yourself (though I’m happy to share my code if you’re interested). Beyond estimating sample size, simulation studies like this can also be used to evaluate the Type I error rates of the gatekeeping hypothesis testing framework.
 
-ggplot(data = pdata_provider, aes(x = eff_A, y = power, group = diff)) +
-  geom_hline(yintercept = 0.8, color = "white") +
-  geom_line(color = "grey75") +
-  geom_point(aes(color = factor(diff))) +
-  scale_color_manual(
-    values = c("#004488", "#BB5566"), 
-    name = "HR difference for\ncombined intervention") +
-  xlab("Hazard ratio for provider intervention alone") +
-  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
-  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-  ggtitle("Estimated power: randomization by provider") +
-  theme(panel.grid = element_blank(),
-        plot.title = element_text(size = 10, face = "bold"),
-        legend.title = element_text(size = 8, family = "Verdana"),
-        legend.position = "inside",
-        legend.position.inside = c(.75, .25),
-        legend.box.just = "center"
-  )
-```
+<!-- ### Power estimates -->
 
-```{r plot_clinic_1, echo=FALSE, fig.width=7, fig.height=4}
-ggplot(data = pdata_clinic_1, aes(x = eff_A, y = power, group = diff)) +
-  geom_hline(yintercept = 0.8, color = "white") +
-  geom_line(color = "grey75") +
-  geom_point(aes(color = factor(diff))) +
-  scale_color_manual(
-    values = c("#004488", "#BB5566"), 
-    name = "HR difference for\ncombined intervention") +
-  xlab("Hazard ratio for provider intervention alone") +
-  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
-  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-  ggtitle("Estimated power: randomization by clinic") +
-  theme(panel.grid = element_blank(),
-        plot.title = element_text(size = 10, face = "bold"),
-        legend.title = element_text(size = 8, family = "Verdana"),
-        legend.position = "inside",
-        legend.position.inside = c(.75, .25),
-        legend.box.just = "center"
-  )
-```
+<!-- ```{r plot_provider, echo=FALSE, fig.width=7, fig.height=4} -->
+<!-- load("data/power.rda") -->
 
-```{r plot_clinic_2, echo=FALSE, fig.width=7, fig.height=4}
-ggplot(data = pdata_clinic_2, aes(x = nC, y = power)) +
-  geom_hline(yintercept = 0.8, color = "white") +
-  geom_line(color = "grey75") +
-  geom_point() +
-  xlab("Number of clinics") +
-  guides(color = guide_legend(reverse = TRUE, title.position = "left")) +
-  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) +
-  ggtitle("Estimated power: randomization by clinic") +
-  theme(panel.grid = element_blank(),
-        plot.title = element_text(size = 10, face = "bold"))
-```
+<!-- ggplot(data = pdata_provider, aes(x = eff_A, y = power, group = diff)) + -->
+<!--   geom_hline(yintercept = 0.8, color = "white") + -->
+<!--   geom_line(color = "grey75") + -->
+<!--   geom_point(aes(color = factor(diff))) + -->
+<!--   scale_color_manual( -->
+<!--     values = c("#004488", "#BB5566"),  -->
+<!--     name = "HR difference for\ncombined intervention") + -->
+<!--   xlab("Hazard ratio for provider intervention alone") + -->
+<!--   guides(color = guide_legend(reverse = TRUE, title.position = "left")) + -->
+<!--   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) + -->
+<!--   ggtitle("Estimated power: randomization by provider") + -->
+<!--   theme(panel.grid = element_blank(), -->
+<!--         plot.title = element_text(size = 10, face = "bold"), -->
+<!--         legend.title = element_text(size = 8, family = "Verdana"), -->
+<!--         legend.position = "inside", -->
+<!--         legend.position.inside = c(.75, .25), -->
+<!--         legend.box.just = "center" -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- ```{r plot_clinic_1, echo=FALSE, fig.width=7, fig.height=4} -->
+<!-- ggplot(data = pdata_clinic_1, aes(x = eff_A, y = power, group = diff)) + -->
+<!--   geom_hline(yintercept = 0.8, color = "white") + -->
+<!--   geom_line(color = "grey75") + -->
+<!--   geom_point(aes(color = factor(diff))) + -->
+<!--   scale_color_manual( -->
+<!--     values = c("#004488", "#BB5566"),  -->
+<!--     name = "HR difference for\ncombined intervention") + -->
+<!--   xlab("Hazard ratio for provider intervention alone") + -->
+<!--   guides(color = guide_legend(reverse = TRUE, title.position = "left")) + -->
+<!--   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) + -->
+<!--   ggtitle("Estimated power: randomization by clinic") + -->
+<!--   theme(panel.grid = element_blank(), -->
+<!--         plot.title = element_text(size = 10, face = "bold"), -->
+<!--         legend.title = element_text(size = 8, family = "Verdana"), -->
+<!--         legend.position = "inside", -->
+<!--         legend.position.inside = c(.75, .25), -->
+<!--         legend.box.just = "center" -->
+<!--   ) -->
+<!-- ``` -->
+
+<!-- ```{r plot_clinic_2, echo=FALSE, fig.width=7, fig.height=4} -->
+<!-- ggplot(data = pdata_clinic_2, aes(x = nC, y = power)) + -->
+<!--   geom_hline(yintercept = 0.8, color = "white") + -->
+<!--   geom_line(color = "grey75") + -->
+<!--   geom_point() + -->
+<!--   xlab("Number of clinics") + -->
+<!--   guides(color = guide_legend(reverse = TRUE, title.position = "left")) + -->
+<!--   scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, by = 0.2)) + -->
+<!--   ggtitle("Estimated power: randomization by clinic") + -->
+<!--   theme(panel.grid = element_blank(), -->
+<!--         plot.title = element_text(size = 10, face = "bold")) -->
+<!-- ``` -->
 
 
 <p><small><font color="darkkhaki">
