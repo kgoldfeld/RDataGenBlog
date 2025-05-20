@@ -10,12 +10,11 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 
 
-<p>A researcher recently approached me for advice on a cluster-randomized trial he was developing. He was interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.</p>
+<p>A researcher recently approached me for advice on a cluster-randomized trial he is developing. He is interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.</p>
 <p>As we discussed the interventions (I’ll call them <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>), it became clear that <span class="math inline">\(A\)</span> was the primary focus. Intervention <span class="math inline">\(B\)</span> might enhance the effectiveness of <span class="math inline">\(A\)</span>, but on its own, <span class="math inline">\(B\)</span> was not expected to have much impact. (It’s also possible that <span class="math inline">\(A\)</span> alone doesn’t work, but once <span class="math inline">\(B\)</span> is in place, the combination may reap benefits.) Given this, it didn’t seem worthwhile to randomize clinics or providers to receive B alone. We agreed that a three-arm cluster-randomized trial—with (1) control, (2) <span class="math inline">\(A\)</span> alone, and (3) <span class="math inline">\(A + B\)</span>—would be a more efficient and relevant design.</p>
 <p>A while ago, I <a href="https://www.rdatagen.net/post/2023-12-19-a-three-arm-trial-using-two-step-randomization/" target="_blank">wrote about</a> a proposal to conduct a three-arm trial using a two-step randomization scheme. That design assumes that outcomes in the enhanced arm (<span class="math inline">\(A + B\)</span>) are uncorrelated with those in the standalone arm <span class="math inline">\(A\)</span> within the same cluster. For this project, that assumption didn’t seem plausible, so I recommended sticking with a standard cluster-level randomization.</p>
 <p>The study has three goals:</p>
@@ -24,11 +23,11 @@ draft: TRUE
 <li>Compare <span class="math inline">\(A + B\)</span> versus <span class="math inline">\(A\)</span> alone</li>
 <li>If <span class="math inline">\(A\)</span> alone is ineffective, compare <span class="math inline">\(A + B\)</span> versus control</li>
 </ul>
-<p>In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we used a <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463" target="_blank">gatekeeping</a> strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at <span class="math inline">\(\alpha = 0.05\)</span>.</p>
-<p>This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple datasets and applied the gatekeeping hypothesis tests to estimate statistical power.</p>
+<p>In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we decided to use a <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463" target="_blank">gatekeeping</a> strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at <span class="math inline">\(\alpha = 0.05\)</span>.</p>
+<p>This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple data sets and applied the gatekeeping hypothesis testing framework to estimate statistical power.</p>
 <div id="preliminaries" class="section level3">
 <h3>Preliminaries</h3>
-<p>Before getting started, here are the <code>R</code> packages used in this post. In addition, I’ve set a randomization seed to that if you attempt to replicate the approach taken here, our results should align.</p>
+<p>Before getting started, here are the <code>R</code> packages used in this post. In addition, I’ve set a randomization seed so that if you try to replicate the approach taken here, our results should align.</p>
 <pre class="r"><code>library(simstudy)
 library(data.table)
 library(survival)
@@ -92,7 +91,7 @@ tidy(fit, exponentiate = TRUE)</code></pre>
 </div>
 <div id="relationship-of-hr-to-median-time-to-event" class="section level4">
 <h4>Relationship of HR to median time-to-event</h4>
-<p>My collaborator is especially interested in how the interventions might shift the <em>median</em> time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of datasets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. This helps illustrate the relationship. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.</p>
+<p>My collaborator is especially interested in how the interventions might shift the <em>median</em> time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of data sets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.</p>
 <pre class="r"><code>getmedian &lt;- function(eff = 0) {
   
   dd &lt;- genData(100000, def)
@@ -108,8 +107,8 @@ dm &lt;- rbindlist(lapply(
 <p><img src="{{< blogdown/postref >}}index.en_files/figure-html/plot_median-1.png" width="528" /></p>
 </div>
 </div>
-<div id="simulating-three-arm-study-data" class="section level3">
-<h3>Simulating three-arm study data</h3>
+<div id="simulating-the-three-arm-study-data" class="section level3">
+<h3>Simulating the three-arm study data</h3>
 <p>In the proposed three-arm cluster randomized trial, there are three levels of measurement: patient, provider, and clinic. Randomization is conducted at the provider level, stratified by clinic. The hazard for individual <span class="math inline">\(i\)</span>, treated by provider <span class="math inline">\(j\)</span> in clinic <span class="math inline">\(k\)</span>, is modeled as:</p>
 <p><span class="math display">\[
 h_{ijk}(t) = h_0(t) \exp\left( \beta_1 A_{ijk} + \beta_2 AB_{ijk} + b_j + g_k \right)
@@ -126,11 +125,11 @@ h_{ijk}(t) = h_0(t) \exp\left( \beta_1 A_{ijk} + \beta_2 AB_{ijk} + b_j + g_k \r
 </ul>
 <div id="data-definititions" class="section level4">
 <h4>Data definititions</h4>
-<p>While the model is semi-parametric (i.e., it does not assume a specific distribution for event times), the data generation process is fully parametric, based on the Weibull distribution. Despite this difference, the two are closely aligned: if all goes well, we should be able to recover the parameters used for data generation when fitting the semi-parametric model.</p>
+<p>While the model is semi-parametric (i.e., it does not assume a specific distribution for event times), the data generation process is fully parametric, based on the Weibull distribution. Despite this difference, the two are closely aligned: if all goes well, we should be able to recover the parameters used for data generation when fitting the semi-parametric model as we did in the simpler RCT case above.</p>
 <p>Data generation occurs in three broad steps:</p>
 <ol style="list-style-type: decimal">
-<li>Clinic-level: generate the clinic-specific random effect <span class="math inline">\(g\)</span>,</li>
-<li>Provider-level: generate the provider-specific random effect <span class="math inline">\(b\)</span> and assign treatment,</li>
+<li>Clinic-level: generate the clinic-specific random effect <span class="math inline">\(g\)</span>.</li>
+<li>Provider-level: generate the provider-specific random effect <span class="math inline">\(b\)</span> and assign treatment.</li>
 <li>Patient-level: generate individual time-to-event outcomes.</li>
 </ol>
 <p>These steps are implemented using the following definitions:</p>

@@ -10,10 +10,9 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
-A researcher recently approached me for advice on a cluster-randomized trial he was developing. He was interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.
+A researcher recently approached me for advice on a cluster-randomized trial he is developing. He is interested in testing the effectiveness of two interventions and wondered whether a 2×2 factorial design might be the best approach.
 
 As we discussed the interventions (I'll call them $A$ and $B$), it became clear that $A$ was the primary focus. Intervention $B$ might enhance the effectiveness of $A$, but on its own, $B$ was not expected to have much impact. (It's also possible that $A$ alone doesn't work, but once $B$ is in place, the combination may reap benefits.) Given this, it didn’t seem worthwhile to randomize clinics or providers to receive B alone. We agreed that a three-arm cluster-randomized trial---with (1) control, (2) $A$ alone, and (3) $A + B$---would be a more efficient and relevant design.
 
@@ -25,13 +24,13 @@ The study has three goals:
 * Compare $A + B$ versus $A$ alone
 * If $A$ alone is ineffective, compare $A + B$ versus control
 
-In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we used a [gatekeeping](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463){target="_blank"} strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at $\alpha = 0.05$.
+In other words, we want to make three pairwise comparisons. Initially, we were concerned about needing to adjust our tests for multiple comparisons. However, we decided to use a [gatekeeping](https://onlinelibrary.wiley.com/doi/full/10.1002/sim.8463){target="_blank"} strategy that maintains the overall Type I error rate at 5% while allowing each test to be performed at $\alpha = 0.05$.
 
-This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple datasets and applied the gatekeeping hypothesis tests to estimate statistical power.
+This post describes how I set up simulations to evaluate sample size requirements for the proposed trial. The primary outcome is a time-to-event measure: the time from an index physician visit to a follow-up visit, which the intervention aims to shorten. I first generated survival data based on estimates from the literature, then simulated the study design under various sample size assumptions. For each scenario, I generated multiple data sets and applied the gatekeeping hypothesis testing framework to estimate statistical power.
 
 ### Preliminaries
 
-Before getting started, here are the `R` packages used in this post. In addition, I've set a randomization seed to that if you attempt to replicate the approach taken here, our results should align.
+Before getting started, here are the `R` packages used in this post. In addition, I've set a randomization seed so that if you try to replicate the approach taken here, our results should align.
 
 ```{r, message=FALSE}
 library(simstudy)
@@ -127,7 +126,7 @@ tidy(fit, exponentiate = TRUE)
 
 #### Relationship of HR to median time-to-event
 
-My collaborator is especially interested in how the interventions might shift the *median* time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of datasets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. This helps illustrate the relationship. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.
+My collaborator is especially interested in how the interventions might shift the *median* time-to-event. This essentially raises the question of how the hazard ratio translates to a change in the median. To explore this, I generated a series of data sets using hazard ratios ranging from 1 to 2 and recorded the observed median for each. As expected, when the hazard ratio is 1, the median closely aligns with that of the baseline distribution.
 
 ```{r}
 getmedian <- function(eff = 0) {
@@ -153,7 +152,7 @@ ggplot(data = dm, aes(x = HR, y = median)) +
   theme(panel.grid = element_blank())
 ```
 
-### Simulating three-arm study data
+### Simulating the three-arm study data
 
 In the proposed three-arm cluster randomized trial, there are three levels of measurement: patient, provider, and clinic. Randomization is conducted at the provider level, stratified by clinic. The hazard for individual $i$, treated by provider $j$ in clinic $k$, is modeled as:
 
@@ -173,12 +172,12 @@ where:
 
 #### Data definititions
 
-While the model is semi-parametric (i.e., it does not assume a specific distribution for event times), the data generation process is fully parametric, based on the Weibull distribution. Despite this difference, the two are closely aligned: if all goes well, we should be able to recover the parameters used for data generation when fitting the semi-parametric model.
+While the model is semi-parametric (i.e., it does not assume a specific distribution for event times), the data generation process is fully parametric, based on the Weibull distribution. Despite this difference, the two are closely aligned: if all goes well, we should be able to recover the parameters used for data generation when fitting the semi-parametric model as we did in the simpler RCT case above.
 
 Data generation occurs in three broad steps:
 
-1. Clinic-level: generate the clinic-specific random effect $g$,
-2. Provider-level: generate the provider-specific random effect $b$ and assign treatment,
+1. Clinic-level: generate the clinic-specific random effect $g$.
+2. Provider-level: generate the provider-specific random effect $b$ and assign treatment.
 3. Patient-level: generate individual time-to-event outcomes.
 
 These steps are implemented using the following definitions:
