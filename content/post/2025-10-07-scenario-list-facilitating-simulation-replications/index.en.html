@@ -1,0 +1,192 @@
+---
+title: 'A new simstudy function to make simulating replications easier'
+author: Package Build
+date: '2025-10-07'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>Four years ago, I <a href="https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/" target="_blank">described</a> a simple framework for organizing simulations to conduct power analyses or explore the operating characteristics of modeling approaches. In that framework, I introduced a small function <code>scenario_list</code> that generated a list of scenarios forming the basis for simulations. I had always intended to incorporate that function into <code>simstudy</code>, and now I have finally done so This post offers a brief introduction to the function and concludes with a small simulation.</p>
+<p>Here are the <code>R</code> packages used in the code that follows:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(parallel)
+library(lmerTest)
+library(broom.mixed)</code></pre>
+<p><code>scenario_list</code> takes a collection of vectors and generates all possible combinations of their elements. Under the hood, it’s essentially a wrapper around the base <code>R</code> function <code>expand.grid</code>, but the function is designed to make the process a bit more convenient when setting up simulation scenarios.</p>
+<p>In the first example, suppose there are two parameters: <em>a</em> (with 3 elements) and <em>b</em> (2 elements). In this case, <code>scenario_list</code> will return a list of length <span class="math inline">\(3 \times 2 = 6\)</span>. Each object in the list is a <code>data.table</code> with a single row, where the columns are named for the parameters. An additional column is included to uniquely identify each scenario.</p>
+<pre class="r"><code>a &lt;- c(0.5, 0.7, 0.9)
+b &lt;- c(8, 16)
+
+scenario_list(a, b)</code></pre>
+<pre><code>## [[1]]
+##        a        b scenario 
+##      0.5      8.0      1.0 
+## 
+## [[2]]
+##        a        b scenario 
+##      0.7      8.0      2.0 
+## 
+## [[3]]
+##        a        b scenario 
+##      0.9      8.0      3.0 
+## 
+## [[4]]
+##        a        b scenario 
+##      0.5     16.0      4.0 
+## 
+## [[5]]
+##        a        b scenario 
+##      0.7     16.0      5.0 
+## 
+## [[6]]
+##        a        b scenario 
+##      0.9     16.0      6.0</code></pre>
+<p>If there is a set (or multiple sets) of parameters that will vary together, it is possible to use the new <code>grouped</code> function to link them together. In this example <em>c</em> and <em>d</em> (which are of the same length), are grouped together, and the number of possible scenarios is still <span class="math inline">\(6\)</span> and not <span class="math inline">\(3 \times 2 \times 2 = 12\)</span>:</p>
+<p>If a set (or multiple sets) of parameters need to vary together, the new <code>grouped</code> function can be used to link them. In this example, <em>c</em> and <em>d</em> (which have the same length) are grouped, so the total number of possible scenarios remains <span class="math inline">\(6\)</span>, rather than <span class="math inline">\(3 \times 2 \times 2 = 12\)</span>.</p>
+<pre class="r"><code>d &lt;- c(12, 18)
+
+scenario_list(a, grouped(b, d))</code></pre>
+<pre><code>## [[1]]
+##        a        b        d scenario 
+##      0.5      8.0     12.0      1.0 
+## 
+## [[2]]
+##        a        b        d scenario 
+##      0.7      8.0     12.0      2.0 
+## 
+## [[3]]
+##        a        b        d scenario 
+##      0.9      8.0     12.0      3.0 
+## 
+## [[4]]
+##        a        b        d scenario 
+##      0.5     16.0     18.0      4.0 
+## 
+## [[5]]
+##        a        b        d scenario 
+##      0.7     16.0     18.0      5.0 
+## 
+## [[6]]
+##        a        b        d scenario 
+##      0.9     16.0     18.0      6.0</code></pre>
+<p>Finally, we can generate multiple replications of each scenario using the each argument. For example, there are four possible combinations of <em>b</em> and <em>d</em> (not grouped), and setting <em>each = 2</em> creates two replications of each combination:</p>
+<pre class="r"><code>scenario_list(b, d, each = 2)</code></pre>
+<pre><code>## [[1]]
+##        b        d scenario 
+##        8       12        1 
+## 
+## [[2]]
+##        b        d scenario 
+##        8       12        1 
+## 
+## [[3]]
+##        b        d scenario 
+##       16       12        2 
+## 
+## [[4]]
+##        b        d scenario 
+##       16       12        2 
+## 
+## [[5]]
+##        b        d scenario 
+##        8       18        3 
+## 
+## [[6]]
+##        b        d scenario 
+##        8       18        3 
+## 
+## [[7]]
+##        b        d scenario 
+##       16       18        4 
+## 
+## [[8]]
+##        b        d scenario 
+##       16       18        4</code></pre>
+<div id="sample-simulation-using-scenarios_list" class="section level3">
+<h3>Sample simulation using <code>scenarios_list</code></h3>
+<p>Here’s a simple example of a simulation for a cluster randomized trial. The goal is to explore how four parameters affect estimated power: site-level sample size (<em>npat</em>), between-site variation (<em>svar</em>), within-site variation (<em>ivar</em>), and effect size (<em>delta</em>).</p>
+<p>The code below defines three helper functions:</p>
+<ul>
+<li><code>s_define</code>: specifies data definitions for cluster-level and individual-level data,</li>
+<li><code>s_generate</code>: generates both site-level and individual-level data,</li>
+<li><code>s_model</code>: fits a mixed-effects model.</li>
+</ul>
+<p>A fourth function, <code>s_replicate</code>, ties everything together by calling the first three functions using a single set of parameter values:</p>
+<pre class="r"><code>s_define &lt;- function() {
+  
+  #--- data definition code ---#
+  
+  def1 &lt;- defData(varname = &quot;site_eff&quot;, 
+    formula = 0, variance = &quot;..svar&quot;, dist = &quot;normal&quot;, id = &quot;site&quot;)
+  def1 &lt;- defData(def1, &quot;n&quot;, formula = &quot;..npat&quot;, dist = &quot;poisson&quot;)
+  
+  def2 &lt;- defDataAdd(varname = &quot;Y&quot;, formula = &quot;5 + site_eff + ..delta * rx&quot;, 
+    variance = &quot;..ivar&quot;, dist = &quot;normal&quot;)
+  
+  return(list(def1 = def1, def2 = def2)) 
+}
+
+s_generate &lt;- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  #--- data generation code ---#
+  
+  ds &lt;- genData(40, def1)
+  ds &lt;- trtAssign(ds, grpName = &quot;rx&quot;)
+  dd &lt;- genCluster(ds, &quot;site&quot;, &quot;n&quot;, &quot;id&quot;)
+  dd &lt;- addColumns(def2, dd)
+  
+  return(dd)
+}
+
+s_model &lt;- function(generated_data) {
+  
+  #--- model code ---#
+  
+  lmefit &lt;- lmer(Y ~ rx + (1|site), data = generated_data)
+ 
+  return(data.table(tidy(lmefit)))
+}
+
+s_replicate &lt;- function(argsvec) {
+  
+  list_of_defs &lt;- s_define()
+  generated_data &lt;- s_generate(list_of_defs, argsvec)
+  model_results &lt;- s_model(generated_data)
+  
+  return(list(argsvec, model_results)) 
+}</code></pre>
+<p>The four parameters—<em>npat</em> (2 values), <em>svar</em> (2 values), <em>ivar</em> (2 values), and <em>delta</em> (3 values)—are specified as vectors. Because the variance parameters are meant to be tested together, they are grouped. This results in <span class="math inline">\(3 \times 2 \times 3 = 18\)</span> distinct scenarios. With 1000 replications per scenario, the <em>scenarios</em> list contains 18,000 objects. The object <em>model_fits</em> will then store the model estimates for each replication:</p>
+<pre class="r"><code>#------ set simulation parameters
+
+npat &lt;- c(8, 16, 24)
+svar &lt;- c(0.40, 0.80)
+ivar &lt;- c(3, 6)
+delta &lt;- c(0.50, 0.75, 1.00)
+
+scenarios &lt;- scenario_list(delta, npat, grouped(svar, ivar), each = 1000)
+
+model_fits &lt;- mclapply(scenarios, function(a) s_replicate(a), mc.cores = 5)</code></pre>
+<p>Once the data have been collected, it is quite easy to summarize and create a table or a figure.</p>
+<pre class="r"><code>summarize &lt;- function(m_fit) {
+  args &lt;- data.table(t(m_fit[[1]]))
+  reject &lt;- m_fit[[2]][term == &quot;rx&quot;, p.value &lt;= 0.05]
+  cbind(args, reject)
+}
+
+reject &lt;- rbindlist(lapply(model_fits, function(a) summarize(a)))
+power &lt;- reject[, .(power = mean(reject)), keyby = .(delta, npat, svar, ivar, scenario)]</code></pre>
+<p><img src="{{< blogdown/postref >}}index.en_files/figure-html/power_plot-1.png" width="672" /></p>
+</div>

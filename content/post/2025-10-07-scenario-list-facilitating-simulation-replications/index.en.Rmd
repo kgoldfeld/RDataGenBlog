@@ -1,0 +1,173 @@
+---
+title: 'A new simstudy function to make simulating replications easier'
+author: Package Build
+date: '2025-10-07'
+slug: []
+categories: []
+tags:
+  - R
+  - simulation
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+Four years ago, I [described](https://www.rdatagen.net/post/2021-03-16-framework-for-power-analysis-using-simulation/){target="_blank"} a simple framework for organizing simulations to  conduct power analyses or explore the operating characteristics of modeling approaches. In that framework, I introduced  a small function `scenario_list` that generated a list of scenarios forming the basis for simulations. I had always intended to incorporate that function into `simstudy`, and now I have finally done so This post offers a brief introduction to the function and concludes with a small simulation.
+
+```{r, echo=FALSE}
+knitr::opts_chunk$set(
+  warning = FALSE,
+  message = FALSE
+)
+```
+
+Here are the `R` packages used in the code that follows:
+
+```{r, warning=FALSE, message=FALSE}
+library(simstudy)
+library(data.table)
+library(parallel)
+library(lmerTest)
+library(broom.mixed)
+```
+
+`scenario_list` takes a collection of vectors and generates all possible combinations of their elements. Under the hood, it’s essentially a wrapper around the base `R` function `expand.grid`, but the function is designed to make the process a bit more convenient when setting up simulation scenarios.
+
+In the first example, suppose there are two parameters: *a* (with 3 elements) and *b* (2 elements). In this case, `scenario_list` will return a list of length $3 \times 2 = 6$. Each object in the list is a `data.table` with a single row, where the columns are named for the parameters. An additional column is included to uniquely identify each scenario.
+
+```{r}
+a <- c(0.5, 0.7, 0.9)
+b <- c(8, 16)
+
+scenario_list(a, b)
+```
+
+If there is a set (or multiple sets) of parameters that will vary together, it is possible to use the new `grouped` function to link them together. In this example *c* and *d* (which are of the same length), are grouped together, and the number of possible scenarios is still $6$ and not $3 \times 2 \times 2 = 12$:
+
+If a set (or multiple sets) of parameters need to vary together, the new `grouped` function can be used to link them. In this example, *c* and *d* (which have the same length) are grouped, so the total number of possible scenarios remains $6$, rather than $3 \times 2 \times 2 = 12$.
+
+```{r}
+d <- c(12, 18)
+
+scenario_list(a, grouped(b, d))
+```
+
+Finally, we can generate multiple replications of each scenario using the each argument. For example, there are four possible combinations of *b* and *d* (not grouped), and setting *each = 2* creates two replications of each combination:
+
+```{r}
+scenario_list(b, d, each = 2)
+```
+
+### Sample simulation using `scenarios_list`
+
+Here’s a simple example of a simulation for a cluster randomized trial. The goal is to explore how four parameters affect estimated power: site-level sample size (*npat*), between-site variation (*svar*), within-site variation (*ivar*), and effect size (*delta*).
+
+The code below defines three helper functions:
+
+- `s_define`: specifies data definitions for cluster-level and individual-level data,
+- `s_generate`: generates both site-level and individual-level data,
+- `s_model`: fits a mixed-effects model.
+
+A fourth function, `s_replicate`, ties everything together by calling the first three functions using a single set of parameter values:
+
+```{r, eval=FALSE}
+s_define <- function() {
+  
+  #--- data definition code ---#
+  
+  def1 <- defData(varname = "site_eff", 
+    formula = 0, variance = "..svar", dist = "normal", id = "site")
+  def1 <- defData(def1, "n", formula = "..npat", dist = "poisson")
+  
+  def2 <- defDataAdd(varname = "Y", formula = "5 + site_eff + ..delta * rx", 
+    variance = "..ivar", dist = "normal")
+  
+  return(list(def1 = def1, def2 = def2)) 
+}
+
+s_generate <- function(list_of_defs, argsvec) {
+  
+  list2env(list_of_defs, envir = environment())
+  list2env(as.list(argsvec), envir = environment())
+  
+  #--- data generation code ---#
+  
+  ds <- genData(40, def1)
+  ds <- trtAssign(ds, grpName = "rx")
+  dd <- genCluster(ds, "site", "n", "id")
+  dd <- addColumns(def2, dd)
+  
+  return(dd)
+}
+
+s_model <- function(generated_data) {
+  
+  #--- model code ---#
+  
+  lmefit <- lmer(Y ~ rx + (1|site), data = generated_data)
+ 
+  return(data.table(tidy(lmefit)))
+}
+
+s_replicate <- function(argsvec) {
+  
+  list_of_defs <- s_define()
+  generated_data <- s_generate(list_of_defs, argsvec)
+  model_results <- s_model(generated_data)
+  
+  return(list(argsvec, model_results)) 
+}
+```
+
+The four parameters---*npat* (2 values), *svar* (2 values), *ivar* (2 values), and *delta* (3 values)---are specified as vectors. Because the variance parameters are meant to be tested together, they are grouped. This results in $3 \times 2 \times 3 = 18$ distinct scenarios. With 1000 replications per scenario, the *scenarios* list contains 18,000 objects. The object *model_fits* will then store the model estimates for each replication:
+
+```{r, eval = FALSE}
+
+#------ set simulation parameters
+
+npat <- c(8, 16, 24)
+svar <- c(0.40, 0.80)
+ivar <- c(3, 6)
+delta <- c(0.50, 0.75, 1.00)
+
+scenarios <- scenario_list(delta, npat, grouped(svar, ivar), each = 1000)
+
+model_fits <- mclapply(scenarios, function(a) s_replicate(a), mc.cores = 5)
+```
+
+Once the data have been collected, it is quite easy to summarize and create a table or a figure.
+
+```{r, eval = FALSE}
+summarize <- function(m_fit) {
+  args <- data.table(t(m_fit[[1]]))
+  reject <- m_fit[[2]][term == "rx", p.value <= 0.05]
+  cbind(args, reject)
+}
+
+reject <- rbindlist(lapply(model_fits, function(a) summarize(a)))
+power <- reject[, .(power = mean(reject)), keyby = .(delta, npat, svar, ivar, scenario)]
+```
+
+```{r power_plot, echo=FALSE, fig.width = 7, fig.height=3}
+load("data/power.rda")
+power[, highvar := (svar ==.8)]
+
+library(ggplot2)
+
+ggplot(data = power, 
+       aes(x = factor(npat), y = power, 
+        group = factor(delta), color = factor(delta))) +
+  geom_hline(yintercept = 0.8, color = "white") +
+  geom_line(linewidth = 0.9) +
+  facet_grid(. ~ factor(highvar, labels = c("low variance", "high variance"))) +
+  theme(panel.grid = element_blank()) +
+  scale_y_continuous(limits = c(0,1)) +
+  scale_x_discrete(name = "number of patients per site", expand = c(.1, .1)) +
+  scale_color_manual(
+    values = c("1" = "#4477AA", "0.75" = "#EE6677", "0.5" = "#228833"),
+    breaks = c("1", "0.75", "0.5"),
+    labels = c("1.00", "0.75", "0.50"),
+    name = "effect size"
+  )
+```
