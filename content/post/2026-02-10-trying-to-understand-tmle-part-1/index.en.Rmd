@@ -1,0 +1,250 @@
+---
+title: 'Trying to understand TMLE: Part 1'
+author: R Build
+date: '2026-02-10'
+slug: []
+categories: []
+tags:
+  - R
+  - TMLE
+  - causal inference
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+I first encountered TMLE - sometimes spelled out as *targeted maximum likelihood estimation* or *targeted minimum-loss estimate* - during my peak causal inference phase about twelve or so years ago when Mark var der Laan, one of the original inventors of the method, gave a talk at NYU. It sounded very cool and seemed quite revolutionary and important, but I really couldn't follow much of what was going on. Immediately after that talk, I tried to read some of the literature, but was quickly intimidated. What struck me most was not the algorithmic complexity, but the language. *Influence functions*. *Clever covariates*. *Orthogonality*. *Double robustness*. It all felt simultaneously precise and opaque.
+
+More recently, I inherited a project from a colleague who had proposed using TMLE methods to analyze a cluster randomized trial using a stepped-wedge design. In order to decide whether I would go along with this suggestion, I needed to try again to see if I could make head or tails of the methods. I decided to tackle the literature again, this time with the aid of ChatGPT to help clarify some of the thornier issues.
+
+This post (and the planned sequel, if I make it that far) is definitely not a tutorial nor is it literature review. It’s my attempt to encode my (clearly simplistic) understanding of the underpinnings of TMLE.
+
+### Estimators as Functionals
+
+I think a key insight is to understand that an esimator is not merely a formula applied to data, but can be thought of more formally as a *functional*, a mapping that takes a probablity distribution $P$ in a familiy of distributions $\mathcal{P}$ and returns a number $T(P)$:
+$$ T : \mathcal{P} \to \mathbb{R} $$
+Here $\mathcal{P}$ just denotes the collection of probability distributions under consideration. Writing $T : \mathcal{P} \to \mathbb{R}$ emphasizes that a statistical parameter is not a property of a particular dataset, but of the *data-generating distribution*. The dataset enters only through the empirical distribution $P_n$.
+
+From this perspective, the key question becomes how $T$ changes when the data-generating distribution changes slightly---for example, by comparing $T(P_1)$ with $T(P_2)$, where $P_1, P_2 \in \mathcal{P}$. 
+
+As an example, the *mean* is a functional:
+
+$$T(P) = \int z\ dP(z).$$
+If $P_0$ is the true data-generating distribution, then the target parameter is $T(P_0)$.
+
+$P_n$ is the emprical distribution (i.e., the distribution induced based by the observed sample), 
+
+$$P_n = \frac{1}{n}\sum_{i=1}^n \delta_{Z_i},$$
+and the sample mean is simply $T(P_n)$. The notation $\delta_z$ denotes a *point mass* at $z$: a probability distribution that assigns probability 1 to the single value $z$. Writing the emprical distribution as an average of point masses simply formalizes the the idea that the observed data place equal weight on each sampled point. The empirical distribution is therefore a discrete approximation to the true data-generating distribution $P_0$, placing mass $1/n$ on each observed value.
+
+Ultimately, estimation is about quantifying how far our estimate $\hat{\theta}$ based on the empirical distribution deviates from the target parameter $\theta_0$ defined by the true distribution:
+
+$$\hat{θ} − \theta_0 = T(P_n)−T(P_0).$$
+Written this way, estimation error is simply the difference between evaluating the same functional at two nearby distributions: the true distribution $P_0$ and its empirical approximation $P_n$. Everything hinges on understanding how $T(P)$ changes when $P$ changes from $P_0$ to $P_n$.
+
+### Sampling as a Perturbation
+
+The empirical distribution $P_n$ differs from $P_0$ by many small deviations. As we just saw, each observation contributes a point mass of size $1/n$.
+
+Heuristically, we can think of
+
+$$P_n − P_0$$ 
+as a sum of many small perturbations to the true distribution. This suggests a natural question: how sensitive is the functional $T(P)$ to small changes in $P$? Answering this question leads directly to the *influence function*.
+
+### Hampel’s Contamination Model
+
+After reading about TMLE for a few weeks, I finally stumbled on an important paper by Frank Hampel, written in the early 1970's. In that paper, Hampel formalized what is meant by “small changes” in $P$ by framing it as a kind of *contamination* model.
+
+As before, if $P_0$ is the true distribution, and $\delta_z$ denotes the point mass at $z$, then we can consider the perturbed distribution 
+
+$$P_{\epsilon} = (1−\epsilon)P_0 + \epsilon \delta_z,\ \ \ 0< \epsilon < 1.$$
+This does **not** correspond to adding a full new data point. Instead, it represents adding an infinitesimal amount of probability mass at $z$. This makes the perturbation smooth and differentiable.
+
+The influence function of $T$ at $P_0$ is $\phi_{P_0}$, defined as
+$$
+\phi_{P_0}(z)
+=
+\left.
+\frac{d}{d\epsilon}
+T(P_\epsilon)
+\right|_{\epsilon = 0} =
+\left.
+\frac{d}{d\epsilon}
+T\!\left((1-\epsilon)P_0 + \epsilon \delta_z\right)
+\right|_{\epsilon = 0}
+$$
+In words *the influence function measures the first-order effect on $T(P)$ of "nudging" the distribution at point $z$*.
+
+### Linearization via the Influence Function
+
+<!-- A bit out context would be helpful here. --->
+
+If $T$ is sufficiently smooth, we obtain a first-order expansion:
+
+$$T(P_n) − T(P_0) = (P_n−P_0)\phi_{P_0} + R_n,$$
+where
+
+$$(P_n−P_0)ϕ_{P_0} = \sum_{i=1}^n \phi_{P_0}(Z_i),$$
+
+and $R_n$ is a remainder term. This equation is the workhorse behind asymptotic theory. If 
+$$R_n=o_p(n^{−1/2}),$$
+
+
+then
+
+n(T(Pn)−T(P0))=1n∑i=1nϕP0(Zi)+op(1),
+n
+	​
+
+(T(P
+n
+	​
+
+)−T(P
+0
+	​
+
+))=
+n
+	​
+
+1
+	​
+
+i=1
+∑
+n
+	​
+
+ϕ
+P
+0
+	​
+
+	​
+
+(Z
+i
+	​
+
+)+o
+p
+	​
+
+(1),
+
+and asymptotic normality follows by the central limit theorem.
+
+Mean-Zero and Orthogonality
+
+For the expansion above to make sense, the influence function must satisfy
+
+EP0[ϕP0(Z)]=0.
+E
+P
+0
+	​
+
+	​
+
+[ϕ
+P
+0
+	​
+
+	​
+
+(Z)]=0.
+
+In semiparametric problems, this condition often strengthens to a conditional mean-zero property, such as
+
+EP0[ϕP0(Z)∣X]=0.
+E
+P
+0
+	​
+
+	​
+
+[ϕ
+P
+0
+	​
+
+	​
+
+(Z)∣X]=0.
+
+This orthogonality is not a technical afterthought—it is what allows plug-in estimates of nuisance functions to converge slowly without contaminating the first-order behavior of the estimator.
+
+This is the precise sense in which TMLE (and related methods like DML) achieve robustness.
+
+### Why This Matters for TMLE
+
+TMLE can now be seen as a construction that ensures:
+
+The estimator corresponds to a well-defined functional 
+T(P)
+T(P),
+
+The associated influence function is known and efficient,
+
+The remainder term 
+Rn
+R
+n
+	​
+
+ is asymptotically negligible,
+
+Nuisance estimation errors enter only through higher-order terms.
+
+The “targeting step” in TMLE is not magic. It is a finite-sample procedure designed to enforce the influence-function equation
+
+PnϕP^=0,
+P
+n
+	​
+
+ϕ
+P
+^
+	​
+
+=0,
+
+so that the empirical mean of the estimated influence function vanishes.
+
+Once this equation holds, the asymptotic expansion effectively locks in.
+
+### Where This Is Going
+
+In the next post, I plan to connect this influence-function expansion to:
+
+efficient influence functions,
+
+clever covariates,
+
+double robustness,
+
+and the role of cross-fitting.
+
+For now, the main takeaway is simple:
+
+TMLE is about controlling first-order sensitivity to perturbations of the data-generating distribution.
+
+Once that clicks, the rest becomes much easier to place.
+
+### Extra stuff
+
+What eventually helped was realizing that TMLE is not primarily about likelihoods or machine learning. It is about how statistical parameters respond to small perturbations of the data-generating distribution. This sounds a bit abstract, but it turns out to be a useful place to start.
+
+Rather than thinking of an estimator as a formula applied to data, it is often more useful to think of it as a functional — a map that takes a probability distribution 
+$P$ and returns a number $T(P)$. The sample mean, for example, is just the mean of the empirical distribution $P_n$.
+
+Once you adopt this perspective, sampling itself becomes a perturbation: the empirical distribution $P_n$ is a random approximation to the true distribution $P_0$, differing by a sum of small point-mass deviations. The influence function, introduced by Hampel in the 1970s, is simply the first derivative of the functional $T(P)$ with respect to such perturbations.
+
+In other words, the influence function tells us *how sensitive a parameter is to “throwing in” a small amount of probability mass at a particular point in the sample space*. Sampling variability is just the accumulation of many such small perturbations, which explains why the influence function governs both asymptotic behavior and variance.
+
+From this point of view, TMLE is less mysterious: it is a way of constructing estimators whose first-order behavior is entirely captured by a well-behaved influence function, even when parts of the data-generating process are estimated flexibly.
