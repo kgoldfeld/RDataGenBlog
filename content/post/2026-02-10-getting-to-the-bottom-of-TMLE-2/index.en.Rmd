@@ -14,6 +14,7 @@ image: ''
 draft: TRUE
 ---
 
+I first encountered TMLE—sometimes spelled out as targeted maximum likelihood estimation or targeted minimum-loss estimate—about twelve or so years ago when Mark var der Laan, one of the original developers who literally wrote the book, gave a talk at NYU. It sounded very cool and seemed quite revolutionary and important, but it was really challenging to follow all of the details. Following that talk, I tried to tackle some of the literature, but quickly found that it as a challenge to penetrate. What struck me most was not the algorithmic complexity (which it certainly had), but much of the language and terminology, and the underlying math.
 
 ### Quick reset: what Part 1 bought us
 
@@ -84,3 +85,322 @@ We’ll simulate $X$, treatment $A$, and binary outcome $Y$ $g_0, μ_0$. We’ll
 * Post-targeting $P_n \phi_\hat{P} \approx 0$
 * Wrong clever covariate fails to fix it
 * Bad $Q$ + bad $g$/positivity $\Rightarrow$ remainder dominates
+
+```{r, eval=FALSE}
+invlogit <- function(x) 1 / (1 + exp(-x))
+
+# DGP constructor (tune these for your examples)
+simulate_data <- function(n, positivity = FALSE, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  # Covariate: 2-dim for flexibility
+  X1 <- rnorm(n)
+  X2 <- rnorm(n)
+  X  <- data.frame(X1 = X1, X2 = X2)
+
+  # Propensity score g0(x)
+  lin_g <- 0.2 + 0.8*X1 - 0.6*X2 + 0.4*X1*X2
+  if (positivity) {
+    # Push probabilities toward 0/1 (stress test)
+    lin_g <- 2.5*lin_g
+  }
+  g0 <- invlogit(lin_g)
+  A  <- rbinom(n, 1, g0)
+
+  # Outcome regression mu0(a,x)
+  # Nonlinear so that misspecification is easy
+  lin_mu <- -0.3 + 0.8*A + 0.7*X1^2 - 0.5*X2 + 0.3*sin(X1) - 0.4*A*X2
+  mu0 <- invlogit(lin_mu)
+  Y   <- rbinom(n, 1, mu0)
+
+  dplyr::tibble(X1 = X1, X2 = X2, A = A, Y = Y, g0 = g0, mu0 = mu0)
+}
+
+# Truth for psi = E[Y^1] under this DGP (Monte Carlo "ground truth")
+psi_truth_mc <- function(M = 2e6, positivity = FALSE, seed = 99) {
+  dd <- simulate_data(M, positivity = positivity, seed = seed)
+  # Set A=1 and compute mu0(1,X)
+  lin_mu1 <- -0.3 + 0.8*1 + 0.7*dd$X1^2 - 0.5*dd$X2 + 0.3*sin(dd$X1) - 0.4*1*dd$X2
+  mean(invlogit(lin_mu1))
+}
+
+psi0 <- psi_truth_mc(M = 2e5)  # keep manageable for knitting; increase if desired
+psi0
+
+
+```
+
+### 5. Nuisance estimation (good vs bad)
+
+We’ll intentionally use simple GLMs so we can control misspecification.
+
+```{r, eval=FALSE}
+fit_nuisance <- function(dd, misspec_q = FALSE, misspec_g = FALSE) {
+
+  # Fit g(x) = P(A=1|X)
+  if (!misspec_g) {
+    fit_g <- glm(A ~ X1 + X2 + I(X1*X2), family = binomial(), data = dd)
+  } else {
+    # Bad misspec: omit key terms / wrong functional form
+    fit_g <- glm(A ~ X1, family = binomial(), data = dd)
+  }
+  ghat <- pmin(pmax(predict(fit_g, type = "response"), 0.01), 0.99)
+
+  # Fit mu(1,x)=E[Y|A=1,X] (for psi=E[Y^1]) or full mu(A,X) (for ATE)
+  if (!misspec_q) {
+    fit_q1 <- glm(Y ~ X1 + X2 + I(X1^2) + sin(X1) + X2, family = binomial(), data = dd |> 
+                    filter(A == 1))
+  } else {
+    fit_q1 <- glm(Y ~ X1, family = binomial(), data = dd |> 
+                    filter(A == 1))
+  }
+
+  # Predict muhat(1,x) for all
+  muhat1 <- pmin(pmax(predict(fit_q1, newdata = dd, type = "response"), 1e-6), 1 - 1e-6)
+
+  list(
+    fit_g = fit_g, ghat = ghat,
+    fit_q1 = fit_q1, muhat1 = muhat1
+  )
+}
+
+```
+
+### 6. Compute EIF and its empirical mean (pre-targeting)
+
+For $\psi = E[Y_1]$, an estimated EIF using $\hat{g}$, $\hat{μ}(1, \cdot)$, and $\hat{ψ}$ is
+
+$$\hat{\phi}_i = \frac{A_i}{\hat{g(Xi)}}(Y_i−\hat{μ}(1,X_i)) +\hat{μ}(1,X_i) − \hat{\psi}.$$
+
+```{r, eval=FALSE}
+compute_eif_y1 <- function(dd, ghat, muhat1, psi_hat) {
+  (dd$A / ghat) * (dd$Y - muhat1) + muhat1 - psi_hat
+}
+
+psi_plugin <- function(muhat1) mean(muhat1)
+
+dd <- simulate_data(n = 2000, seed = 1)
+
+nuis0 <- fit_nuisance(dd, misspec_q = TRUE, misspec_g = FALSE)  # tweak scenarios
+psi_init <- psi_plugin(nuis0$muhat1)
+
+phi_init <- compute_eif_y1(dd, nuis0$ghat, nuis0$muhat1, psi_init)
+
+c(
+  psi0 = psi0,
+  psi_init = psi_init,
+  eif_mean_init = mean(phi_init),
+  eif_sd_init = sd(phi_init)
+)
+
+ggplot(data.frame(phi = phi_init), aes(x = phi)) +
+  geom_histogram(bins = 50) +
+  geom_vline(xintercept = mean(phi_init), linetype = "dashed") +
+  labs(
+    title = "Estimated EIF values (pre-targeting)",
+    subtitle = paste0("Empirical mean = ", signif(mean(phi_init), 3)),
+    x = expression(hat(phi)), y = "Count"
+  )
+
+```
+
+### 7. Targeting step (TMLE) for $\psi = E[Y_1]$
+
+#### Correct clever covariate
+
+For this target, $H_\hat{g}(A,X)=A/\hat{g}(X)$
+.
+
+We fluctuate the initial $\hat{μ}^{(0)}(1,X)$ via a logistic regression on the full data:
+
+* outcome: $Y$
+* covariate: $H$
+* offset: $\text{logit}\big(\hat{μ}^{(0)}(1,X)\big)$
+* but only among  $A=1$ for this parameter (standard approach)
+
+```{r, eval=FALSE}
+logit <- function(p) qlogis(p)
+
+tmle_update_y1 <- function(dd, ghat, muhat1) {
+  # clever covariate for Y^1 uses only treated units
+  H <- dd$A / ghat
+
+  # Fit fluctuation among A=1 only, with offset logit(muhat1)
+  d1 <- dd %>% filter(A == 1)
+
+  H1 <- d1$A / ghat[d1$A == 1]  # equals 1/ghat among treated
+  off <- logit(muhat1[d1$A == 1])
+
+  fit_eps <- glm(d1$Y ~ -1 + H1 + offset(off), family = binomial())
+  eps_hat <- coef(fit_eps)[["H1"]]
+
+  # Updated mu*(1,x) for all x:
+  mu_star1 <- invlogit(logit(muhat1) + eps_hat * (1 / ghat))  # since A=1 target ⇒ H=1/ghat
+  mu_star1 <- pmin(pmax(mu_star1, 1e-6), 1 - 1e-6)
+
+  list(eps = eps_hat, mu_star1 = mu_star1, fit_eps = fit_eps)
+}
+
+upd <- tmle_update_y1(dd, nuis0$ghat, nuis0$muhat1)
+psi_star <- mean(upd$mu_star1)
+
+phi_star <- compute_eif_y1(dd, nuis0$ghat, upd$mu_star1, psi_star)
+
+c(
+  psi0 = psi0,
+  psi_star = psi_star,
+  eif_mean_star = mean(phi_star),
+  eif_sd_star = sd(phi_star),
+  eps = upd$eps
+)
+
+df_plot <- dplyr::bind_rows(
+  data.frame(phi = phi_init, stage = "pre-targeting"),
+  data.frame(phi = phi_star, stage = "post-targeting")
+)
+
+ggplot(df_plot, aes(x = phi)) +
+  geom_histogram(bins = 50) +
+  facet_wrap(~stage, ncol = 1) +
+  geom_vline(data = df_plot %>% group_by(stage) %>% summarise(m = mean(phi)),
+             aes(xintercept = m), linetype = "dashed") +
+  labs(
+    title = "Estimated EIF values before vs after targeting",
+    x = expression(hat(phi)), y = "Count"
+  )
+
+```
+
+### 8. “Wrong clever covariate” experiment
+
+The point: targeting is not “logistic regression magic”—it works because the update uses the right $H$.
+
+```{r, eval=FALSE}
+tmle_update_wrongH_y1 <- function(dd, muhat1) {
+  # Wrong clever covariate: just A, ignoring 1/ghat weighting
+  d1 <- dd %>% filter(A == 1)
+  H_wrong <- rep(1, nrow(d1))  # equivalently intercept-only fluctuation
+
+  off <- logit(muhat1[d1$A == 1])
+
+  fit_eps <- glm(d1$Y ~ -1 + H_wrong + offset(off), family = binomial())
+  eps_hat <- coef(fit_eps)[["H_wrong"]]
+
+  mu_star1 <- invlogit(logit(muhat1) + eps_hat)  # wrong update
+  mu_star1 <- pmin(pmax(mu_star1, 1e-6), 1 - 1e-6)
+
+  list(eps = eps_hat, mu_star1 = mu_star1, fit_eps = fit_eps)
+}
+
+upd_wrong <- tmle_update_wrongH_y1(dd, nuis0$muhat1)
+psi_wrong <- mean(upd_wrong$mu_star1)
+phi_wrong <- compute_eif_y1(dd, nuis0$ghat, upd_wrong$mu_star1, psi_wrong)
+
+c(
+  eif_mean_init = mean(phi_init),
+  eif_mean_wrongH = mean(phi_wrong),
+  eif_mean_star = mean(phi_star),
+  psi_init = psi_init,
+  psi_wrong = psi_wrong,
+  psi_star = psi_star
+)
+
+```
+
+<!-- TODO: Add 1–2 sentences interpreting this outcome. -->
+
+### 9. When things go wrong: bad $Q$ + bad $g$ and/or positivity stress
+
+We’ll run a grid of scenarios and show bias / EIF mean / instability.
+
+```{r, eval=FALSE}
+run_one <- function(n, misspec_q, misspec_g, positivity, seed = NULL) {
+  dd <- simulate_data(n = n, positivity = positivity, seed = seed)
+  nuis <- fit_nuisance(dd, misspec_q = misspec_q, misspec_g = misspec_g)
+  psi_init <- psi_plugin(nuis$muhat1)
+  phi_init <- compute_eif_y1(dd, nuis$ghat, nuis$muhat1, psi_init)
+
+  upd <- try(tmle_update_y1(dd, nuis$ghat, nuis$muhat1), silent = TRUE)
+  if (inherits(upd, "try-error")) {
+    psi_star <- NA_real_
+    phi_star <- rep(NA_real_, n)
+  } else {
+    psi_star <- mean(upd$mu_star1)
+    phi_star <- compute_eif_y1(dd, nuis$ghat, upd$mu_star1, psi_star)
+  }
+
+  tibble(
+    n = n,
+    misspec_q = misspec_q,
+    misspec_g = misspec_g,
+    positivity = positivity,
+    psi0 = psi0,
+    psi_init = psi_init,
+    bias_init = psi_init - psi0,
+    eif_mean_init = mean(phi_init),
+    psi_star = psi_star,
+    bias_star = psi_star - psi0,
+    eif_mean_star = mean(phi_star)
+  )
+}
+
+grid <- expand.grid(
+  misspec_q = c(FALSE, TRUE),
+  misspec_g = c(FALSE, TRUE),
+  positivity = c(FALSE, TRUE),
+  stringsAsFactors = FALSE
+)
+
+res <- dplyr::bind_rows(lapply(seq_len(nrow(grid)), function(i) {
+  run_one(n = 2000,
+          misspec_q = grid$misspec_q[i],
+          misspec_g = grid$misspec_g[i],
+          positivity = grid$positivity[i],
+          seed = 100 + i)
+}))
+
+res
+
+res2 <- res %>%
+  mutate(scenario = paste0(
+    "Q", ifelse(misspec_q, " bad", " ok"),
+    ", g", ifelse(misspec_g, " bad", " ok"),
+    ifelse(positivity, ", positivity stress", "")
+  ))
+
+ggplot(res2, aes(x = scenario, y = bias_star)) +
+  geom_point(size = 2) +
+  coord_flip() +
+  labs(
+    title = "Bias after targeting across scenarios",
+    y = "Bias (psi_star - psi0)", x = ""
+  )
+
+```
+
+<!-- TODO: Add interpretation: - targeting fixes EIF mean but not necessarily bias if remainder dominates - positivity stress inflates variance / instability - both nuisances bad: no DR rescue; estimator can be far away -->
+
+### 10. Wrap-up + bridge to Part 3
+
+#### What we saw
+
+* Pre-targeting: $P_n \phi_{\hat{P}^{(0)}}$ can be far from 0.
+* Targeting with the clever covariate drives the EIF equation toward 0.
+* Using the wrong covariate fails to fix the right problem.
+* When we are far from the truth (bad nuisances / positivity), the remainder can dominate.
+
+#### Next steps
+
+* Derive the EIF more systematically (pathwise derivative / tangent space).
+* Show ATE targeting with both arms.
+* Discuss cross-fitting (why it helps when nuisance learners are too flexible).
+
+
+
+### A couple of quick notes (so you don’t get tripped up)
+
+- The targeting update I coded for $\mathbb{E}[Y^1]$ uses a treated-only fluctuation and then updates $\mu(1,X)$ for all $X$. That’s the standard clean way to do this parameter.
+- The “wrong clever covariate” demo is intentionally crude—its job is rhetorical: show that targeting is not just “refitting.”
+- The remainder-dominates story is easiest to *see* under **positivity stress**. Even with decent learners, $1/\hat g(X)$ can blow up, the EIF variance goes huge, and finite-sample behavior gets ugly.
+
+If you tell me whether you want the main parameter in Post 2 to be **$E(Y^1)$** or **ATE**, I can tailor the TMLE update section and EIF computations to match (and add the ATE targeting code cleanly).

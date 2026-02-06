@@ -1,0 +1,381 @@
+---
+title: 'Getting to the bottom of TMLE: clever covariates, targeting, and what can go wrong'
+author: R Build
+date: '2026-02-10'
+slug: []
+categories: []
+tags:
+  - R
+  - TMLE
+  - causal inference
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>I first encountered TMLE—sometimes spelled out as targeted maximum likelihood estimation or targeted minimum-loss estimate—about twelve or so years ago when Mark var der Laan, one of the original developers who literally wrote the book, gave a talk at NYU. It sounded very cool and seemed quite revolutionary and important, but it was really challenging to follow all of the details. Following that talk, I tried to tackle some of the literature, but quickly found that it as a challenge to penetrate. What struck me most was not the algorithmic complexity (which it certainly had), but much of the language and terminology, and the underlying math.</p>
+<div id="quick-reset-what-part-1-bought-us" class="section level3">
+<h3>Quick reset: what Part 1 bought us</h3>
+<p>Goal. Construct an estimator whose error admits an influence-function expansion</p>
+<p><span class="math display">\[\hat{\psi} − \psi_0 \approx (P_n−P_0)\phi_{P_0} + R_n,\ \ \ R_n = o_p(n^{−1/2}),\]</span>
+even when the influence function depends on nuisance functions that must be estimated.</p>
+<!-- TODO: Keep this section short (1 paragraph + the equation). -->
+</div>
+<div id="a-simplest-causal-target-psi-ey_1" class="section level3">
+<h3>1. A simplest causal target: <span class="math inline">\(\psi = E[Y_1]\)</span></h3>
+<div id="identification-one-paragraph-minimal" class="section level4">
+<h4>Identification (one paragraph, minimal)</h4>
+<!-- TODO: One line about consistency + exchangeability + positivity, and psi = E[mu0(1,X)] with mu0(1,x)=E[Y|A=1,X=x]. -->
+</div>
+<div id="the-eif-state-it-then-verify-the-key-property" class="section level4">
+<h4>The EIF (state it, then verify the key property)</h4>
+<p>For <span class="math inline">\(O = (X,A,Y)\)</span> with <span class="math inline">\(A \in \{0,1\}\)</span>, define</p>
+<ul>
+<li><span class="math inline">\(g_0(x) = Pr(A = 1 \mid X = x)\)</span></li>
+<li><span class="math inline">\(\mu_0(1,x) = E( Y \mid A=1, X=x)\)</span></li>
+<li><span class="math inline">\(\psi_0 = E[μ_(1,X)]\)</span></li>
+</ul>
+<p>A standard efficient influence function for <span class="math inline">\(\psi_0\)</span> is
+<span class="math display">\[\phi_\psi(O) = \frac{A}{g_0(X)}\{Y−μ_0(1,X)\} + μ_0(1,X) − \psi_0.\]</span>
+The clever covariate is the weight
+<span class="math display">\[H(X,A) = \frac{A}{g_0(X)}.\]</span>
+<!-- TODO: In text, explain that the clever covariate is chosen so the residual term has conditional mean zero. -->
+<!-- # Quick symbolic/empirical check of the key property: -->
+<!-- # E[ A/g0(X) * (Y - mu0(1,X)) | X ] = 0 when mu0 and g0 are correct. -->
+<!-- # -->
+<!-- # We'll verify numerically later under a known DGP. --></p>
+</div>
+</div>
+<div id="ate-version-optional-but-likely-what-you-want" class="section level3">
+<h3>2. ATE version (optional but likely what you want)</h3>
+<p>If <span class="math inline">\(\psi_0=E[Y_1−Y_0]\)</span>, one EIF is</p>
+<p><span class="math display">\[ϕ_ψ(O)=(Ag0(X)−1−A1−g0(X)){Y−μ0(A,X)}+μ0(1,X)−μ0(0,X)−ψ0.\]</span>
+Clever covariate:</p>
+<p><span class="math display">\[H(A,X)=Ag0(X)−1−A1−g0(X).\]</span></p>
+<!-- TODO: Decide if you keep ATE here, or move it to after simulations. -->
+</div>
+<div id="minimal-tmle-explained-through-the-eif-equation" class="section level3">
+<h3>3. Minimal TMLE, explained through the EIF equation</h3>
+<div id="the-one-dimensional-fluctuation" class="section level4">
+<h4>The one-dimensional fluctuation</h4>
+<p>For binary <span class="math inline">\(Y\)</span>, a common TMLE fluctuation updates an initial outcome regression <span class="math inline">\(\hat{μ}^{(0)}(A,X)\)</span> via</p>
+<p><span class="math display">\[logit μ^(ϵ)(A,X)=logit μ^(0)(A,X)+ϵ Hg^(A,X),\]</span></p>
+<p>where <span class="math inline">\(H_\hat{g}\)</span> is the clever covariate built using <span class="math inline">\(\hat{g}(X)\)</span></p>
+<p><span class="math inline">\(\hat{epsilon}\)</span> is chosen so the empirical score equation holds:</p>
+<p><span class="math display">\[P_n\big[H_\hat{g}(A,X)\{Y−\hat{μ}^\hat{ϵ}(A,X)\}\big]=0,\]</span>
+which is the key piece that makes <span class="math inline">\(P_n \phi_\hat{P}\)</span> “behave.”</p>
+<!-- TODO: Write 1 paragraph that makes this feel like "solve the EIF equation" rather than "run logistic regression." -->
+</div>
+</div>
+<div id="simulation-engine" class="section level3">
+<h3>4. Simulation engine</h3>
+<div id="data-generating-process" class="section level4">
+<h4>Data-generating process</h4>
+<p>We’ll simulate <span class="math inline">\(X\)</span>, treatment <span class="math inline">\(A\)</span>, and binary outcome <span class="math inline">\(Y\)</span> <span class="math inline">\(g_0, μ_0\)</span>. We’ll use this to show:</p>
+<ul>
+<li>Pre-targeting <span class="math inline">\(P_n \phi_{\hat{P}^{(0)}} \not = 0\)</span></li>
+<li>Post-targeting <span class="math inline">\(P_n \phi_\hat{P} \approx 0\)</span></li>
+<li>Wrong clever covariate fails to fix it</li>
+<li>Bad <span class="math inline">\(Q\)</span> + bad <span class="math inline">\(g\)</span>/positivity <span class="math inline">\(\Rightarrow\)</span> remainder dominates</li>
+</ul>
+<pre class="r"><code>invlogit &lt;- function(x) 1 / (1 + exp(-x))
+
+# DGP constructor (tune these for your examples)
+simulate_data &lt;- function(n, positivity = FALSE, seed = NULL) {
+  if (!is.null(seed)) set.seed(seed)
+
+  # Covariate: 2-dim for flexibility
+  X1 &lt;- rnorm(n)
+  X2 &lt;- rnorm(n)
+  X  &lt;- data.frame(X1 = X1, X2 = X2)
+
+  # Propensity score g0(x)
+  lin_g &lt;- 0.2 + 0.8*X1 - 0.6*X2 + 0.4*X1*X2
+  if (positivity) {
+    # Push probabilities toward 0/1 (stress test)
+    lin_g &lt;- 2.5*lin_g
+  }
+  g0 &lt;- invlogit(lin_g)
+  A  &lt;- rbinom(n, 1, g0)
+
+  # Outcome regression mu0(a,x)
+  # Nonlinear so that misspecification is easy
+  lin_mu &lt;- -0.3 + 0.8*A + 0.7*X1^2 - 0.5*X2 + 0.3*sin(X1) - 0.4*A*X2
+  mu0 &lt;- invlogit(lin_mu)
+  Y   &lt;- rbinom(n, 1, mu0)
+
+  dplyr::tibble(X1 = X1, X2 = X2, A = A, Y = Y, g0 = g0, mu0 = mu0)
+}
+
+# Truth for psi = E[Y^1] under this DGP (Monte Carlo &quot;ground truth&quot;)
+psi_truth_mc &lt;- function(M = 2e6, positivity = FALSE, seed = 99) {
+  dd &lt;- simulate_data(M, positivity = positivity, seed = seed)
+  # Set A=1 and compute mu0(1,X)
+  lin_mu1 &lt;- -0.3 + 0.8*1 + 0.7*dd$X1^2 - 0.5*dd$X2 + 0.3*sin(dd$X1) - 0.4*1*dd$X2
+  mean(invlogit(lin_mu1))
+}
+
+psi0 &lt;- psi_truth_mc(M = 2e5)  # keep manageable for knitting; increase if desired
+psi0</code></pre>
+</div>
+</div>
+<div id="nuisance-estimation-good-vs-bad" class="section level3">
+<h3>5. Nuisance estimation (good vs bad)</h3>
+<p>We’ll intentionally use simple GLMs so we can control misspecification.</p>
+<pre class="r"><code>fit_nuisance &lt;- function(dd, misspec_q = FALSE, misspec_g = FALSE) {
+
+  # Fit g(x) = P(A=1|X)
+  if (!misspec_g) {
+    fit_g &lt;- glm(A ~ X1 + X2 + I(X1*X2), family = binomial(), data = dd)
+  } else {
+    # Bad misspec: omit key terms / wrong functional form
+    fit_g &lt;- glm(A ~ X1, family = binomial(), data = dd)
+  }
+  ghat &lt;- pmin(pmax(predict(fit_g, type = &quot;response&quot;), 0.01), 0.99)
+
+  # Fit mu(1,x)=E[Y|A=1,X] (for psi=E[Y^1]) or full mu(A,X) (for ATE)
+  if (!misspec_q) {
+    fit_q1 &lt;- glm(Y ~ X1 + X2 + I(X1^2) + sin(X1) + X2, family = binomial(), data = dd |&gt; 
+                    filter(A == 1))
+  } else {
+    fit_q1 &lt;- glm(Y ~ X1, family = binomial(), data = dd |&gt; 
+                    filter(A == 1))
+  }
+
+  # Predict muhat(1,x) for all
+  muhat1 &lt;- pmin(pmax(predict(fit_q1, newdata = dd, type = &quot;response&quot;), 1e-6), 1 - 1e-6)
+
+  list(
+    fit_g = fit_g, ghat = ghat,
+    fit_q1 = fit_q1, muhat1 = muhat1
+  )
+}</code></pre>
+</div>
+<div id="compute-eif-and-its-empirical-mean-pre-targeting" class="section level3">
+<h3>6. Compute EIF and its empirical mean (pre-targeting)</h3>
+<p>For <span class="math inline">\(\psi = E[Y_1]\)</span>, an estimated EIF using <span class="math inline">\(\hat{g}\)</span>, <span class="math inline">\(\hat{μ}(1, \cdot)\)</span>, and <span class="math inline">\(\hat{ψ}\)</span> is</p>
+<p><span class="math display">\[\hat{\phi}_i = \frac{A_i}{\hat{g(Xi)}}(Y_i−\hat{μ}(1,X_i)) +\hat{μ}(1,X_i) − \hat{\psi}.\]</span></p>
+<pre class="r"><code>compute_eif_y1 &lt;- function(dd, ghat, muhat1, psi_hat) {
+  (dd$A / ghat) * (dd$Y - muhat1) + muhat1 - psi_hat
+}
+
+psi_plugin &lt;- function(muhat1) mean(muhat1)
+
+dd &lt;- simulate_data(n = 2000, seed = 1)
+
+nuis0 &lt;- fit_nuisance(dd, misspec_q = TRUE, misspec_g = FALSE)  # tweak scenarios
+psi_init &lt;- psi_plugin(nuis0$muhat1)
+
+phi_init &lt;- compute_eif_y1(dd, nuis0$ghat, nuis0$muhat1, psi_init)
+
+c(
+  psi0 = psi0,
+  psi_init = psi_init,
+  eif_mean_init = mean(phi_init),
+  eif_sd_init = sd(phi_init)
+)
+
+ggplot(data.frame(phi = phi_init), aes(x = phi)) +
+  geom_histogram(bins = 50) +
+  geom_vline(xintercept = mean(phi_init), linetype = &quot;dashed&quot;) +
+  labs(
+    title = &quot;Estimated EIF values (pre-targeting)&quot;,
+    subtitle = paste0(&quot;Empirical mean = &quot;, signif(mean(phi_init), 3)),
+    x = expression(hat(phi)), y = &quot;Count&quot;
+  )</code></pre>
+</div>
+<div id="targeting-step-tmle-for-psi-ey_1" class="section level3">
+<h3>7. Targeting step (TMLE) for <span class="math inline">\(\psi = E[Y_1]\)</span></h3>
+<div id="correct-clever-covariate" class="section level4">
+<h4>Correct clever covariate</h4>
+<p>For this target, <span class="math inline">\(H_\hat{g}(A,X)=A/\hat{g}(X)\)</span>
+.</p>
+<p>We fluctuate the initial <span class="math inline">\(\hat{μ}^{(0)}(1,X)\)</span> via a logistic regression on the full data:</p>
+<ul>
+<li>outcome: <span class="math inline">\(Y\)</span></li>
+<li>covariate: <span class="math inline">\(H\)</span></li>
+<li>offset: <span class="math inline">\(\text{logit}\big(\hat{μ}^{(0)}(1,X)\big)\)</span></li>
+<li>but only among <span class="math inline">\(A=1\)</span> for this parameter (standard approach)</li>
+</ul>
+<pre class="r"><code>logit &lt;- function(p) qlogis(p)
+
+tmle_update_y1 &lt;- function(dd, ghat, muhat1) {
+  # clever covariate for Y^1 uses only treated units
+  H &lt;- dd$A / ghat
+
+  # Fit fluctuation among A=1 only, with offset logit(muhat1)
+  d1 &lt;- dd %&gt;% filter(A == 1)
+
+  H1 &lt;- d1$A / ghat[d1$A == 1]  # equals 1/ghat among treated
+  off &lt;- logit(muhat1[d1$A == 1])
+
+  fit_eps &lt;- glm(d1$Y ~ -1 + H1 + offset(off), family = binomial())
+  eps_hat &lt;- coef(fit_eps)[[&quot;H1&quot;]]
+
+  # Updated mu*(1,x) for all x:
+  mu_star1 &lt;- invlogit(logit(muhat1) + eps_hat * (1 / ghat))  # since A=1 target ⇒ H=1/ghat
+  mu_star1 &lt;- pmin(pmax(mu_star1, 1e-6), 1 - 1e-6)
+
+  list(eps = eps_hat, mu_star1 = mu_star1, fit_eps = fit_eps)
+}
+
+upd &lt;- tmle_update_y1(dd, nuis0$ghat, nuis0$muhat1)
+psi_star &lt;- mean(upd$mu_star1)
+
+phi_star &lt;- compute_eif_y1(dd, nuis0$ghat, upd$mu_star1, psi_star)
+
+c(
+  psi0 = psi0,
+  psi_star = psi_star,
+  eif_mean_star = mean(phi_star),
+  eif_sd_star = sd(phi_star),
+  eps = upd$eps
+)
+
+df_plot &lt;- dplyr::bind_rows(
+  data.frame(phi = phi_init, stage = &quot;pre-targeting&quot;),
+  data.frame(phi = phi_star, stage = &quot;post-targeting&quot;)
+)
+
+ggplot(df_plot, aes(x = phi)) +
+  geom_histogram(bins = 50) +
+  facet_wrap(~stage, ncol = 1) +
+  geom_vline(data = df_plot %&gt;% group_by(stage) %&gt;% summarise(m = mean(phi)),
+             aes(xintercept = m), linetype = &quot;dashed&quot;) +
+  labs(
+    title = &quot;Estimated EIF values before vs after targeting&quot;,
+    x = expression(hat(phi)), y = &quot;Count&quot;
+  )</code></pre>
+</div>
+</div>
+<div id="wrong-clever-covariate-experiment" class="section level3">
+<h3>8. “Wrong clever covariate” experiment</h3>
+<p>The point: targeting is not “logistic regression magic”—it works because the update uses the right <span class="math inline">\(H\)</span>.</p>
+<pre class="r"><code>tmle_update_wrongH_y1 &lt;- function(dd, muhat1) {
+  # Wrong clever covariate: just A, ignoring 1/ghat weighting
+  d1 &lt;- dd %&gt;% filter(A == 1)
+  H_wrong &lt;- rep(1, nrow(d1))  # equivalently intercept-only fluctuation
+
+  off &lt;- logit(muhat1[d1$A == 1])
+
+  fit_eps &lt;- glm(d1$Y ~ -1 + H_wrong + offset(off), family = binomial())
+  eps_hat &lt;- coef(fit_eps)[[&quot;H_wrong&quot;]]
+
+  mu_star1 &lt;- invlogit(logit(muhat1) + eps_hat)  # wrong update
+  mu_star1 &lt;- pmin(pmax(mu_star1, 1e-6), 1 - 1e-6)
+
+  list(eps = eps_hat, mu_star1 = mu_star1, fit_eps = fit_eps)
+}
+
+upd_wrong &lt;- tmle_update_wrongH_y1(dd, nuis0$muhat1)
+psi_wrong &lt;- mean(upd_wrong$mu_star1)
+phi_wrong &lt;- compute_eif_y1(dd, nuis0$ghat, upd_wrong$mu_star1, psi_wrong)
+
+c(
+  eif_mean_init = mean(phi_init),
+  eif_mean_wrongH = mean(phi_wrong),
+  eif_mean_star = mean(phi_star),
+  psi_init = psi_init,
+  psi_wrong = psi_wrong,
+  psi_star = psi_star
+)</code></pre>
+<!-- TODO: Add 1–2 sentences interpreting this outcome. -->
+</div>
+<div id="when-things-go-wrong-bad-q-bad-g-andor-positivity-stress" class="section level3">
+<h3>9. When things go wrong: bad <span class="math inline">\(Q\)</span> + bad <span class="math inline">\(g\)</span> and/or positivity stress</h3>
+<p>We’ll run a grid of scenarios and show bias / EIF mean / instability.</p>
+<pre class="r"><code>run_one &lt;- function(n, misspec_q, misspec_g, positivity, seed = NULL) {
+  dd &lt;- simulate_data(n = n, positivity = positivity, seed = seed)
+  nuis &lt;- fit_nuisance(dd, misspec_q = misspec_q, misspec_g = misspec_g)
+  psi_init &lt;- psi_plugin(nuis$muhat1)
+  phi_init &lt;- compute_eif_y1(dd, nuis$ghat, nuis$muhat1, psi_init)
+
+  upd &lt;- try(tmle_update_y1(dd, nuis$ghat, nuis$muhat1), silent = TRUE)
+  if (inherits(upd, &quot;try-error&quot;)) {
+    psi_star &lt;- NA_real_
+    phi_star &lt;- rep(NA_real_, n)
+  } else {
+    psi_star &lt;- mean(upd$mu_star1)
+    phi_star &lt;- compute_eif_y1(dd, nuis$ghat, upd$mu_star1, psi_star)
+  }
+
+  tibble(
+    n = n,
+    misspec_q = misspec_q,
+    misspec_g = misspec_g,
+    positivity = positivity,
+    psi0 = psi0,
+    psi_init = psi_init,
+    bias_init = psi_init - psi0,
+    eif_mean_init = mean(phi_init),
+    psi_star = psi_star,
+    bias_star = psi_star - psi0,
+    eif_mean_star = mean(phi_star)
+  )
+}
+
+grid &lt;- expand.grid(
+  misspec_q = c(FALSE, TRUE),
+  misspec_g = c(FALSE, TRUE),
+  positivity = c(FALSE, TRUE),
+  stringsAsFactors = FALSE
+)
+
+res &lt;- dplyr::bind_rows(lapply(seq_len(nrow(grid)), function(i) {
+  run_one(n = 2000,
+          misspec_q = grid$misspec_q[i],
+          misspec_g = grid$misspec_g[i],
+          positivity = grid$positivity[i],
+          seed = 100 + i)
+}))
+
+res
+
+res2 &lt;- res %&gt;%
+  mutate(scenario = paste0(
+    &quot;Q&quot;, ifelse(misspec_q, &quot; bad&quot;, &quot; ok&quot;),
+    &quot;, g&quot;, ifelse(misspec_g, &quot; bad&quot;, &quot; ok&quot;),
+    ifelse(positivity, &quot;, positivity stress&quot;, &quot;&quot;)
+  ))
+
+ggplot(res2, aes(x = scenario, y = bias_star)) +
+  geom_point(size = 2) +
+  coord_flip() +
+  labs(
+    title = &quot;Bias after targeting across scenarios&quot;,
+    y = &quot;Bias (psi_star - psi0)&quot;, x = &quot;&quot;
+  )</code></pre>
+<!-- TODO: Add interpretation: - targeting fixes EIF mean but not necessarily bias if remainder dominates - positivity stress inflates variance / instability - both nuisances bad: no DR rescue; estimator can be far away -->
+</div>
+<div id="wrap-up-bridge-to-part-3" class="section level3">
+<h3>10. Wrap-up + bridge to Part 3</h3>
+<div id="what-we-saw" class="section level4">
+<h4>What we saw</h4>
+<ul>
+<li>Pre-targeting: <span class="math inline">\(P_n \phi_{\hat{P}^{(0)}}\)</span> can be far from 0.</li>
+<li>Targeting with the clever covariate drives the EIF equation toward 0.</li>
+<li>Using the wrong covariate fails to fix the right problem.</li>
+<li>When we are far from the truth (bad nuisances / positivity), the remainder can dominate.</li>
+</ul>
+</div>
+<div id="next-steps" class="section level4">
+<h4>Next steps</h4>
+<ul>
+<li>Derive the EIF more systematically (pathwise derivative / tangent space).</li>
+<li>Show ATE targeting with both arms.</li>
+<li>Discuss cross-fitting (why it helps when nuisance learners are too flexible).</li>
+</ul>
+</div>
+</div>
+<div id="a-couple-of-quick-notes-so-you-dont-get-tripped-up" class="section level3">
+<h3>A couple of quick notes (so you don’t get tripped up)</h3>
+<ul>
+<li>The targeting update I coded for <span class="math inline">\(\mathbb{E}[Y^1]\)</span> uses a treated-only fluctuation and then updates <span class="math inline">\(\mu(1,X)\)</span> for all <span class="math inline">\(X\)</span>. That’s the standard clean way to do this parameter.</li>
+<li>The “wrong clever covariate” demo is intentionally crude—its job is rhetorical: show that targeting is not just “refitting.”</li>
+<li>The remainder-dominates story is easiest to <em>see</em> under <strong>positivity stress</strong>. Even with decent learners, <span class="math inline">\(1/\hat g(X)\)</span> can blow up, the EIF variance goes huge, and finite-sample behavior gets ugly.</li>
+</ul>
+<p>If you tell me whether you want the main parameter in Post 2 to be <strong><span class="math inline">\(E(Y^1)\)</span></strong> or <strong>ATE</strong>, I can tailor the TMLE update section and EIF computations to match (and add the ATE targeting code cleanly).</p>
+</div>
