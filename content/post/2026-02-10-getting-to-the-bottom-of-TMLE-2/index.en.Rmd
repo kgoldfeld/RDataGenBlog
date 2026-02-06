@@ -1,0 +1,86 @@
+---
+title: 'Getting to the bottom of TMLE: clever covariates, targeting, and what can go wrong'
+author: R Build
+date: '2026-02-10'
+slug: []
+categories: []
+tags:
+  - R
+  - TMLE
+  - causal inference
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+### Quick reset: what Part 1 bought us
+
+Goal. Construct an estimator whose error admits an influence-function expansion
+
+$$\hat{\psi} − \psi_0 \approx (P_n−P_0)\phi_{P_0} + R_n,\ \ \ R_n = o_p(n^{−1/2}),$$
+even when the influence function depends on nuisance functions that must be estimated.
+
+<!-- TODO: Keep this section short (1 paragraph + the equation). -->
+
+### 1. A simplest causal target: $\psi = E[Y_1]$
+
+#### Identification (one paragraph, minimal)
+<!-- TODO: One line about consistency + exchangeability + positivity, and psi = E[mu0(1,X)] with mu0(1,x)=E[Y|A=1,X=x]. -->
+
+#### The EIF (state it, then verify the key property)
+
+For $O = (X,A,Y)$ with $A \in \{0,1\}$, define
+
+* $g_0(x) = Pr(A = 1 \mid X = x)$
+* $\mu_0(1,x) = E( Y \mid A=1, X=x)$
+* $\psi_0 = E[μ_(1,X)]$
+
+A standard efficient influence function for $\psi_0$ is 
+$$\phi_\psi(O) = \frac{A}{g_0(X)}\{Y−μ_0(1,X)\} + μ_0(1,X) − \psi_0.$$
+The clever covariate is the weight
+$$H(X,A) = \frac{A}{g_0(X)}.$$
+<!-- TODO: In text, explain that the clever covariate is chosen so the residual term has conditional mean zero. -->
+<!-- # Quick symbolic/empirical check of the key property: -->
+<!-- # E[ A/g0(X) * (Y - mu0(1,X)) | X ] = 0 when mu0 and g0 are correct. -->
+<!-- # -->
+<!-- # We'll verify numerically later under a known DGP. -->
+
+### 2. ATE version (optional but likely what you want)
+
+If $\psi_0=E[Y_1−Y_0]$, one EIF is
+
+$$ϕ_ψ(O)=(Ag0(X)−1−A1−g0(X)){Y−μ0(A,X)}+μ0(1,X)−μ0(0,X)−ψ0.$$
+Clever covariate:
+
+$$H(A,X)=Ag0(X)−1−A1−g0(X).$$
+
+<!-- TODO: Decide if you keep ATE here, or move it to after simulations. -->
+
+### 3. Minimal TMLE, explained through the EIF equation
+
+#### The one-dimensional fluctuation
+
+For binary $Y$, a common TMLE fluctuation updates an initial outcome regression $\hat{μ}^{(0)}(A,X)$ via
+
+$$logit μ^(ϵ)(A,X)=logit μ^(0)(A,X)+ϵ Hg^(A,X),$$ 
+
+where $H_\hat{g}$ is the clever covariate built using $\hat{g}(X)$
+
+$\hat{epsilon}$ is chosen so the empirical score equation holds:
+
+$$P_n\big[H_\hat{g}(A,X)\{Y−\hat{μ}^\hat{ϵ}(A,X)\}\big]=0,$$
+which is the key piece that makes $P_n \phi_\hat{P}$ “behave.”
+
+<!-- TODO: Write 1 paragraph that makes this feel like "solve the EIF equation" rather than "run logistic regression." -->
+
+### 4. Simulation engine
+#### Data-generating process
+
+We’ll simulate $X$, treatment $A$, and binary outcome $Y$ $g_0, μ_0$. We’ll use this to show:
+
+* Pre-targeting $P_n \phi_{\hat{P}^{(0)}} \not = 0$
+* Post-targeting $P_n \phi_\hat{P} \approx 0$
+* Wrong clever covariate fails to fix it
+* Bad $Q$ + bad $g$/positivity $\Rightarrow$ remainder dominates
