@@ -140,42 +140,47 @@ $$
 +
 o_p(1).
 $$
-The appearance of the $\sqrt{n}$ scaling is not accidental — it reflects a universal feature of averaging noisy data. Each observation carries some randomness, and when we average $n$ independent observations, the noise partly cancels out. The variability of the average shrinks as the sample grows, but it shrinks at a very specific rate: the standard deviation decreases proportionally to $1/\sqrt{n}$. Multiplying the estimation error by $\sqrt{n}$ therefore puts it on a scale where the random fluctuations remain visible rather than collapsing toward zero. This is why $\sqrt{n}(\hat{\theta} - \theta_0)$ often settles into a stable, typically Gaussian or normal, distribution in large samples, and why the $\sqrt{n}$ rate appears so consistently across statistical theory.
+The appearance of the $\sqrt{n}$ scaling reflects a universal feature of averaging noisy data. Each observation carries some randomness, and when we average $n$ independent observations, the noise partly cancels out. The variability of the average shrinks as the sample grows, with the standard deviation decreasing at a rate proportional to $1/\sqrt{n}$. Multiplying the estimation error by $\sqrt{n}$ puts it on a scale where the random fluctuations remain visible rather than collapsing toward zero. This is why $\sqrt{n}(\hat{\theta} - \theta_0)$ often settles into a stable, typically Gaussian or normal, distribution in large samples.
 
 Because the influence function has mean zero, the central limit theorem implies that the right-hand side converges in distribution to a normal random variable. This is what ultimately allows us to characterize the sampling variability of the estimator. TMLE is designed so that its estimation error admits exactly this kind of $\sqrt{n}$-scaled linear expansion, even when parts of the model are estimated using flexible machine learning.
 
 ### Orthogonality under estimation of the influence function
 
-The mean-zero property of the influence function ensures that the leading term
+Up to this point, we've assumed that $\phi_{P_0}$ is known, which is never going to be the case. In most problems of interest, particularly causal inference, the influence function depends on additional *unknown* components of the data-generating process, such as conditional outcome models or treatment assignment mechanisms. These are often called *nuisance functions*: they are not themselves the primary target of inference but they are required in order to construct the influence function. In practice, they need to be estimated from the data, often using flexible statistical or machine learning methods.
+
+Once nuisance functions are estimated, we replace the true influence function with an estimated one. The leading term then becomes $(P_n - P_0)\phi_{\hat P}$ and can be expanded as
 $$
-(P_n−P_0)\phi_{P_0}
-=
-\frac{1}{n} \sum_{i=1}^n \phi_{P_0}(Z_i)
-$$
-fluctuates randomly around zero rather than drifting systematically. In other words, the influence function describes sampling variability, not bias. Without this centering condition, the first-order term would contain a persistent deterministic component, and the expansion would fail to characterize uncertainty correctly.
-
-However, this discussion implicitly assumes that $\phi_{P_0}$ is known. In most problems of interest, particularly causal inference, the influence function depends on additional *unknown* components of the data-generating process, such as conditional outcome models or treatment assignment mechanisms. These are often referred to as *nuisance functions* because they are not themselves the primary target of inference but are required to construct the influence function. These quantities must be estimated from the data, often using flexible statistical or machine learning methods.
-
-If the influence function depends on unknown nuisance functions, we must replace the true influence function with an estimated one. This introduces an additional source of error. If this nuisance estimation error enters the leading linear term of the expansion, it can be amplified by the $\sqrt{n}$ scaling and distort the asymptotic behavior of the estimator. In particular, bias introduced by nuisance estimation may not vanish even in large samples.
-
-#### What goes wrong without orthogonality
-To see this more concretely, note that in practice we replace the true influence function $\phi_{P_0}$ with an estimated version $\phi_{\hat P}$. The leading term of the expansion then becomes
-\[
 (P_n - P_0)\phi_{\hat P}
 =
 (P_n - P_0)\phi_{P_0}
 +
 (P_n - P_0)(\phi_{\hat P} - \phi_{P_0}).
-\]
-The second term reflects nuisance estimation error. Because $(P_n - P_0)$ fluctuates at order $1/\sqrt{n}$, this term can dominate the asymptotic behavior unless $\phi_{\hat P}$ is constructed to be orthogonal to nuisance directions. Orthogonality ensures that this term is absorbed into the remainder and asymptotically negligible.
-
-Mathematically, this protection often appears as a *conditional* mean-zero property such as
 $$
-E_{P_0}[\phi_{P_0}(Z \mid X)] = 0.
-$$
-This condition implies that the influence function is deliberately constructed to be insensitive to errors that arise from estimating functions of the covariates $X$. Since nuisance components like outcome regressions and propensity scores depend on $X$, small errors in estimating these quantities tend to vary across values of $X$. The conditional mean-zero property ensures that when these errors interact with the influence function, their contributions cancel out when averaged across the sample. In effect, nuisance estimation errors add noise but do not systematically push the estimator away from the truth.
+The first term is what we described above, and has order $n^{-1/2}$. The second term in the expansion reflects error from estimating the nuisance functions. If nuisance errors enter the expansion at first order, they contaminate the leading behavior of the estimator. In particular, even small misspecifications in the nuisance models may introduce bias that does not disappear in large samples.
 
-This orthogonality is a key mechanism behind the robustness of TMLE. It allows flexible, slower-converging nuisance estimators to be used without contaminating the primary asymptotic behavior of the target parameter. More on how that influence function is constructed will hopefully follow in the next post that looks more closely at TMLE.
+To understand what “first order” and “second order” mean here, it helps to think in terms of convergence rates.
+
+The empirical fluctuation term (with the unobserved true influence function) satisfies
+$$
+(P_n - P_0)\phi_{P_0} = O_p(n^{-1/2}),
+$$
+which determines the usual $n^{−1/2}$ convergence and asymptotic normality of the estimator.
+
+Now suppose the nuisance estimators converge at rate $r_n$, meaning
+$$
+\Vert \phi_{\hat{P}} - \phi_{P_0}\Vert = O_p(r_n).
+$$
+Then the additional term behaves roughly like
+$$ 
+\big(P_n−P_0\big)\big(\phi_{\hat{P}} − \phi_{P_0}\big) = O_p\big(n^{−1/2}r_n\big).
+$$
+If the influence function is not constructed to neutralize nuisance error, this term can be of the same order as the leading term. In that case, estimation error in the nuisance models directly affects the behavior of the estimator.
+
+Orthogonality prevents this from happening. When the influence function is constructed to be orthogonal to nuisance perturbations, the first-order effect of nuisance error disappears. This really means that the estimator has zero slope with respect to small perturbations in the nuisance functions: tiny changes in those auxiliary models do not immediately move the target parameter. Under orthogonality, the nuisance contribution is of order $n^{−1/2} r_n^2$. If $r_n$ converges faster than $n^{−1/4}$, then  $n^{−1/2} r_n^2$ is smaller than $n^{−1/2}$ and does not affect the limiting distribution.
+
+Importantly, “shrinking fast enough” does not mean the nuisance models must be perfectly specified or highly accurate in finite samples. It only requires that their estimation error decreases with sample size at a modest rate. Orthogonality relaxes the burden on nuisance estimation: instead of requiring parametric $n^{−1/2}$ accuracy, it typically suffices that nuisance estimators converge at rate faster than $n^{−1/4}$. This is a much weaker requirement and allows the use of flexible machine learning methods.
+
+This orthogonality allows flexible, slower-converging nuisance estimators to be used without contaminating the primary asymptotic behavior of the target parameter. More on how that influence function is constructed will hopefully follow in the next post that looks more closely at TMLE.
 
 ### Next steps
 
