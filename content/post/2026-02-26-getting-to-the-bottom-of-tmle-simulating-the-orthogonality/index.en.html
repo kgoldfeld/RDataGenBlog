@@ -1,0 +1,293 @@
+---
+title: 'Getting to the bottom of TMLE: the vanishing nuisance interaction'
+author: R Build
+date: '2026-02-26'
+slug: []
+categories: []
+tags:
+  - R
+  - TMLE
+type: ''
+subtitle: ''
+image: ''
+draft: TRUE
+---
+
+
+
+<p>In the <a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">previous post</a>, I argued that understanding TMLE starts with understanding how estimation error behaves. In the spirit of working through the conceptual issues underlying TMLE, I am adding what is really more of an addendum to that first post, as I developed a simulation that demonstrates one of the key orthogonal properties that makes TMLE work.</p>
+<!--more-->
+<div id="a-key-theoretical-underpinning-a-quick-recap" class="section level3">
+<h3>A key theoretical underpinning — a quick recap</h3>
+<p>In these analyses, we care about some target parameter <span class="math inline">\(T(P_0)\)</span>, but in practice can observe data drawn from that distribution and can compute <span class="math inline">\(T(P_n)\)</span>. The quantity that really matters is the difference
+<span class="math display">\[
+T\big(P_n\big) − T\big(P_0\big),
+\]</span>
+because that difference determines bias, variance, and uncertainty. Using the influence function, this error can be approximated as
+<span class="math display">\[
+T\big(P_n\big) − T\big(P_0\big) \approx \big(P_n − P_0\big) \phi_{P_0}.
+\]</span>
+This is powerful because the right-hand side has well-understood statistical behavior. Unfortunately, we never observe the true influence function <span class="math inline">\(\phi_{P_0}\)</span>. In causal problems, the influence function depends on nuisance components, outcome regressions and treatment mechanisms that must be estimated from data. So in practice, we replace the true influence function with an estimated <span class="math inline">\(\phi_{\hat{P}}\)</span>, and the key quantity becomes
+<span class="math display">\[
+\big(P_n−P_0\big) \phi_{\hat{P}}.
+\]</span>
+This can be decomposed as
+<span class="math display">\[
+\big(P_n−P_0\big) \phi_{\hat{P}} = \big(P_n − P_0\big)  \phi_{P_0} + \big( P_n − P_0 \big) \big( \phi_{\hat{P}} − \phi_{P_0} \big)
+\]</span>
+The first term is the “good” stochastic fluctuation we understand, but the second term is the dangerous one. It captures how errors in the nuisance models might leak into the leading behavior of the estimator. If this term does not vanish, then flexible nuisance estimation could distort the target parameter itself. However, when the influence function is constructed properly (and I think this is a key theoretical foundation behind TMLE), this leakage term shrinks toward zero as the sample size grows:
+<span class="math display">\[
+\big( P_n − P_0 \big) \big( \phi_{\hat{P}} − \phi_{P_0} \big) \rightarrow 0
+\]</span>
+I really wanted to see if we can observe that, at east in an artificial setting of simulated data. In particular, I wanted to see if this nuisance-driven term actually disappears as the sample size increases, even when the nuisance models are misspecified.</p>
+</div>
+<div id="a-concrete-example-the-ate-influence-function" class="section level3">
+<h3>A concrete example: the ATE influence function</h3>
+<p>To make this discussion less abstract, we need a concrete influence function. Suppose our target parameter is the average treatment effect (ATE):
+<span class="math display">\[\psi_0 = E_{P_0}\big[ Y_1 − Y_0 \big].\]</span>
+Under the usual identification conditions (consistency, exchangeability, and positivity), this can be written as a functional of the observed data distribution.</p>
+<p>The efficient influence function for the ATE is:
+<span class="math display">\[\phi_{P_0} \big( Z \big ) = \big (Q_1 (X) − Q_0(X) − \psi_0 \big) + \frac{A}{g(X)} \big( Y − Q_1(X)\big) − \frac{1−A}{1−g(X)} \big( Y − Q_0(X) \big),\]</span>
+where the nuisance functions for the outcome (<span class="math inline">\(Q\)</span>) and propensity score (<span class="math inline">\(g\)</span>), respectively, are
+<span class="math display">\[
+Q_a(X)=E[Y∣A=a,X], \ \ \ \ \ \ g(X)=P(A=1∣X).
+\]</span>
+I won’t go into the derivation of this influence function here (and maybe not anywhere, since there are many other sources far more qualified than me) but the structure is important. The nuisance functions appear in two distinct roles: directly through the plug-in term
+<span class="math inline">\(Q_1(X)−Q_0(X)\)</span>, and indirectly through residual-based corrections such as <span class="math inline">\(Y−Q_a(X)\)</span>, with the propensity score entering through weights. This layered form means that errors in the nuisance models do not affect the influence function in a single direction, but instead enter through both plug-in and correction terms.</p>
+<p>If we knew the true outcome model <span class="math inline">\(Q_a(X)\)</span> and the true treatment mechanism <span class="math inline">\(g(X)\)</span>, we would know the true influence function <span class="math inline">\(\phi_{P_0}\)</span>. But in practice, we must estimate them, producing an estimated influence function <span class="math inline">\(\phi_{\hat{P}}\)</span>. So for the ATE, the “dangerous term” <span class="math inline">\((P_n−P_0)(\phi_{\hat{P}} − \phi_{P_0})\)</span> is driven entirely by how errors in estimating
+<span class="math inline">\(Q\)</span> and <span class="math inline">\(g\)</span> propagate through this expression.</p>
+<p>In other words, misspecifying either the outcome model or the treatment model changes the influence function itself. If orthogonality were not present, these changes could enter the leading behavior of the estimator. Theory suggests that, for this influence function, their impact should diminish with increasing sample size.</p>
+<p>Even when <span class="math inline">\(Q\)</span> and <span class="math inline">\(g\)</span> are estimated imperfectly, the interaction <span class="math inline">\((P_n−P_0)(\phi_{\hat{P}} − \phi_{P_0})\)</span> should shrink toward zero. The simulation below is built around this specific influence function. We will deliberately estimate <span class="math inline">\(Q\)</span> and <span class="math inline">\(g\)</span> correctly or incorrectly, construct an estimated EIF, and observe whether this nuisance-driven term vanishes as the sample size grows.</p>
+</div>
+<div id="a-note-on-cross-fitting" class="section level3">
+<h3>A note on cross-fitting</h3>
+<p>Before getting to the simulation, I want to point out why I use cross-fitting to estimate the nuisance parameters. While not strictly required for TMLE, it is generally good practice, especially when using flexible models. The quantity we want to examine, <span class="math inline">\((P_n−P_0)(\phi_{\hat{P}} − \phi_{P_0})\)</span>, captures how nuisance estimation error interacts with sampling variability.</p>
+<p>Without cross-fitting, both the empirical fluctuation <span class="math inline">\((P_n − P_0)\)</span> and the nuisance-driven error <span class="math inline">\(\phi_{\hat{P}} − \phi_{P_0}\)</span> are functions of the same data and therefore share the same randomness. Cross-fitting separates these sources of variation, reducing the feedback between nuisance estimation and empirical fluctuation, and allowing their interaction to better reflect the theoretical quantity of interest.</p>
+</div>
+<div id="simulating-the-vanishing-term" class="section level3">
+<h3>Simulating the vanishing term</h3>
+<p>Before we get to the key functions, we need to load the two libraries:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)</code></pre>
+<div id="data-generating-process" class="section level4">
+<h4>Data-generating process</h4>
+<p>First, we define a simple data-generating process. This creates covariates (<span class="math inline">\(X_1\)</span> and <span class="math inline">\(X_2\)</span>), treatment assignment (<span class="math inline">\(A\)</span>) driven by those covariates, and an outcome <span class="math inline">\(Y\)</span> that depends on treatment, covariates, and their interaction. The parameter <span class="math inline">\(\tau\)</span> determines the true treatment effect.</p>
+<pre class="r"><code>gen_dgp &lt;- function(n) {
+  
+  def &lt;- 
+    defData(varname = &quot;x1&quot;, formula = .5, dist = &quot;binary&quot;) |&gt;
+    defData(varname = &quot;x2&quot;, formula = 0, variance = 1) |&gt;
+    defData(
+      varname = &quot;a&quot;, 
+      formula = &quot;-0.2 + 0.8 * x1 + 0.6 * x2&quot;, 
+      dist = &quot;binary&quot;, 
+      link = &quot;logit&quot;
+    ) |&gt;
+    defData(
+      varname = &quot;y&quot;, 
+      formula = &quot;..tau * a + 1.0 * x1 + 1.0 * x2 + 1.5 * x1 * x2&quot;,
+      variance = 1,
+      dist = &quot;normal&quot;
+    )
+  
+  genData(n, def)[]
+  
+}</code></pre>
+</div>
+<div id="fitting-nuisance-models" class="section level4">
+<h4>Fitting nuisance models</h4>
+<p>Next, we create a helper function that fits the nuisance models — the outcome regression <span class="math inline">\(Q\)</span> and the propensity score <span class="math inline">\(g\)</span>.</p>
+<p>Depending on the scenario, these models are either correctly specified or deliberately misspecified. This allows us to examine whether the vanishing term behaves differently when nuisance models are wrong.</p>
+<pre class="r"><code>fit_nuisance &lt;- function(dt, scenario) {
+  
+  # Outcome regression Q(a,x)
+  
+  if (scenario %in% c(&quot;both_correct&quot;, &quot;g_wrong&quot;)) {
+    Q_fit &lt;- lm(y ~ a + x1 + x2 + x1:x2, data = dt)  # correct
+  } else {
+    Q_fit &lt;- lm(y ~ a + x1, data = dt)               # wrong on purpose
+  }
+  
+  # Propensity model g(x)
+  
+  if (scenario %in% c(&quot;both_correct&quot;, &quot;Q_wrong&quot;)) {
+    g_fit &lt;- glm(a ~ x1 + x2, data = dt, family = binomial())  # correct
+  } else {
+    g_fit &lt;- glm(a ~ x1, data = dt, family = binomial())       # wrong on purpose
+  }
+  
+  list(Q_fit = Q_fit, g_fit = g_fit)
+}</code></pre>
+</div>
+<div id="predictions-and-true-nuisance-functions" class="section level4">
+<h4>Predictions and true nuisance functions</h4>
+<p>These functions generate predicted values from the fitted nuisance models, as well as the true outcome regression and propensity score implied by the data-generating process.</p>
+<p>The predicted versions reflect estimation error; the true versions give us the benchmark influence function we would have if the nuisances were known.</p>
+<pre class="r"><code>predict_Q &lt;- function(Q_fit, dt, a_val) {
+  nd &lt;- copy(dt)
+  nd[, a := a_val]
+  as.numeric(predict(Q_fit, newdata = nd))
+}
+
+predict_g &lt;- function(g_fit, dt) {
+  p &lt;- as.numeric(predict(g_fit, newdata = dt, type = &quot;response&quot;))
+  pmin(pmax(p, 0.01), 0.99)  # simple stabilization
+}
+
+Q_true &lt;- function(dt, a_val, tau) {
+  tau * a_val + 1.0 * dt$x1 + 1.0 * dt$x2 + 1.5 * dt$x1 * dt$x2
+}
+
+g_true &lt;- function(dt) {
+  plogis(-0.2 + 0.8 * dt$x1 + 0.6 * dt$x2)
+}</code></pre>
+</div>
+<div id="constructing-the-influence-function" class="section level4">
+<h4>Constructing the influence function</h4>
+<p>Using the EIF expression for the ATE defined above, we can construct two versions:</p>
+<ul>
+<li>an estimated influence function based on fitted nuisance models</li>
+<li>the true influence function based on the known data-generating process</li>
+</ul>
+<p>One small technical detail arises here. The EIF includes the target parameter <span class="math inline">\(\psi_0\)</span>, and by definition it is centered — its mean should be zero under the relevant distribution. When we construct an estimated EIF, we therefore need to plug in a compatible estimate <span class="math inline">\(\hat{\psi}\)</span>.</p>
+<p>In this simulation, <span class="math inline">\(\hat{\psi}\)</span> is not the object of interest. Instead, it serves only to center the estimated influence function so that it behaves like a true influence function. To do this, we compute a fold-specific <span class="math inline">\(\hat{\psi}\)</span> using the same fitted nuisance models that are used to build the estimated EIF.</p>
+<p>In principle, we could center the EIF using a simple plug-in estimate such as the average of
+<span class="math inline">\(Q_1(X)−Q_0(X)\)</span>. Instead, we use an adjusted version that also includes a residual-based correction involving <span class="math inline">\(\hat{Q}\)</span> and <span class="math inline">\(\hat{g}\)</span>. This choice ensures that the estimated EIF has approximately mean zero in the evaluation fold, making it behave more like the true influence function constructed from the same nuisance fits.</p>
+<p>This allows us to compare the estimated influence function based on <span class="math inline">\(\hat{Q}\)</span> and <span class="math inline">\(\hat{g}\)</span>, and the true influence function based on the known data-generating process, and ultimately evaluate how nuisance estimation error propagates through the EIF.</p>
+<pre class="r"><code>psi_hat_from_fits &lt;- function(dt, Q_fit, g_fit) {
+  Q1 &lt;- predict_Q(Q_fit, dt, 1)
+  Q0 &lt;- predict_Q(Q_fit, dt, 0)
+  g  &lt;- predict_g(g_fit, dt)
+  A &lt;- dt$a; Y &lt;- dt$y
+  mean((Q1 - Q0) + A/g * (Y - Q1) - (1 - A)/(1 - g) * (Y - Q0))
+}
+
+phi_ate &lt;- function(dt, Q1, Q0, g, psi) {
+  A &lt;- dt$a
+  Y &lt;- dt$y
+  (Q1 - Q0 - psi) + A/g * (Y - Q1) - (1 - A)/(1 - g) * (Y - Q0)
+}
+
+# Build phi_hat using your fitted nuisances (AIPW-style)
+
+phi_hat_from_fits &lt;- function(dt, Q_fit, g_fit, psi_hat) {
+  Q1 &lt;- predict_Q(Q_fit, dt, 1)
+  Q0 &lt;- predict_Q(Q_fit, dt, 0)
+  g  &lt;- predict_g(g_fit, dt)
+  phi_ate(dt, Q1, Q0, g, psi_hat)
+}
+
+# Build phi0 from true nuisances
+
+phi0_true &lt;- function(dt, tau) {
+  Q1 &lt;- Q_true(dt, 1, tau)
+  Q0 &lt;- Q_true(dt, 0, tau)
+  g  &lt;- g_true(dt)
+  psi0 &lt;- tau
+  phi_ate(dt, Q1, Q0, g, psi0)
+}</code></pre>
+</div>
+<div id="estimating-the-vanishing-term" class="section level4">
+<h4>Estimating the vanishing term</h4>
+<p>This function performs the core task of the simulation. For a given data set:</p>
+<ul>
+<li>we split the data into two folds</li>
+<li>fit nuisance models on each fold</li>
+<li>compute a cross-fitted EIF</li>
+</ul>
+<p>We then compare the estimated EIF with the true EIF both in the sample and in an independent population draw (which is fixed across iterations). This allows us to approximate the nuisance-driven interaction term whose behavior we want to study.</p>
+<pre class="r"><code>est_2T &lt;- function(scenario, dd, tau, dd_pop) {
+  
+  n &lt;- nrow(dd)
+  idx &lt;- sample.int(n)
+  I1 &lt;- idx[1:floor(n/2)]
+  I2 &lt;- idx[(floor(n/2)+1):n]
+  
+  # fit nuisances on each training fold
+  
+  fits1 &lt;- fit_nuisance(dd[I1], scenario)  # trained on fold 1
+  fits2 &lt;- fit_nuisance(dd[I2], scenario)  # trained on fold 2
+  
+  # cross-fitted psi_hat (evaluate each model on opposite fold, then average)
+  
+  psi1 &lt;- psi_hat_from_fits(dd[I2], fits1$Q_fit, fits1$g_fit)  # train 1, eval 2
+  psi2 &lt;- psi_hat_from_fits(dd[I1], fits2$Q_fit, fits2$g_fit)  # train 2, eval 1
+  psi_hat_cf &lt;- 0.5 * (psi1 + psi2)
+  
+  # cross-fitted phi_hat on dd:
+  # - for obs in fold 2, use fits1 (trained on fold 1)
+  # - for obs in fold 1, use fits2 (trained on fold 2)
+  
+  phi_hat_dd &lt;- numeric(n)
+  phi_hat_dd[I2] &lt;- phi_hat_from_fits(dd[I2], fits1$Q_fit, fits1$g_fit, psi_hat_cf)
+  phi_hat_dd[I1] &lt;- phi_hat_from_fits(dd[I1], fits2$Q_fit, fits2$g_fit, psi_hat_cf)
+  
+  dphi_dd &lt;- phi_hat_dd - phi0_true(dd, tau)
+  
+  # approximate P0 expectation:
+  # evaluate delta-phi under each fold-specific nuisance fit on independent pop,
+  # then average them (since cross-fitting produces two fitted nuisance models)
+  
+  dphi_pop_1 &lt;- 
+    phi_hat_from_fits(
+      pop_dd, fits1$Q_fit, fits1$g_fit, psi_hat_cf) - phi0_true(pop_dd, tau
+    )
+  
+  dphi_pop_2 &lt;- 
+    phi_hat_from_fits(
+      pop_dd, fits2$Q_fit, fits2$g_fit, psi_hat_cf) - phi0_true(pop_dd, tau
+    )
+  
+  dphi_pop &lt;- 0.5 * (dphi_pop_1 + dphi_pop_2)
+  
+  T2 &lt;- mean(dphi_dd) - mean(dphi_pop)
+  
+  data.table(scenario, n, T2)[]
+}</code></pre>
+</div>
+<div id="running-the-simulation" class="section level4">
+<h4>Running the simulation</h4>
+<p>Finally, we repeatedly generate data and apply the procedure across sample sizes and nuisance model scenarios to see whether this interaction term shrinks toward zero.</p>
+<pre class="r"><code>run_sim &lt;- function(n, tau, dd_pop, scenarios) {
+  
+  dd &lt;- gen_dgp(n)
+  rbindlist(lapply(
+      scenarios, 
+      function(s) est_2T(s, dd, tau, dd_pop)
+    )
+  )
+}
+
+set.seed(1)
+
+tau &lt;- 5
+pop_dd &lt;- gen_dgp(5e5)
+
+n = rep(c(100, 250, 750, 1000), each = 500)
+scenarios = c(&quot;both_correct&quot;, &quot;Q_wrong&quot;)
+
+res &lt;- rbindlist(
+  lapply(n, function(x) run_sim(x, tau, dd_pop, scenarios))
+)</code></pre>
+</div>
+</div>
+<div id="results" class="section level3">
+<h3>Results</h3>
+<p>Each point in the figure represents one estimate of the interaction term <span class="math inline">\((P_n−P_0)(\phi_{\hat{P}} − \phi_{P_0})\)</span> from a single simulated data set, across sample sizes and nuisance model scenarios.</p>
+<p>When both nuisance models are correctly specified, the estimates are tightly centered around zero even at smaller sample sizes. At <span class="math inline">\(n = 100\)</span>, there is noticeable variability, but this rapidly diminishes as the sample size increases. By <span class="math inline">\(n=750\)</span> and <span class="math inline">\(n=1000\)</span>, the estimates are highly concentrated near zero, consistent with the expectation that this term should vanish.</p>
+<p>More interesting is the case where the outcome model is misspecified. Here, variability remains substantially larger across all sample sizes — reflecting the fact that nuisance estimation error is present and does not disappear simply because the sample grows. However, the estimates remain centered around zero and the spread clearly decreases with increasing <span class="math inline">\(n\)</span>.</p>
+<p>Even when nuisance models are imperfect, their contribution does not enter at first order. Instead, the interaction term shrinks with sample size, behaving like a second-order quantity. In other words, misspecification increases noise, but does not induce systematic drift.</p>
+<p><img src="code_and_output/ortho.png" /></p>
+<p>For example, when both models are correct, the standard deviation drops from 0.28 at <span class="math inline">\(n=100\)</span> to 0.006 at <span class="math inline">\(n=2000\)</span>. When the outcome model is misspecified, variability is much higher initially (1.34 at <span class="math inline">\(n=100\)</span>), but still shrinks markedly with increasing <span class="math inline">\(n\)</span>, falling to 0.12 by <span class="math inline">\(n=2000\)</span>.</p>
+<p>Across all settings, the averages remain close to zero, reinforcing that nuisance error affects variability rather than introducing systematic drift in this interaction term.</p>
+</div>
+<div id="next-steps" class="section level3">
+<h3>Next steps</h3>
+<p>In the next post, I will finally look more squarely at TMLE, working through the algorithm and trying to understand the motivations for each of the components.</p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Van der Laan, Mark J., and Sherri Rose. Targeted learning: causal inference for observational and experimental data. Vol. 4. New York: Springer, 2011.</p>
+</font></small>
+</p>
+</div>
