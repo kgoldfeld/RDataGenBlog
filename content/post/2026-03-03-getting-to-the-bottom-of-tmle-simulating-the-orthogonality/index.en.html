@@ -1,7 +1,7 @@
 ---
-title: 'Getting to the bottom of TMLE: the vanishing nuisance interaction'
+title: 'Getting to the bottom of TMLE: the (almost) vanishing nuisance interaction'
 author: R Build
-date: '2026-03-03'
+date: '2026-03-02'
 slug: []
 categories: []
 tags:
@@ -10,12 +10,12 @@ tags:
 type: ''
 subtitle: ''
 image: ''
-draft: TRUE
 ---
 
 
 
-<p>In the <a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">previous post</a>, I argued that understanding TMLE starts with understanding how estimation error behaves. In the spirit of working through the conceptual issues underlying TMLE, I am adding what is really more of an addendum to that first post, as I developed a simulation that demonstrates one of the key orthogonal properties that makes TMLE work.</p>
+<p>In the <a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">previous post</a>, I argued that understanding TMLE starts with understanding how estimation error behaves. In particular, we saw that influence functions allow us to separate sampling variability from nuisance estimation error.</p>
+<p>But something subtle happens when nuisance models are estimated rather than known. The interaction term that captures their effect on the target parameter appears to shrink as the sample size grows, sometimes quite a bit. In this post, I explore that behavior through simulation. We’ll see that the nuisance interaction does shrink (though perhaps not fast enough to ignore).</p>
 <!--more-->
 <div id="a-key-theoretical-underpinning-a-quick-recap" class="section level3">
 <h3>A key theoretical underpinning — a quick recap</h3>
@@ -35,7 +35,7 @@ This can be decomposed as
 <span class="math display">\[
 \big(P_n−P_0\big) \phi_{\hat{P}} = \big(P_n − P_0\big)  \phi_{P_0} + \big( P_n − P_0 \big) \big( \phi_{\hat{P}} − \phi_{P_0} \big)
 \]</span>
-The first term is the “good” stochastic fluctuation we understand, but the second term is the dangerous one. It captures how errors in the nuisance models might leak into the leading behavior of the estimator. If this term does not vanish, then flexible nuisance estimation could distort the target parameter itself. However, when the influence function is constructed properly (and I think this is a key theoretical foundation behind TMLE), this leakage term shrinks toward zero as the sample size grows:
+The first term is the “good” stochastic fluctuation we understand, but the second term is the dangerous one. It captures how errors in the nuisance models might leak into the leading behavior of the estimator. This interaction term is the pathway through which nuisance estimation error can influence the estimator. Nuisance errors do not affect the estimator directly, but only through their interaction with sampling variability captured by <span class="math inline">\(P_n−P_0\)</span>. If this term does not vanish, then flexible nuisance estimation could distort the target parameter itself. However, when the influence function is constructed properly (and I think this is a key theoretical foundation behind TMLE), this leakage term shrinks toward zero as the sample size grows:
 <span class="math display">\[
 \big( P_n − P_0 \big) \big( \phi_{\hat{P}} − \phi_{P_0} \big) \rightarrow 0
 \]</span>
@@ -187,8 +187,8 @@ phi0_true &lt;- function(dt, tau) {
   phi_ate(dt, Q1, Q0, g, psi0)
 }</code></pre>
 </div>
-<div id="estimating-the-vanishing-term" class="section level4">
-<h4>Estimating the vanishing term</h4>
+<div id="estimating-the-term-we-hope-will-vanish" class="section level4">
+<h4>Estimating the term we hope will vanish</h4>
 <p>This function performs the core task of the simulation. For a given data set:</p>
 <ul>
 <li>we split the data into two folds</li>
@@ -276,14 +276,15 @@ res &lt;- rbindlist(
 <p>Each point in the figure represents one estimate of the interaction term <span class="math inline">\((P_n−P_0)(\phi_{\hat{P}} − \phi_{P_0})\)</span> from a single simulated data set, across sample sizes and nuisance model scenarios.</p>
 <p>When both nuisance models are correctly specified, the estimates are tightly centered around zero even at smaller sample sizes. At <span class="math inline">\(n = 100\)</span>, there is noticeable variability, but this rapidly diminishes as the sample size increases. By <span class="math inline">\(n=750\)</span> and <span class="math inline">\(n=1000\)</span>, the estimates are highly concentrated near zero, consistent with the expectation that this term should vanish.</p>
 <p>More interesting is the case where the outcome model is misspecified. Here, variability remains substantially larger across all sample sizes — reflecting the fact that nuisance estimation error is present and does not disappear simply because the sample grows. However, the estimates remain centered around zero and the spread clearly decreases with increasing <span class="math inline">\(n\)</span>.</p>
-<p>Even when nuisance models are imperfect, their contribution does not enter at first order. Instead, the interaction term shrinks with sample size, behaving like a second-order quantity. In other words, misspecification increases noise, but does not induce systematic drift.</p>
 <p><img src="code_and_output/ortho.png" /></p>
 <p>For example, when both models are correct, the standard deviation drops from 0.28 at <span class="math inline">\(n=100\)</span> to 0.006 at <span class="math inline">\(n=2000\)</span>. When the outcome model is misspecified, variability is much higher initially (1.34 at <span class="math inline">\(n=100\)</span>), but still shrinks markedly with increasing <span class="math inline">\(n\)</span>, falling to 0.12 by <span class="math inline">\(n=2000\)</span>.</p>
 <p>Across all settings, the averages remain close to zero, reinforcing that nuisance error affects variability rather than introducing systematic drift in this interaction term.</p>
+<p>Even when nuisance models are imperfect, their contribution does not appear to enter at first order in these simulations. Instead, the interaction term shrinks with sample size, behaving like a second-order quantity. In other words, misspecification increases noise, but does not induce systematic drift.</p>
 </div>
 <div id="next-steps" class="section level3">
 <h3>Next steps</h3>
-<p>In the next post, I will finally look more squarely at TMLE, specifically considering how the targeting step is designed to make the efficient influence function equation hold.</p>
+<p>The fact that the interaction shrinks does not guarantee that it becomes small relative to sampling error. How quickly it shrinks depends on how accurately the nuisance models are estimated. Orthogonality ensures that nuisance errors do not affect the estimator directly, but only through their interaction. Still, it does not force the empirical influence function equation to hold in finite samples. Without guarantees on the rate at which the nuisance models improve, the remaining discrepancy may still affect inference. That’s where TMLE fits in.</p>
+<p>In the next post, I will look more squarely at TMLE, specifically considering how the targeting step is designed to make the efficient influence function equation hold and to ensure that the remaining discrepancy behaves like sampling noise rather than model-driven bias.</p>
 <p>
 <p><small><font color="darkkhaki">
 Reference:</p>
