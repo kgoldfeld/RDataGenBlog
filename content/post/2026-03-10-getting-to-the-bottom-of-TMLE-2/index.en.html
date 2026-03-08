@@ -16,22 +16,22 @@ draft: TRUE
 
 
 
-<p>In the last couple of posts (<a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">starting here</a>), I’ve tried to unpack some of the ideas that sit underneath TMLE: viewing parameters as functionals of a distribution, thinking about sampling as a perturbation, and understanding how influence functions describe the leading behavior of estimation error. In the second post, I showed through simulation how errors in nuisance estimation can interact with sampling variability, but typically have a smaller effect than the main sampling fluctuation. This brings us to the central idea behind TMLE.</p>
+<p>In the last couple of posts (<a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">starting here</a>), I’ve tried to unpack some of the ideas that sit underneath TMLE: viewing parameters as functionals of a distribution, thinking about sampling as a perturbation, and understanding how influence functions describe the leading behavior of estimation error. In the second post, I showed through simulation how errors in nuisance estimation can interact with sampling variability, but typically have a smaller effect than the main sampling fluctuation itself. This brings us to the central idea behind TMLE.</p>
 <p>If we knew the true exposure and outcome models, the empirical mean of the influence function would already be (approximately) zero, and the estimator would differ from the truth only because of sampling variability.</p>
 <p>In practice, we estimate those nuisance models without full knowledge. Even small mistakes can disturb the balance that keeps the influence function centered. When that happens, the final estimate can be pulled away from the truth, not just by sampling noise, but by imperfections in the nuisance models.</p>
-<p>TMLE works by making a targeted adjustment to the initial nuisance fit so that the empirical mean of the estimated influence function becomes zero. <em>After this adjustment, the remaining discrepancy behaves like ordinary sampling noise rather than model-driven bias.</em> Rather than simply improving the nuisance fits themselves, TMLE is trying to fix the behavior of the target parameter.</p>
+<p>In this simple continuous-outcome setup, TMLE makes a targeted adjustment to the initial outcome fit so that the empirical mean of the estimated influence function is driven to zero. <em>After this adjustment, the remaining discrepancy behaves like ordinary sampling noise rather than model-driven bias.</em> Rather than simply improving the nuisance fits themselves, TMLE tries to correct the behavior of the target parameter.</p>
 <p>To see how this plays out in a causal setting, we first need to be explicit about the parameter we’re trying to learn.</p>
 <div id="a-brief-causal-grounding" class="section level3">
 <h3>A brief causal grounding</h3>
 <p>In causal inference, the parameters we care about are usually contrasts between potential outcomes. For a binary treatment <span class="math inline">\(A\)</span>, each unit has two potential outcomes:
 <span class="math display">\[
-Y(1),Y(0),
+Y(1),\ Y(0),
 \]</span>
 representing the outcomes that would be observed under treatment and control. A common causal target is the average treatment effect:
 <span class="math display">\[
-\psi_0 = E[Y(1) - Y(0)]
+\psi^0 = E[Y(1) - Y(0)]
 \]</span>
-Because we observe only one of these for each person, estimating this quantity requires assumptions (consistency, exchangeability, and positivity) that allow us to express it as a functional of the observed data distribution.</p>
+(In this post, I move from the generic functional notation <span class="math inline">\(T(P)\)</span> used earlier to the specific causal parameter <span class="math inline">\(\psi(P)\)</span>, the average treatment effect.) Because we observe only one of these for each person, estimating this quantity requires assumptions (consistency, exchangeability, and positivity) that allow us to express it as a functional of the observed data distribution.</p>
 <p>TMLE operates entirely within this observed-data framework. It does not try to recover individual counterfactuals. Instead, it constructs an estimator whose statistical behavior is aligned with the influence function of the causal parameter.</p>
 </div>
 <div id="why-nuisance-models-matter" class="section level3">
@@ -43,191 +43,229 @@ Because we observe only one of these for each person, estimating this quantity r
 <div id="the-ate-and-its-efficient-influence-function" class="section level3">
 <h3>The ATE and its efficient influence function</h3>
 <p>Let <span class="math inline">\(Z = (X, A ,Y)\)</span> denote observed data: baseline covariates <span class="math inline">\(X\)</span>, binary treatment <span class="math inline">\(A \in \{0,1\}\)</span>, and outcome <span class="math inline">\(Y\)</span>.</p>
-<p>We can define the outcome (<span class="math inline">\(Q\)</span>) and treatment (<span class="math inline">\(g\)</span>) nuisance functions as
+<p>We can define the outcome regression (<span class="math inline">\(Q\)</span>) and treatment mechanism (<span class="math inline">\(g\)</span>) as
 <span class="math display">\[Q_a(x) = E[Y ∣ A = a, X = x], \ \ \ g(x) = P(A = 1 ∣ X = x).\]</span>
-Conceptually, the influence function comes from the same perturbation-and-differentiation process discussed in the initial <a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">post</a>: we slightly perturb the underlying distribution and examine the component of the resulting change in the ATE that dominates when the perturbation is small. It turns out that this dominant component can be written as the perturbation <span class="math inline">\(P_n − P_0\)</span> acting on a particular function of the data:
-<span class="math display">\[T(P_n) − T(P_0) ≈ (P_n−P_0)\phi,\]</span>
-That function <span class="math inline">\(\phi\)</span> is the influence function, and <span class="math inline">\((P_n−P_0) \phi\)</span> simply means the difference between the empirical and population averages of <span class="math inline">\(\phi(Z)\)</span>.</p>
+The ATE can be written as the functional
+<span class="math display">\[
+\psi(P) = E_P\big[Q_1(X) - Q_0(X)\big],
+\]</span>
+with the target parameter <span class="math inline">\(\psi_0 = \psi(P_0)\)</span> under the true distribution <span class="math inline">\(P_0\)</span>.</p>
+<p>Conceptually, the influence function comes from the same perturbation-and-differentiation process discussed in the initial <a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">post</a>: we slightly perturb the underlying distribution and examine the component of the resulting change in the ATE that dominates when the perturbation is small. It turns out that this dominant component can be written as the perturbation <span class="math inline">\(P_n − P_0\)</span> acting on a particular function of the data:
+<span class="math display">\[\psi(P_n) − \psi(P_0) ≈ (P_n−P_0)\phi_{P_0},\]</span>
+Here <span class="math inline">\(\phi_{P_0}\)</span> is the efficient influence function, and <span class="math inline">\((P_n−P_0) \phi_{P_0}\)</span> simply means the difference between the empirical and population averages of <span class="math inline">\(\phi_{P_0}(Z)\)</span>.</p>
 <p>The version shown below, which I am not explicitly deriving, is the efficient influence function for the ATE:
 <span class="math display">\[
-\phi_P(Z) = \big( Q_1(X) − Q_0(X) − \psi(P)\big) + \frac{A} {g(X)} \big(Y−Q_1(X)\big) − \frac{1−A}{1 − g(X)} \big(Y−Q_0(X)\big),
+\phi_P(Z) = \big( Q_1(X) − Q_0(X) − \psi(P)\big) + \frac{A}{g(X)} \big(Y−Q_1(X)\big) − \frac{1−A}{1 − g(X)} \big(Y−Q_0(X)\big),
 \]</span>
-where <span class="math inline">\(\psi(P) = E[Q_1(X) - Q_0(X)]\)</span>.</p>
-<p>It turns out that if we plug in the true outcome and treatment models, then the EIF is centered, which means the expected value over the true distribution is zero:
+I’m not deriving this here, but its structure is what matters. It combines a plug-in piece involving the conditional mean outcomes and a residual-correction piece weighted by the propensity score.</p>
+<p>It turns out that if we plug in the true outcome and treatment models, then the EIF is centered under the true distribution:
 <span class="math display">\[
 E_{P_0}[\phi_{P_0}(Z)] = 0.
 \]</span>
 But if we plug in <em>estimated</em> nuisances, the empirical mean typically won’t be zero:</p>
 <p><span class="math display">\[P_n \phi_{\hat{P}} = \frac{1}{n} \sum_{i=1}^{n} \phi_{\hat{P}}(Z_i) \ne 0,\]</span>
-This matters, because in the ideal linear expansion, the estimation error behaves like
-<span class="math display">\[T(P_n) − T(P_0) ≈ (P_n−P_0)\phi.\]</span>
-That approximation only makes sense if the influence function balances out in the sample (i.e., its average is zero). When <span class="math inline">\(P_n \phi_{\hat P} \neq 0\)</span>, that balance is broken, and the estimator drifts away from its clean first-order description.</p>
-<p>TMLE restores the balance by slightly “editing” the nuisance fits until the empirical mean <span class="math inline">\(P_n \phi_{\hat P}\)</span> is (approximately) zero.</p>
+This matters, because the ideal first-order expansion behaves like
+<span class="math display">\[\psi(P_n) − \psi(P_0) ≈ (P_n−P_0)\phi_{P_0}.\]</span>
+That approximation only behaves as expected if the influence function balances out in the sample (i.e., its average is zero). When <span class="math inline">\(P_n \phi_{\hat P} \neq 0\)</span>, that balance is broken, and the estimator drifts away from its clean first-order description.</p>
+<p>TMLE restores the balance by slightly adjusting the nuisance fits until the empirical mean of the estimated influence function is brought back to zero.</p>
 </div>
 <div id="evaluating-the-eif-at-the-initial-fit" class="section level3">
 <h3>Evaluating the EIF at the initial fit</h3>
-<p>Given <span class="math inline">\(\hat Q^0\)</span>, <span class="math inline">\(\hat g\)</span> and <span class="math inline">\(\hat\psi^0\)</span>, we can form the estimated EIF at the initial fit:
+<p>Let <span class="math inline">\(\hat P^0\)</span> denote the observed-data distribution indexed by the initial nuisance estimates <span class="math inline">\((\hat Q^0,\hat g,\hat\psi^0)\)</span>. The estimated EIF at that initial fit is
 <span class="math display">\[
-\hat{\phi}^0(Z) = \big(\hat{Q}_1^0(X) − \hat{Q}_0^0(X) − \hat{\psi}^0\big) + \frac{A}{\hat{g}(X)} (Y − \hat{Q}_1^0(X)) − \frac{1−A}{1−\hat{g}(X)} \big(Y−\hat{Q}_0^0(X)\big),
+\phi_{\hat P^0}(Z)
+=
+\big(\hat Q_1^0(X) - \hat Q_0^0(X) - \hat\psi^0\big)
++
+\frac{A}{\hat g(X)}\big(Y - \hat Q_1^0(X)\big)
+-
+\frac{1-A}{1-\hat g(X)}\big(Y - \hat Q_0^0(X)\big),
 \]</span>
 where I’m using <span class="math inline">\(\hat Q^0_a(X)\)</span> as shorthand for <span class="math inline">\(\hat Q^0(a,X)\)</span>.</p>
 <p>Now compute its empirical mean:
 <span class="math display">\[
-P_n\hat{\phi}^0 = \frac{1}{n} \sum_{i=1}^{n} \hat\phi^0(Z_i).
+P_n \phi_{\hat P^0}
+=
+\frac{1}{n}\sum_{i=1}^n \phi_{\hat P^0}(Z_i).
 \]</span>
-If this equals zero, you’re already in great shape: your estimator behaves (to first order) like the ideal one with a centered EIF.</p>
-<p>If it doesn’t equal zero, TMLE does not throw away the nuisance fits. Instead it “tilts” them just enough to remove the imbalance.</p>
+If this equals zero, you’re already in great shape: your estimator behaves (to first order) like the ideal one with a centered EIF. If it doesn’t equal zero, TMLE does not throw away the nuisance fits. Instead it “tilts” them just enough to remove the imbalance.</p>
 </div>
 <div id="bring-in-the-clever-covariate" class="section level3">
 <h3>Bring in the clever covariate</h3>
-<p>This raises the question of what that tilt should look like. It turns out the answer lies in the EIF itself. From above, the EIF evaluated at the initial estimates is</p>
-<p><span class="math display">\[
-\phi_{\hat P}(Z)
+<p>This raises the question of what that tilt should look like. From above, the EIF evaluated at the initial estimates is
+<span class="math display">\[
+\phi_{\hat P^0}(Z)
 =
 \big(\hat Q_1^0(X) - \hat Q_0^0(X) - \hat\psi^0\big)
 +
 \frac{A}{\hat g(X)}\big(Y - \hat Q_1^0(X)\big)
 -
 \frac{1-A}{1-\hat g(X)}\big(Y - \hat Q_0^0(X)\big).
-\]</span></p>
-<p>Focusing on the part involving the observed outcome <span class="math inline">\(Y\)</span>:</p>
-<p><span class="math display">\[
+\]</span>
+Focusing on the part involving the observed outcome <span class="math inline">\(Y\)</span>:
+<span class="math display">\[
 \frac{A}{\hat g(X)}\big(Y - \hat Q_1^0(X)\big)
 -
 \frac{1-A}{1-\hat g(X)}\big(Y - \hat Q_0^0(X)\big),
-\]</span></p>
-<p>we can rewrite this in a slightly simpler form. Because only one of these terms is active for any individual (depending on whether <span class="math inline">\(A=1\)</span> or <span class="math inline">\(A=0\)</span>), the two elements can be combined into a single expression:</p>
-<p><span class="math display">\[
+\]</span>
+we can rewrite this in a slightly simpler form. Because only one of these terms is active for any individual (depending on whether <span class="math inline">\(A=1\)</span> or <span class="math inline">\(A=0\)</span>), the two elements can be combined into a single expression:
+<span class="math display">\[
 \left(
 \frac{A}{\hat g(X)}
 -
 \frac{1-A}{1-\hat g(X)}
 \right)
 \big(Y - \hat Q^0(A,X)\big).
-\]</span></p>
-<p>This motivates the definition of the <strong>clever covariate</strong></p>
-<p><span class="math display">\[
+\]</span>
+This motivates the definition of the <strong>clever covariate</strong>
+<span class="math display">\[
 H_{\hat g}(A,X)
 =
 \frac{A}{\hat g(X)}
 -
 \frac{1-A}{1-\hat g(X)}.
-\]</span></p>
-<p>With this notation, the outcome-dependent part of the EIF becomes</p>
-<p><span class="math display">\[
+\]</span>
+With this notation, the outcome-dependent part of the EIF becomes
+<span class="math display">\[
 H_{\hat g}(A,X)\big(Y - \hat Q^0(A,X)\big).
 \]</span>
-Now the EIF can be written more compactly as</p>
-<p><span class="math display">\[
-\phi_{\hat P}(Z)
+Now the EIF can be written more compactly as
+<span class="math display">\[
+\phi_{\hat P^0}(Z)
 =
 \big(\hat Q_1^0(X) - \hat Q_0^0(X) - \hat\psi^0\big)
 +
 H_{\hat g}(A,X)\big(Y - \hat Q^0(A,X)\big).
-\]</span></p>
-<p>This decomposition reveals exactly where imbalance can appear. Recall that the causal parameter is</p>
-<p><span class="math display">\[
-\psi = E[Q_1(X) - Q_0(X)].
-\]</span></p>
-<p>The plug-in estimator replaces the unknown regressions with their estimates in the empirical average:
-<span class="math display">\[
-\hat\psi^0 =
-P_n\big(\hat Q_1^0(X) - \hat Q_0^0(X)\big).
 \]</span>
-By construction this guarantees
+This decomposition makes the source of the imbalance easier to see. The plug-in estimator is
 <span class="math display">\[
-P_n(\hat Q_1^0(X)- \hat Q_0^0(X) - \hat\psi^0) = 0.
+\hat\psi^0 = P_n\big(\hat Q_1^0(X) - \hat Q_0^0(X)\big),
 \]</span>
-So any imbalance in the empirical EIF must come entirely from</p>
-<p><span class="math display">\[
-P_n
-\Big[
+so by construction,
+<span class="math display">\[
+P_n\big(\hat Q_1^0(X) - \hat Q_0^0(X) - \hat\psi^0\big) = 0.
+\]</span>
+That means any imbalance in the empirical EIF must come entirely from
+<span class="math display">\[
+P_n\left[
 H_{\hat g}(A,X)\big(Y - \hat Q^0(A,X)\big)
-\Big].
-\]</span></p>
-<p>This means the only part of the EIF we can influence directly is the residual <span class="math inline">\(Y-\hat Q^0(A,X)\)</span>. So if we move <span class="math inline">\(\hat Q^0\)</span> slightly until this residual imbalance disappears, we can bring the empirical EIF back into balance and better target the parameter.</p>
+\right].
+\]</span>
+So the only part of the EIF we can directly influence is the residual <span class="math inline">\(Y - \hat Q^0(A,X)\)</span>. If we move <span class="math inline">\(\hat Q^0\)</span> slightly until this residual imbalance disappears, we can bring the empirical EIF back into balance and better target the parameter.</p>
 </div>
 <div id="the-fluctuation-step" class="section level3">
 <h3>The fluctuation step</h3>
-<p>TMLE does not refit the outcome model from scratch. Instead, it introduces a one-dimensional update that moves <span class="math inline">\(\hat Q^0\)</span> in exactly the EIF-relevant direction:</p>
-<p><span class="math display">\[
+<p>TMLE does not refit the outcome model from scratch. Instead, it introduces a one-dimensional update that adjusts the initial regression just enough to remove the imbalance in the empirical influence-function equation:
+<span class="math display">\[
 \hat Q^\epsilon(A,X)
 =
 \hat Q^0(A,X)
 +
 \epsilon H_{\hat g}(A,X).
-\]</span></p>
-<p>The parameter <span class="math inline">\(\epsilon\)</span> controls how much we tilt the regression.</p>
-<p>We estimate <span class="math inline">\(\epsilon\)</span> using the observed outcomes <span class="math inline">\(Y_i\)</span>. For a continuous outcome, we estimate <span class="math inline">\(\epsilon\)</span> by least squares. The normal equation for this regression is</p>
-<p><span class="math display">\[
+\]</span>
+The parameter <span class="math inline">\(\epsilon\)</span> controls how much we tilt the regression. We estimate <span class="math inline">\(\epsilon\)</span> using the observed outcomes <span class="math inline">\(Y_i\)</span>. For a continuous outcome, we estimate <span class="math inline">\(\epsilon\)</span> by least squares. The normal equation for this regression is
+<span class="math display">\[
 \sum_{i=1}^n
 H_{\hat g}(A_i, X_i)
 \big(
 Y_i - \hat Q^{\epsilon}(A_i,X_i)
 \big)
 =0.
-\]</span></p>
-<p>Dividing by <span class="math inline">\(n\)</span> gives</p>
-<p><span class="math display">\[
+\]</span>
+This is equivalent to saying
+<span class="math display">\[
 P_n
 \Big[
 H_{\hat g}(A,X)\big(Y-\hat Q^{\epsilon}(A,X)\big)
 \Big]
-=0.
-\]</span></p>
-<p>Define the updated regression</p>
-<p><span class="math display">\[
+= 0,
+\]</span>
+after dividing both sides by <span class="math inline">\(n\)</span>. Define the updated regression <span class="math inline">\(Q^*\)</span> by plugging in the estimated <span class="math inline">\(\hat\epsilon\)</span>:
+<span class="math display">\[
 \hat Q^*(A,X) = \hat Q^{\hat\epsilon}(A,X).
-\]</span></p>
-<p>Now the residual EIF imbalance has been removed in the sample.</p>
-</div>
-<div id="updating-the-parameter" class="section level3">
-<h3>Updating the parameter</h3>
-<p>Once we have <span class="math inline">\(\hat Q^*\)</span>, we update the ATE estimate using the usual plug-in formula</p>
-<p><span class="math display">\[
+\]</span>
+Once we have <span class="math inline">\(\hat Q^*\)</span>, we update the ATE estimate to get the TMLE estimate using the usual plug-in formula
+<span class="math display">\[
 \hat\psi^*
 =
 \frac{1}{n}\sum_{i=1}^n
 \big(
 \hat Q^*(1,X_i) - \hat Q^*(0,X_i)
 \big).
-\]</span></p>
-<p>This is the TMLE estimate. The key point is what the targeting step has accomplished. Because <span class="math inline">\(\hat\epsilon\)</span> was chosen to satisfy</p>
-<p><span class="math display">\[
-P_n
-\Big[
-H_{\hat g}(A,X)\big(Y-\hat Q^*(A,X)\big)
-\Big]
-\approx 0,
-\]</span></p>
-<p>the empirical influence-function equation</p>
-<p><span class="math display">\[
-P_n\phi_{\hat P^*} \approx 0
-\]</span></p>
-<p>now holds. In other words, the estimator has been nudged into the regime where its behavior matches the ideal first-order expansion.</p>
-<p>Earlier in this series, we framed the key requirement for influence-function estimators as</p>
-<p><span class="math display">\[
-(P_n - P_0)\big(\phi_{\hat P}-\phi_{P_0}\big)\to0.
-\]</span></p>
-<p>This condition ensures that the empirical fluctuation behaves as if the true influence function were known. The targeting step moves the estimator in that direction. By enforcing the empirical equation</p>
-<p><span class="math display">\[
-P_n\phi_{\hat P^*} \approx 0,
-\]</span></p>
-<p>TMLE removes the component of the influence function that arises from nuisance-estimation error in the observed sample. What remains behaves much more like the ideal term <span class="math inline">\((P_n-P_0)\phi_{P_0}\)</span> driven purely by sampling variability.</p>
+\]</span>
+The updated estimated influence function becomes
+<span class="math display">\[
+\phi_{\hat P^*}(Z) =
+\underbrace{\big(\hat Q^*_1(X) - \hat Q^*_0(X) - \hat\psi^*\big)}_{\text{plug-in}}
++
+\underbrace{H_{\hat g}(A,X)\big(Y - \hat Q^*(A,X)\big)}_{\text{weighted residual error}}.
+\]</span>
+The plug-in construction guarantees that the first term has empirical mean zero, while the normal equation above ensures that the residual term also has empirical mean zero. As a result,
+<span class="math display">\[
+P_n \phi_{\hat P^*} \approx 0.
+\]</span>
+In other words, the targeting step removes the residual imbalance in the efficient influence function within the observed sample. Now the behavior of the estimator matches the ideal first-order expansion.</p>
+</div>
+<div id="returning-to-the-nuisance-interaction" class="section level3">
+<h3>Returning to the nuisance interaction</h3>
+<p>In the earlier posts, I tried to argue that influence-function–based estimators behave well when the interaction term
+<span class="math display">\[
+(P_n - P_0)(\phi_{\hat P} - \phi_{P_0}),
+\]</span>
+becomes small relative to the main sampling fluctuation. When that happens, the estimator behaves as if the true influence function were known. In the previous post, we explored this interaction through simulation and saw that it can shrink toward zero, though it may still be quite variable in finite samples when nuisance models are estimated imperfectly. The targeting step in TMLE is designed to enforce the empirical influence-function equation in sample, which helps ensure that any remaining discrepancy appears only in the higher-order remainder.</p>
+<p>To see how targeting helps achieve this, start from the identity
+<span class="math display">\[
+(P_n - P_0)(\phi_{\hat P^*} - \phi_{P_0})
+=
+P_n(\phi_{\hat P^*} - \phi_{P_0})
+-
+P_0(\phi_{\hat P^*} - \phi_{P_0}).
+\]</span>
+Expanding the first term gives
+<span class="math display">\[
+P_n(\phi_{\hat P^*} - \phi_{P_0})
+=
+P_n\phi_{\hat P^*} - P_n\phi_{P_0}.
+\]</span>
+The targeting step enforces
+<span class="math display">\[
+P_n \phi_{\hat P^*} \approx 0,
+\]</span>
+so this term reduces to
+<span class="math display">\[
+P_n(\phi_{\hat P^*} - \phi_{P_0})
+\approx
+-\, P_n \phi_{P_0}.
+\]</span>
+The quantity <span class="math inline">\(P_n \phi_{P_0}\)</span> is simply the empirical average of the true influence function, which fluctuates at order <span class="math inline">\(n^{-1/2}\)</span> due to sampling variability.</p>
+<p>The second term,
+<span class="math display">\[
+P_0(\phi_{\hat P^*} - \phi_{P_0}),
+\]</span>
+reflects how far the targeted influence function is from the true one in the population. Its magnitude is largely determined by the accuracy of the nuisance estimates.</p>
+<p>A key feature of the influence function is that first-order errors in either nuisance model cancel out. What remains behaves roughly like the product of the errors in the outcome regression and the propensity score model. As those nuisance estimates improve, this interaction shrinks and becomes negligible relative to the <span class="math inline">\(n^{-1/2}\)</span> sampling fluctuation. Targeting removes the leading imbalance caused by nuisance estimation in the observed sample. What remains is dominated by the usual sampling fluctuation <span class="math inline">\((P_n-P_0)\phi_{P_0}\)</span>, with nuisance errors entering only through a smaller interaction term.</p>
 </div>
 <div id="a-quick-word-on-cross-fitting" class="section level3">
 <h3>A quick word on cross-fitting</h3>
-<p>Everything above can be done with or without cross-fitting.</p>
-<p>But if <span class="math inline">\(\hat Q^0\)</span> and <span class="math inline">\(\hat g\)</span> are estimated with flexible methods, cross-fitting is the practical step that helps the theory show up in finite samples: it reduces the feedback loop where the same observations both train the nuisance fits and judge the EIF centering condition.</p>
-<p>Conceptually, it just makes <span class="math inline">\(P_n\hat\phi\)</span> behave more like “an average of something approximately fixed,” which is exactly the situation where influence-function CLT arguments are most believable.</p>
+<p>Everything above can be done with or without cross-fitting. But when <span class="math inline">\(\hat Q^0\)</span> and <span class="math inline">\(\hat g\)</span> are estimated using flexible machine-learning methods, cross-fitting helps ensure that the empirical EIF equation behaves the way the theory expects.</p>
+<p>Without cross-fitting, the same observations both train the nuisance models and evaluate the influence function. Cross-fitting separates those roles, so each observation is evaluated using nuisance estimates that were learned from other data. This avoids the feedback loop that can otherwise distort the EIF centering condition and helps the usual influence-function asymptotics show up more clearly in finite samples.</p>
 </div>
 <div id="where-the-double-robustness-shows-up" class="section level3">
 <h3>Where the “double robustness” shows up</h3>
-<p>Even though TMLE is often introduced as “just a substitution estimator with a targeting step,” it inherits a key robustness property from the EIF structure.</p>
-<p>Loosely:</p>
-<p>if <span class="math inline">\(\hat g\)</span> is good and <span class="math inline">\(\hat Q^0\)</span> is mediocre, the targeting step can still correct the part of <span class="math inline">\(\hat Q^0\)</span> that matters for <span class="math inline">\(\psi\)</span>,</p>
-<p>if <span class="math inline">\(\hat Q^0\)</span> is good and <span class="math inline">\(\hat g\)</span> is mediocre, the correction terms still behave well enough to protect the target.</p>
-<p>The slogan is familiar (“consistent if either nuisance is consistent”), but the mental model I find more useful is the one you’ve been building in this series:</p>
-<p>the EIF is constructed so nuisance errors can only matter through specific interactions, and targeting is the mechanism that pushes the estimator into the regime where those interactions are second-order.</p>
-<!-- P_n \hat^phi = 0 msut be front and center, make clear how that fits in-->
+<p>TMLE also inherits a key robustness property from the structure of the influence function. Roughly speaking, the estimator remains consistent if either the outcome regression or the propensity model is estimated correctly.</p>
+<p>Nuisance errors enter the estimator multiplicatively rather than additively. If the outcome regression has error <span class="math inline">\(e_Q\)</span> and the propensity model has error <span class="math inline">\(e_g\)</span>, the leading bias behaves roughly like the product <span class="math inline">\(e_Q \times e_g\)</span>. If either model is correct the bias disappears, and even when both are imperfect their interaction can still be small.</p>
+<p>This multiplicative structure comes from the orthogonality built into the efficient influence function: first-order errors in either nuisance model cancel out, so nuisance mistakes only matter through their interaction.</p>
+<p>In that sense, TMLE is not trying to perfectly estimate the nuisance models themselves. Instead, it adjusts them just enough so that the target parameter obeys the influence-function equation that governs its asymptotic behavior.</p>
+</div>
+<div id="next-steps" class="section level3">
+<h3>Next steps</h3>
+<p>I had hoped to include some simulations here to see the theory in action, but this post ended up longer than anticipated. As I did after the first post, I’ll follow up with another post that focuses on simulation examples illustrating the ideas developed here.</p>
+<p>
+<p><small><font color="darkkhaki">
+Reference:</p>
+<p>Van der Laan, Mark J., and Sherri Rose. Targeted learning: causal inference for observational and experimental data. Vol. 4. New York: Springer, 2011.</p>
+<p>Support:</p>
+This work was supported by the National Institute on Aging (NIA) of the National Institutes of Health under Award Number U54AG063546, which funds the NIA IMbedded Pragmatic Alzheimer’s Disease and AD-Related Dementias Clinical Trials Collaboratory (<a href="https://impactcollaboratory.org/">NIA IMPACT Collaboratory</a>). The author, a member of the Design and Statistics Core, was the sole writer of this blog post and has no conflicts. The content is solely the responsibility of the author and does not necessarily represent the official views of the National Institutes of Health.
+</font></small>
+</p>
 </div>
