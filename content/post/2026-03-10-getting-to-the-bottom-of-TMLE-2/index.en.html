@@ -1,7 +1,7 @@
 ---
 title: 'Getting to the bottom of TMLE: forcing the target to behave'
 author: R Build
-date: '2026-03-10'
+date: '2026-03-09'
 slug: []
 categories: []
 tags:
@@ -16,11 +16,12 @@ draft: TRUE
 
 
 
-<p>In the last couple of posts (<a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">starting here</a>), I’ve tried to unpack some of the ideas that sit underneath TMLE: viewing parameters as functionals of a distribution, thinking about sampling as a perturbation, and understanding how influence functions describe the leading behavior of estimation error. In the second post, I showed through simulation how errors in nuisance estimation can interact with sampling variability, but typically have a smaller effect than the main sampling fluctuation itself. This brings us to the central idea behind TMLE.</p>
+<p>In the last couple of posts (<a href="https://www.rdatagen.net/post/2026-02-05-getting-to-the-bottom-of-tmle-1/" target="_blank">starting here</a>), I’ve tried to unpack some of the ideas that sit underneath TMLE: viewing parameters as functionals of a distribution, thinking about sampling as a perturbation, and understanding how influence functions describe the leading behavior of estimation error. In the second <a href="https://www.rdatagen.net/post/2026-03-03-getting-to-the-bottom-of-tmle-simulating-the-orthogonality/" target="_blank">post</a>, I showed through simulation how errors in nuisance estimation can interact with sampling variability, but typically have a smaller effect than the main sampling fluctuation itself. This brings us to the central idea behind TMLE.</p>
+<p>(This series is not meant to be a tutorial, just a set of notes I put together while trying to wrap my head around this important tool. If you are looking for a more comprehensive introduction, there is an excellent collection of videos and tutorials available <a href="https://ctml.berkeley.edu/home" target="_blank">here</a>.)</p>
 <p>If we knew the true exposure and outcome models, the empirical mean of the influence function would already be (approximately) zero, and the estimator would differ from the truth only because of sampling variability.</p>
-<p>In practice, we estimate those nuisance models without full knowledge. Even small mistakes can disturb the balance that keeps the influence function centered. When that happens, the final estimate can be pulled away from the truth, not just by sampling noise, but by imperfections in the nuisance models.</p>
+<p>In practice, we estimate those nuisance models without full knowledge. Even small mistakes can disturb the balance that keeps the influence function centered. When that happens, the final estimate can be pulled away from the truth not just by sampling noise, but by imperfections in the nuisance models.</p>
 <p>In this simple continuous-outcome setup, TMLE makes a targeted adjustment to the initial outcome fit so that the empirical mean of the estimated influence function is driven to zero. <em>After this adjustment, the remaining discrepancy behaves like ordinary sampling noise rather than model-driven bias.</em> Rather than simply improving the nuisance fits themselves, TMLE tries to correct the behavior of the target parameter.</p>
-<p>To see how this plays out in a causal setting, we first need to be explicit about the parameter we’re trying to learn.</p>
+<p>To see how this plays out in a causal setting, we first need to be explicit about the parameter we’re trying to estimate.</p>
 <div id="a-brief-causal-grounding" class="section level3">
 <h3>A brief causal grounding</h3>
 <p>In causal inference, the parameters we care about are usually contrasts between potential outcomes. For a binary treatment <span class="math inline">\(A\)</span>, each unit has two potential outcomes:
@@ -37,7 +38,7 @@ representing the outcomes that would be observed under treatment and control. A 
 <div id="why-nuisance-models-matter" class="section level3">
 <h3>Why nuisance models matter</h3>
 <p>In an ideal world, we would observe both potential outcomes and simply average their differences. In reality, we only observe one outcome per person, so we rely on models for the outcome and treatment mechanism to fill in the missing structure. These nuisance models help identify the causal effect, but if they are imperfect (and more likely than not, they will be), their errors can bias the final estimate.</p>
-<p>TMLE begins with these initial nuisance estimates but makes a small, carefully chosen adjustment so that their errors interact rather than accumulate. The targeting step is chosen so that the empirical average of the estimated influence function equals zero — the centering property discussed earlier.</p>
+<p>TMLE begins with these initial nuisance estimates but makes a small, carefully chosen adjustment so that their errors interact rather than accumulate. The targeting step is chosen so that the empirical average of the estimated influence function equals zero, the centering property discussed earlier.</p>
 <p>In this way, TMLE does not attempt to perfectly reconstruct missing counterfactuals. Instead, it realigns the estimate so that it responds primarily to genuine sampling noise rather than to quirks of the nuisance models.</p>
 </div>
 <div id="the-ate-and-its-efficient-influence-function" class="section level3">
@@ -57,7 +58,7 @@ Here <span class="math inline">\(\phi_{P_0}\)</span> is the efficient influence 
 <span class="math display">\[
 \phi_P(Z) = \big( Q_1(X) − Q_0(X) − \psi(P)\big) + \frac{A}{g(X)} \big(Y−Q_1(X)\big) − \frac{1−A}{1 − g(X)} \big(Y−Q_0(X)\big),
 \]</span>
-I’m not deriving this here, but its structure is what matters. It combines a plug-in piece involving the conditional mean outcomes and a residual-correction piece weighted by the propensity score.</p>
+A key element of the EIF is its structure. It combines a plug-in piece involving the conditional mean outcomes and a residual-correction piece weighted by the propensity score.</p>
 <p>It turns out that if we plug in the true outcome and treatment models, then the EIF is centered under the true distribution:
 <span class="math display">\[
 E_{P_0}[\phi_{P_0}(Z)] = 0.
@@ -212,7 +213,7 @@ In other words, the targeting step removes the residual imbalance in the efficie
 <span class="math display">\[
 (P_n - P_0)(\phi_{\hat P} - \phi_{P_0}),
 \]</span>
-becomes small relative to the main sampling fluctuation. When that happens, the estimator behaves as if the true influence function were known. In the previous post, we explored this interaction through simulation and saw that it can shrink toward zero, though it may still be quite variable in finite samples when nuisance models are estimated imperfectly. The targeting step in TMLE is designed to enforce the empirical influence-function equation in sample, which helps ensure that any remaining discrepancy appears only in the higher-order remainder.</p>
+becomes small relative to the main sampling fluctuation. When that happens, the estimator behaves as if the true influence function were known. In the previous post, we explored this interaction through simulation and saw that it can shrink toward zero, though it may still be quite variable in finite samples when nuisance models are estimated imperfectly. The targeting step in TMLE is designed to enforce the empirical influence-function equation in the observed sample, which helps ensure that any remaining discrepancy appears only in the higher-order remainder.</p>
 <p>To see how targeting helps achieve this, start from the identity
 <span class="math display">\[
 (P_n - P_0)(\phi_{\hat P^*} - \phi_{P_0})
