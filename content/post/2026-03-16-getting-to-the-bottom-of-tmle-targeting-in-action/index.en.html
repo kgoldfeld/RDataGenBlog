@@ -17,7 +17,7 @@ draft: TRUE
 
 
 <p>In the previous <a href="https://www.rdatagen.net/post/2026-03-10-getting-to-the-bottom-of-tmle-2/" target="_blank">post</a>, I worked my way through some key elements of TMLE theory as I try to understand how it all works. At its essence, TMLE is focused on getting the efficient influence function (EIF) to behave properly. When that happens, the estimator of the target parameter behaves as if it were based on a random sample from the true data-generating distribution.</p>
-<p>Estimating the outcome and treatment (or exposure) models is an important part of constructing the EIF, but they are treated as nuisance components and do not need to be perfectly specified. The targeting step can adjust for errors in these nuisance estimates, often recovering the desired behavior of the EIF and improving the resulting estimate of the target parameter, even when one of the nuisance models is misspecified.</p>
+<p>Estimating the outcome and treatment (or exposure) models is an important part of constructing the EIF, but they are treated as nuisance components and do not need to be perfectly specified. The targeting step can adjust for errors in these nuisance estimates, often recovering the desired empirical behavior of the EIF and improving the resulting estimate of the target parameter, even when one of the nuisance models is misspecified.</p>
 <!--more-->
 <p>In that previous post, I described how TMLE does not simply try to improve the nuisance models, but instead makes a targeted adjustment so that the empirical mean of the estimated efficient influence function is brought back to zero. In this post, I use simulation to look directly at what targeting changes. In particular, I compare two estimators of the average treatment effect (ATE)—the plug-in estimator and TMLE—with the goal of understanding what the targeting step is doing mechanically and how it affects the final estimate.</p>
 <p>I focus on two questions. First, how far is the empirical mean of the estimated influence function from zero before and after targeting? Second, how do the plug-in and TMLE estimates of the ATE behave across different nuisance-model scenarios?</p>
@@ -279,37 +279,24 @@ res &lt;- rbindlist(
 </div>
 <div id="empirical-eif-mean-before-and-after-targeting" class="section level3">
 <h3>Empirical EIF mean before and after targeting</h3>
-<p>What I expect to see here is the central mechanical fact of TMLE. Before targeting, the empirical mean of the estimated EIF is often noticeably away from zero, especially in smaller samples and under misspecification. After targeting, that imbalance should collapse to essentially zero in every scenario, because the fluctuation step is constructed to make that happen.</p>
-<p>This is the most literal sense in which TMLE forces the target to behave.</p>
+<p>Below is a plot that shows the distribution of the absolute empirical mean of the EIF for each of the scenarios defined by sample size and nuisance parameter estimation both before and after targeting. There were 1000 data sets generated for each scenario:</p>
 <p><img src="code_and_output/EIF_plot.png" /></p>
+<p>Before targeting, the empirical mean of the estimated EIF is often noticeably away from zero, especially in smaller samples and under misspecification, particularly when the outcome model is misspecified. After targeting, that imbalance collapses to essentially zero in every scenario, because the fluctuation step is constructed to make that happen.</p>
+<p>However, this balance is enforced in the sample, not necessarily in the population. In additional simulations (not shown here), I found that even after targeting, the population mean of the estimated EIF can remain nonzero when the nuisance models are misspecified. When that happens, the estimator remains biased (see below), consistent with the fact that estimation error is driven by the population mean of the EIF.</p>
+<p>This corresponds to the second term described in the previous post: when the nuisance models are misspecified, the targeted influence function differs from the true one in the population, and that discrepancy shows up as bias in the estimator. In this sense, targeting and double robustness play complementary roles: targeting guarantees <em>sample balance</em> (i.e., <span class="math inline">\(P_n \phi_{\hat{P}^*} = 0\)</span>), while double robustness helps ensure <em>population balance</em> (i.e., <span class="math inline">\(P_0 \phi_{\hat{P}^*} \approx 0\)</span>) when at least one nuisance model is correctly specified.</p>
 </div>
 <div id="estimator-performance" class="section level3">
 <h3>Estimator performance</h3>
-<p>Of course, the point is not merely to make an estimating equation look tidy. The real question is whether this changes the behavior of the parameter estimate itself.</p>
+<p>The goal, of course, is not just to make an estimating equation look tidy. The real question is whether this changes the behavior of the parameter estimate itself.</p>
 <p><img src="code_and_output/err_plot.png" /></p>
-</div>
-<div id="what-i-expect-the-simulation-to-show" class="section level3">
-<h3>What I expect the simulation to show</h3>
-<p>The main patterns I expect are familiar, but now they can be tied directly to the targeting step.</p>
-<p>When both nuisance models are correctly specified, all three estimators should behave well, though TMLE and AIPW may still outperform the raw plug-in estimator in smaller samples.</p>
-<p>When the outcome model is wrong but the propensity model is correct, the plug-in estimator should typically struggle because it depends directly on the misspecified outcome regression. In contrast, AIPW and TMLE should remain much more stable because they use the propensity-based residual correction.</p>
-<p>When the propensity model is wrong but the outcome model is correct, the plug-in estimator may already do fairly well, and AIPW and TMLE should also remain consistent. This is one way the familiar double-robustness story becomes visible.</p>
-<p>When both nuisance models are wrong, none of these estimators is guaranteed to behave well. That is also worth seeing directly, because it keeps the simulation from becoming a fairy tale about TMLE solving everything.</p>
-</div>
-<div id="a-subtle-point-worth-watching" class="section level3">
-<h3>A subtle point worth watching</h3>
-<p>One aspect of the simulation that interests me most is that the targeting step may have a meaningful effect on the parameter estimate even though it does not dramatically change the outcome regression as a prediction model.</p>
-<p>That is a useful reminder of the logic behind TMLE. The goal is not primarily to make <span class="math inline">\(\hat Q\)</span> predict <span class="math inline">\(Y\)</span> better in some global sense. The goal is to make the parameter estimate obey the influence-function equation that governs its asymptotic behavior. A small targeted change in <span class="math inline">\(\hat Q\)</span> can therefore matter a lot for <span class="math inline">\(\hat\psi\)</span>, even if it barely matters for overall prediction error.</p>
-</div>
-<div id="interpreting-the-results" class="section level3">
-<h3>Interpreting the results</h3>
-<p>If the simulation behaves as expected, I think the main lesson is this: TMLE is not mysterious because it uses a clever covariate or because it performs a last-minute update to the regression. The important point is that the update is chosen to solve a very specific problem. It removes the empirical imbalance in the estimated efficient influence function, so that the final estimate behaves more like the ideal influence-function approximation described in the earlier posts.</p>
-<p>In that sense, targeting is not a generic model-improvement step. It is a parameter-focused correction.</p>
+<p>When both nuisance models are correctly specified, both estimators behave well. However, when the outcome model is wrong but the propensity model is correct, the plug-in estimator struggles because it depends directly on the misspecified outcome regression. In contrast, the TMLE estimator remains much more stable because it uses the propensity-based residual correction. This is double robustness in action. When the propensity model is wrong but the outcome model is correct, the plug-in estimator still performs well, and TMLE also remains consistent. When both nuisance models are wrong, neither estimator behaves well, highlighting the fact that TMLE is not a panacea.</p>
 </div>
 <div id="final-thoughts" class="section level3">
 <h3>Final thoughts</h3>
-<p>The earlier post argued that TMLE works by slightly adjusting the nuisance fit until the empirical influence-function equation is brought back into balance. This simulation is meant to make that claim visible. Before targeting, the estimated EIF can be noticeably off center. After targeting, it is effectively zero by construction. And once that happens, the estimator often behaves much more like the asymptotic story says it should.</p>
-<p>That, at least for me, makes the targeting step feel much less magical. It is not forcing the nuisance models to be correct. It is forcing the target parameter to obey the equation that makes influence-function-based inference work.</p>
+<p>The earlier post argued that TMLE works by slightly adjusting the nuisance fit until the empirical influence-function equation is brought back into balance. This simulation makes that claim visible. Before targeting, the estimated EIF can be noticeably off center. After targeting, it is effectively zero by construction.</p>
+<p>But this balance is enforced in the sample, not necessarily in the population. When the nuisance models are misspecified, the targeted influence function can still differ from the true one, and its population mean may remain nonzero. In those cases, the estimator remains biased, even though the empirical EIF equation is perfectly satisfied.</p>
+<p>This highlights the central role of the influence function: targeting ensures that the estimator behaves like the ideal first-order expansion in the observed data, but its ultimate performance still depends on how well the estimated influence function reflects the true data-generating process.</p>
+<p>The efficient influence function also plays a central role in inference, since its empirical variance is typically used to estimate the standard error of the TMLE. I have not focused on that aspect here, since the goal of these simulations was to understand how targeting affects bias and stability. When the EIF is well-behaved, it not only centers properly but also provides a natural way to quantify uncertainty. I hope to return to this idea in more applied settings down the road.</p>
 <p>
 <p><small><font color="darkkhaki">
 Reference</p>
