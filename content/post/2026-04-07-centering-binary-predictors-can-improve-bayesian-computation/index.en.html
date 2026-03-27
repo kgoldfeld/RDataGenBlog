@@ -17,6 +17,7 @@ draft: TRUE
 
 <p>The <em>Emergency departments leading the transformation of Alzheimer’s and dementia care</em> (ED-LEAD) study, which I have written about in the <a href="https://www.rdatagen.net/post/2024-02-20-ensuring-balance-with-a-cluster-randomized-factorial-design/" target="_blank">past</a>, is approaching the end of its third year. This multifactorial design evaluates three independent, yet potentially synergistic, interventions aimed at improving care for persons living with dementia (PLWD) and their caregivers.</p>
 <p>To estimate intervention effects, we are using what I’ve <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.70264" target="_blank">called</a> the <em>HEx-factor model</em>, a Bayesian hierarchical exchangeable factorial model. The original plan was to conduct all analyses using <a href="https://mc-stan.org/" target="_blank"><code>Stan</code></a>. However, we’ve run into a bit of a snafu. Working through the issue led to a solution that is worth sharing.</p>
+<!--more-->
 <p>The challenge turned out to be computational. Because the <em>ED-LEAD</em> analyses must be conducted within the NIA Data LINKAGE Enclave, we are working in a somewhat restricted software environment, at least with respect to Bayesian data analysis. In particular, we have not been able to install or run <code>Stan</code>, which was our original analytic engine. This forced us to consider alternatives, and we turned to <code>JAGS</code>, which is available in the Linkage environment and well-suited for Bayesian hierarchical modeling.</p>
 <p>At first glance, this might seem like a straightforward substitution. Both <code>Stan</code> and <code>JAGS</code> allow us to specify the same likelihood and priors. However, I quickly noticed that the models were not performing as well in <code>JAGS</code> as they had in <code>Stan</code>. It turns out that the samplers used in <code>JAGS</code> are more sensitive to posterior dependence than the Hamiltonian Monte Carlo (HMC) methods implemented in <code>Stan</code>.</p>
 <p>I set out to understand and fix the problem, and found that a simple reparameterization made a substantial difference. With this change, the <code>JAGS</code> sampler was able to explore the posterior distribution much more efficiently, yielding results comparable to those obtained with <code>Stan</code>.</p>
@@ -33,7 +34,7 @@ where <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)
 \]</span>
 where</p>
 <p><span class="math display">\[
-A^∗ = A − 0.5, \ \ \ B^∗ = B − 0.5.
+A^* = A - 0.5, \ \ \ B^* = B - 0.5.
 \]</span></p>
 <p>The scientific model is unchanged. The question is whether the sampler behaves differently.</p>
 </div>
@@ -812,7 +813,7 @@ diag_c  &lt;- diag_tbl(samp_c, &quot;centered&quot;)</code></pre>
 </div>
 <p>There are a few things to notice here. First, the Bayesian estimates for both the 0/1-coded and centered data are closer to zero than the GLM estimates above. The shrinkage is particularly large for the interaction term, because we placed much more restrictive priors on <span class="math inline">\(\beta_{ab}\)</span> and <span class="math inline">\(\gamma_{ab}\)</span>. This is exactly what we would expect: the prior is pulling the interaction toward zero, and that influence shows up clearly in the posterior summaries.</p>
 <p>Second, if we compare the two parameterizations, we see that the R-hat—essentially a measure of whether the chains have converged to the same distribution—is slightly lower for the centered data. There isn’t much to make of the difference here (both are very close to 1), but it does suggest slightly more stable behavior.</p>
-<p>The biggest impact is on the bulk effective sample size (ESS), which reflects how much independent information the chains contain after accounting for autocorrelation. Even though we ran the same number of iterations, the centered model yields far larger ESS values, indicating much better mixing. In other words, the sampler is exploring the posterior much more efficiently under the centered parameterization, and in this case the improvement is quite dramatic. Importantly, these differences have nothing to do with the models themselves since the likelihood is unchanged. Rather it reflects how easy it is for the sampler to navigate the posterior surface when the data are centered.</p>
+<p>The biggest impact is on the bulk effective sample size (ESS), which reflects how much independent information the chains contain after accounting for autocorrelation. Even though we ran the same number of iterations, the centered model yields far larger ESS values, indicating much better mixing. In other words, the sampler is exploring the posterior much more efficiently under the centered parameterization, and in this case the improvement is quite dramatic. Importantly, these differences have nothing to do with the models themselves since the likelihood is unchanged. Rather, it reflects how easy it is for the sampler to navigate the posterior surface when the data are centered.</p>
 <p>A comparison of the trace plots reinforces the stability that centering the data provides. The traces for the 0/1-coded data are a bit more irregular, suggesting less efficient exploration of the posterior. In contrast, the centered parameterization produces tighter, more stable traces with less autocorrelation, indicating that the chains are mixing more effectively. This aligns with the much larger effective sample sizes observed for the centered model.</p>
 <p><img src="code_and_data/trace_plot.png" /></p>
 <pre class="r"><code>get_lor_summary &lt;- function(samp, model_name) {
@@ -1314,7 +1315,7 @@ lor_c  &lt;- get_lor_summary(samp_c,  &quot;centered&quot;)</code></pre>
 </div>
 <div id="a-larger-simulation-experiment" class="section level3">
 <h3>A larger simulation experiment</h3>
-<p>A single data set can be misleading. So next I’ll repeat this 500 times and compare the two parameterizations across simulations. Each iteration, I generate a data set with 2000 observations, I fit each model—the one with 0/1-coding and the other with centered coding—using <code>JAGS</code>, and collecting summary data of the posteriors for each model generated by <code>JAGS</code>: mean, median, standard deviation, median absolute deviation, 5th percentile, 95th percentile, R-hat, bulk ESS, and tail ESS.</p>
+<p>A single data set can be misleading. So next I’ll repeat this 500 times and compare the two parameterizations across simulations. Each iteration, I generate a data set with 2000 observations, I fit each model—the one with 0/1-coding and the other with centered coding—using <code>JAGS</code>, and collecting summary data of the posteriors from each model <code>JAGS</code>: mean, median, standard deviation, median absolute deviation, 5th percentile, 95th percentile, R-hat, bulk ESS, and tail ESS.</p>
 <pre class="r"><code>one_run &lt;- function(
   n = 2000,
   truth = c(alpha = -0.8, beta_a = 0.5, beta_b = 0.9, beta_ab = -0.3),
@@ -1333,7 +1334,7 @@ lor_c  &lt;- get_lor_summary(samp_c,  &quot;centered&quot;)</code></pre>
   
   samp_01 &lt;- fit_jags(
     dd, model_01, centered = FALSE, 
-    n_chains = n_chains, burn = burn, n_iter = n_iter, 
+    n_chains = n_chains, burn = burn, n_iter = n_iter
   )
   
   samp_c &lt;- fit_jags(
@@ -1370,11 +1371,11 @@ sim_res &lt;- rbindlist(mclapply(seq_len(nsim), function(i) {
 </div>
 <div id="understanding-what-is-driving-the-performance" class="section level3">
 <h3>Understanding what is driving the performance</h3>
-<p>To better understand this, we can look directly at the dependence structure of the posterior draws. Correlation plots help explain what is driving these differences in performance. Under the 0/1-coded parameterization, the posterior exhibits strong dependence among parameters. Several pairs of coefficients show substantial correlations, reflecting the fact that different combinations of parameters can produce similar fitted values. In geometric terms, the joint posterior distribution has an elongated, highly correlated structure. This is evident in the pairwise scatter plots, where draws fall along narrow, tilted bands rather than forming roughly circular clouds.</p>
+<p>To better understand this, we can look directly at the dependence structure of the posterior draws. Correlation plots help explain what is driving these differences in performance. Under the 0/1-coded parameterization, the posterior exhibits strong dependence among parameters. Several pairs of coefficients show substantial correlations, reflecting the fact that different combinations of parameters can produce similar fitted values. In geometric terms, the joint posterior has an elongated, highly correlated structure. This is evident in the pairwise scatter plots, where draws fall along narrow, tilted bands rather than forming roughly circular clouds.</p>
 <p><img src="code_and_data/plot_cor_01_V1.png" alt="" width="75%" /></p>
 <p>This geometry makes life difficult for the sampler. Exploring such a narrow region requires many small, correlated steps, which leads to high autocorrelation and, ultimately, low effective sample sizes.</p>
-<p>In contrast, the centered parameterization produces a posterior that is nearly uncorrelated. The coefficients capture more distinct aspects of the model, and the resulting posterior is much more spherical. This greatly simplifies the exploration of the parameter space, allowing the sampler to move more freely through the parameter space.</p>
+<p>In contrast, the centered parameterization produces a posterior that is nearly uncorrelated. The coefficients capture more distinct aspects of the model, and the resulting posterior is much more spherical. This greatly simplifies the exploration of the parameter space, allowing the sampler to move more freely.</p>
 <p><img src="code_and_data/plot_cor_c_V1.png" alt="" width="75%" /></p>
-<p>The key point is that centering does not change the model or the scientific conclusions. It changes the geometry of the posterior distribution, and that change can have a dramatic impact on computational performance. In effect, centering makes the parameters closer to orthogonal, reducing interference among them and improving both statistical and computational behavior.</p>
+<p>The key point is that centering does not change the model or the scientific conclusions. It changes the geometry of the posterior distribution, and that change can have a dramatic impact on computational performance. In effect, centering makes the parameters closer to orthogonal in the posterior, reducing interference among them and improving both statistical and computational behavior.</p>
 <p>In the ED-LEAD study, where we are fitting hierarchical factorial models with multiple intervention components, this shift in parameterization is critical. Centering the treatment indicators leads to more stable estimation and far more efficient sampling, which is particularly important given our reliance on <code>JAGS</code>. Unlike Hamiltonian Monte Carlo (as implemented in <code>Stan</code>), which can handle correlated posteriors more effectively, the Gibbs and Metropolis-based updates used by <code>JAGS</code> are much more sensitive to posterior dependence. Improving the geometry of the posterior is therefore essential for good performance in this setting.</p>
 </div>
