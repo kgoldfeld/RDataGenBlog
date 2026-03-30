@@ -16,15 +16,15 @@ draft: TRUE
 
 
 <p>The <em>Emergency departments leading the transformation of Alzheimer’s and dementia care</em> (ED-LEAD) study, which I have written about in the <a href="https://www.rdatagen.net/post/2024-02-20-ensuring-balance-with-a-cluster-randomized-factorial-design/" target="_blank">past</a>, is approaching the end of its third year. This multifactorial design evaluates three independent, yet potentially synergistic, interventions aimed at improving care for persons living with dementia (PLWD) and their caregivers.</p>
-<p>To estimate intervention effects, we are using what I’ve <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.70264" target="_blank">called</a> the <em>HEx-factor model</em>, a Bayesian hierarchical exchangeable factorial model. The original plan was to conduct all analyses using <a href="https://mc-stan.org/" target="_blank"><code>Stan</code></a>. However, we’ve run into a bit of a snafu. Working through the issue led to a solution that is worth sharing.</p>
+<p>To estimate intervention effects, we are using what I’ve <a href="https://onlinelibrary.wiley.com/doi/full/10.1002/sim.70264" target="_blank">called</a> the <em>HEx-factor model</em>, a Bayesian hierarchical exchangeable factorial model. The original plan was to conduct all analyses using <a href="https://mc-stan.org/" target="_blank"><code>Stan</code></a>. However, we’ve run into a bit of a snafu. I’ve been working through the problem, and thought I’d share here.</p>
 <!--more-->
-<p>The challenge turned out to be computational. Because the <em>ED-LEAD</em> analyses must be conducted within the NIA Data LINKAGE Enclave, we are working in a somewhat restricted software environment, at least with respect to Bayesian data analysis. In particular, we have not been able to install or run <code>Stan</code>, which was our original analytic engine. This forced us to consider alternatives, and we turned to <code>JAGS</code>, which is available in the Linkage environment and well-suited for Bayesian hierarchical modeling.</p>
+<p>The challenge turns out to be a computational one. Because the <em>ED-LEAD</em> analyses must be conducted within the NIA Data LINKAGE Enclave, we are working in a somewhat restricted software environment, at least with respect to Bayesian data analysis. In particular, we have not been able to install or run <code>Stan</code>, which was our analytic engine of choice. This forced us to consider alternatives, and we turned to <code>JAGS</code>, which <em>is</em> available in the Linkage environment and certainly is well-suited for Bayesian hierarchical modeling.</p>
 <p>At first glance, this might seem like a straightforward substitution. Both <code>Stan</code> and <code>JAGS</code> allow us to specify the same likelihood and priors. However, I quickly noticed that the models were not performing as well in <code>JAGS</code> as they had in <code>Stan</code>. It turns out that the samplers used in <code>JAGS</code> are more sensitive to posterior dependence than the Hamiltonian Monte Carlo (HMC) methods implemented in <code>Stan</code>.</p>
-<p>I set out to understand and fix the problem, and found that a simple reparameterization made a substantial difference. With this change, the <code>JAGS</code> sampler was able to explore the posterior distribution much more efficiently, yielding results comparable to those obtained with <code>Stan</code>.</p>
+<p>I set out to understand and fix the problem, and found that a simple reparameterization—re-coding the binary treatment indicators—made a substantial difference. With this change, the <code>JAGS</code> sampler was able to explore the posterior distribution much more efficiently, yielding results comparable to those obtained with <code>Stan</code>.</p>
 <p>To understand why this happens, I ran a series of simple simulations comparing the original and reparameterized versions of a basic two-way factorial model. That is what I present here.</p>
 <div id="the-setup" class="section level3">
 <h3>The setup</h3>
-<p>In models with binary predictors and interactions, centering can have a surprisingly large impact on computation, even though it does not change the underlying model. To see this clearly, I’ll start with a simple two-factor logistic model:
+<p>In models with binary predictors and interactions, it turns out that <em>centering</em> can have a surprisingly large impact on computation, even though it does not change the underlying model. To see this clearly, I’ll start with a simple two-factor logistic model:
 <span class="math display">\[
 \text{logit}\big[P(Y=1)\big] = \alpha+ \beta_a A + \beta_b B + \beta_{ab}AB
 \]</span>
@@ -37,69 +37,8 @@ where</p>
 A^* = A - 0.5, \ \ \ B^* = B - 0.5.
 \]</span></p>
 <p>The scientific model is unchanged. The question is whether the sampler behaves differently.</p>
-</div>
-<div id="creating-a-single-data-set" class="section level3">
-<h3>Creating a single data set</h3>
-<p>Before we get started, we need to load the necessary libraries:</p>
-<pre class="r"><code>library(simstudy)
-library(data.table)
-library(ggplot2)
-library(rjags)
-library(coda)
-library(posterior)
-library(broom)
-library(gt)
-
-RNGkind(&quot;Mersenne-Twister&quot;, &quot;Inversion&quot;, &quot;Rejection&quot;)
-set.seed(824)</code></pre>
-<p>Here is the data generation process for a single data set. The outcome <span class="math inline">\(Y\)</span> is generated using the binary parameterization of <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>:</p>
-<pre class="r"><code>s_gen &lt;- function(n = 2000,
-                    alpha = -0.8,
-                    beta_a = 0.5,
-                    beta_b = 0.9,
-                    beta_ab = -0.3) {
-  
-  def &lt;- 
-    defData(varname = &quot;A&quot;, formula = 0.5, dist = &quot;binary&quot;) |&gt;
-    defData(varname = &quot;B&quot;, formula = 0.5, dist = &quot;binary&quot;) |&gt;
-    defData(varname = &quot;AB&quot;, formula = &quot;A*B&quot;, dist = &quot;nonrandom&quot;) |&gt;
-    defData(varname = &quot;A_c&quot;, formula = &quot;A - 0.5&quot;, dist = &quot;nonrandom&quot;) |&gt;
-    defData(varname = &quot;B_c&quot;, formula = &quot;B - 0.5&quot;, dist = &quot;nonrandom&quot;) |&gt;
-    defData(varname = &quot;AB_c&quot;, formula = &quot;A_c * B_c&quot;, dist = &quot;nonrandom&quot;) |&gt;
-    defData(
-      varname = &quot;Y&quot;, 
-      formula = &quot;..alpha + ..beta_a * A + ..beta_b * B + ..beta_ab * AB&quot;,
-      dist = &quot;binary&quot;, link = &quot;logit&quot;
-    )
-    
-  genData(n, def)
-  
-}
-
-dd &lt;- s_gen()</code></pre>
-</div>
-<div id="the-two-parameterizations-fit-the-same-model" class="section level3">
-<h3>The two parameterizations fit the same model</h3>
-<p>First, here is the frequentist check. The fitted probabilities are identical, even though the coefficients differ.</p>
-<pre class="r"><code>fit_01 &lt;- glm(Y ~ A * B, data = dd, family = binomial)
-fit_c  &lt;- glm(Y ~ A_c * B_c, data = dd, family = binomial)
-
-tidy(fit_01)</code></pre>
-<pre><code>## # A tibble: 4 × 5
-##   term        estimate std.error statistic  p.value
-##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
-## 1 (Intercept)   -1.03     0.0995    -10.4  3.90e-25
-## 2 A              0.835    0.135       6.18 6.34e-10
-## 3 B              1.14     0.134       8.46 2.73e-17
-## 4 A:B           -0.670    0.186      -3.61 3.11e- 4</code></pre>
-<pre class="r"><code>tidy(fit_c)</code></pre>
-<pre><code>## # A tibble: 4 × 5
-##   term        estimate std.error statistic  p.value
-##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
-## 1 (Intercept)   -0.212    0.0464     -4.57 4.91e- 6
-## 2 A_c            0.501    0.0929      5.39 7.05e- 8
-## 3 B_c            0.802    0.0929      8.63 6.07e-18
-## 4 A_c:B_c       -0.670    0.186      -3.61 3.11e- 4</code></pre>
+<div id="log-odds-ratios-under-each-parameterization" class="section level4">
+<h4>Log odds ratios under each parameterization</h4>
 <p>With 0/1 coding, the log-odds ratio for <span class="math inline">\(A\)</span> alone (that is, when <span class="math inline">\(B=0\)</span>) is simply
 <span class="math display">\[
 \begin{align*}
@@ -146,23 +85,12 @@ and
 <!--  &= (\alpha^* + \gamma_a * 0.5 + \gamma_b * 0.5 + \gamma_{ab} * 0.25) -  (\alpha^* - \gamma_a * 0.5 - \gamma_b * 0.5 + \gamma_{ab} * 0.25)\\ -->
 <!-- & = \gamma_a + \gamma_b -->
 <!-- \end{align*} -->
-<!-- $$ -->
-From the 0/1-coded model, <span class="math inline">\(\text{lOR}_a = 0.835\)</span>, <span class="math inline">\(\text{lOR}_b = 1.14\)</span>, and <span class="math inline">\(\text{lOR}_{ab} = 0.835 + 1.14 - 0.67 = 1.305.\)</span></p>
-<p>From the centered model,
-<span class="math display">\[
-\text{lOR}_a = 0.501 + 0.5*0.670 = 0.836
-\]</span>
-<span class="math display">\[
-\text{lOR}_b = 0.802 + 0.5*0.670 = 1.137
-\]</span>
-<span class="math display">\[
-\text{lOR}_{ab} = 0.501 + 0.802 = 1.303
-\]</span>
-So the coefficients themselves change under centering, but the underlying treatment contrasts do not.</p>
+<!-- $$ --></p>
+</div>
 </div>
 <div id="bayesian-models-using-jags" class="section level3">
 <h3>Bayesian models using JAGS</h3>
-<p>The model we are fitting is a simple logistic regression with an interaction term:</p>
+<p>The Bayesian model is a simple logistic regression with an interaction term:</p>
 <p><span class="math display">\[
 \begin{align*}
 Y_i &amp;\sim \text{Bernoulli}(p_i), \\
@@ -179,7 +107,89 @@ Here are the prior distribution assumptions, using variance-based notation to al
 \beta_{ab} &amp;\sim \mathcal{N}(0, 25^{-1}).
 \end{align*}
 \]</span>
-The centered model is similar, except that we replace the coefficients with <span class="math inline">\(\alpha^*\)</span> as well as <span class="math inline">\(\gamma_a\)</span>, <span class="math inline">\(\gamma_b\)</span>, <span class="math inline">\(\gamma_{ab}\)</span>, and define the predictors in terms of centered versions of <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>. This reparameterization does not change the model itself, but it does change how the coefficients relate to the underlying treatment contrasts.</p>
+The centered model is similar, except that we replace the coefficients with <span class="math inline">\(\alpha^*\)</span> as well as <span class="math inline">\(\gamma_a\)</span>, <span class="math inline">\(\gamma_b\)</span>, <span class="math inline">\(\gamma_{ab}\)</span>, and define the predictors in terms of centered versions of <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>.</p>
+</div>
+<div id="simulations" class="section level3">
+<h3>Simulations</h3>
+<p>Before we get started on the simulations, we need to load the necessary libraries and set the seed in case you want to replicate these results:</p>
+<pre class="r"><code>library(simstudy)
+library(data.table)
+library(ggplot2)
+library(rjags)
+library(coda)
+library(posterior)
+library(broom)
+library(gt)
+
+RNGkind(&quot;Mersenne-Twister&quot;, &quot;Inversion&quot;, &quot;Rejection&quot;)
+set.seed(824)</code></pre>
+<div id="creating-a-single-data-set" class="section level4">
+<h4>Creating a single data set</h4>
+<p>Here is the data generation process for a single data set. The outcome <span class="math inline">\(Y\)</span> is generated using the binary parameterization of <span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>:</p>
+<pre class="r"><code>s_gen &lt;- function(n = 2000,
+                    alpha = -0.8,
+                    beta_a = 0.5,
+                    beta_b = 0.9,
+                    beta_ab = -0.3) {
+  
+  def &lt;- 
+    defData(varname = &quot;A&quot;, formula = 0.5, dist = &quot;binary&quot;) |&gt;
+    defData(varname = &quot;B&quot;, formula = 0.5, dist = &quot;binary&quot;) |&gt;
+    defData(varname = &quot;AB&quot;, formula = &quot;A*B&quot;, dist = &quot;nonrandom&quot;) |&gt;
+    defData(varname = &quot;A_c&quot;, formula = &quot;A - 0.5&quot;, dist = &quot;nonrandom&quot;) |&gt;
+    defData(varname = &quot;B_c&quot;, formula = &quot;B - 0.5&quot;, dist = &quot;nonrandom&quot;) |&gt;
+    defData(varname = &quot;AB_c&quot;, formula = &quot;A_c * B_c&quot;, dist = &quot;nonrandom&quot;) |&gt;
+    defData(
+      varname = &quot;Y&quot;, 
+      formula = &quot;..alpha + ..beta_a * A + ..beta_b * B + ..beta_ab * AB&quot;,
+      dist = &quot;binary&quot;, link = &quot;logit&quot;
+    )
+    
+  genData(n, def)
+  
+}
+
+dd &lt;- s_gen()</code></pre>
+</div>
+<div id="the-two-parameterizations-fit-the-same-model" class="section level4">
+<h4>The two parameterizations fit the same model</h4>
+<p>First, here is the frequentist check of both models. The fitted probabilities are identical, even though the coefficients differ.</p>
+<pre class="r"><code>fit_01 &lt;- glm(Y ~ A * B, data = dd, family = binomial)
+fit_c  &lt;- glm(Y ~ A_c * B_c, data = dd, family = binomial)
+
+tidy(fit_01)</code></pre>
+<pre><code>## # A tibble: 4 × 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)   -1.03     0.0995    -10.4  3.90e-25
+## 2 A              0.835    0.135       6.18 6.34e-10
+## 3 B              1.14     0.134       8.46 2.73e-17
+## 4 A:B           -0.670    0.186      -3.61 3.11e- 4</code></pre>
+<pre class="r"><code>tidy(fit_c)</code></pre>
+<pre><code>## # A tibble: 4 × 5
+##   term        estimate std.error statistic  p.value
+##   &lt;chr&gt;          &lt;dbl&gt;     &lt;dbl&gt;     &lt;dbl&gt;    &lt;dbl&gt;
+## 1 (Intercept)   -0.212    0.0464     -4.57 4.91e- 6
+## 2 A_c            0.501    0.0929      5.39 7.05e- 8
+## 3 B_c            0.802    0.0929      8.63 6.07e-18
+## 4 A_c:B_c       -0.670    0.186      -3.61 3.11e- 4</code></pre>
+<p>From the 0/1-coded model, <span class="math inline">\(\text{lOR}_a = 0.835\)</span>, <span class="math inline">\(\text{lOR}_b = 1.14\)</span>, and <span class="math inline">\(\text{lOR}_{ab} = 0.835 + 1.14 - 0.67 = 1.305.\)</span></p>
+<p>From the centered model,
+<span class="math display">\[
+\text{lOR}_a = 0.501 + 0.5*0.670 = 0.836
+\]</span>
+<span class="math display">\[
+\text{lOR}_b = 0.802 + 0.5*0.670 = 1.137
+\]</span>
+<span class="math display">\[
+\text{lOR}_{ab} = 0.501 + 0.802 = 1.303
+\]</span>
+So the coefficients themselves change under centering, but the underlying treatment contrasts do not.</p>
+</div>
+<div id="specifying-the-bayesian-models-in-jags" class="section level4">
+<h4>Specifying the Bayesian models in JAGS</h4>
+<p>Now we see that we can recover the same treatment contrasts using two different Bayesian models, though computational performance will be improved with centering.</p>
+<p>Here is the JAGS code for each model:</p>
 <pre class="r"><code>model_01 &lt;- &quot;
 model {
   for (i in 1:N) {
@@ -208,8 +218,8 @@ model {
 }
 &quot;</code></pre>
 </div>
-<div id="fit-both-models-to-one-dataset" class="section level3">
-<h3>Fit both models to one dataset</h3>
+<div id="fitting-the-models" class="section level4">
+<h4>Fitting the models</h4>
 <p>The function <code>fit_jags</code> fits one of the two models just described:</p>
 <pre class="r"><code>fit_jags &lt;- function(dat, model_string, centered = FALSE,
                      n_chains = 3, burn = 2000, n_iter = 5000) {
@@ -256,6 +266,7 @@ diag_tbl &lt;- function(samp, model_name) {
 
 diag_01 &lt;- diag_tbl(samp_01, &quot;0/1-coded&quot;)
 diag_c  &lt;- diag_tbl(samp_c, &quot;centered&quot;)</code></pre>
+<p>Here are the summary statistics of the posterior distribution as well as the computational diagnostics:</p>
 <div id="bxfxwqtyqe" style="padding-left:0px;padding-right:0px;padding-top:10px;padding-bottom:10px;overflow-x:auto;overflow-y:auto;width:auto;height:auto;">
 <style>#bxfxwqtyqe table {
   font-family: system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji';
@@ -811,11 +822,12 @@ diag_c  &lt;- diag_tbl(samp_c, &quot;centered&quot;)</code></pre>
   
 </table>
 </div>
-<p>There are a few things to notice here. First, the Bayesian estimates for both the 0/1-coded and centered data are closer to zero than the GLM estimates above. The shrinkage is particularly large for the interaction term, because we placed much more restrictive priors on <span class="math inline">\(\beta_{ab}\)</span> and <span class="math inline">\(\gamma_{ab}\)</span>. This is exactly what we would expect: the prior is pulling the interaction toward zero, and that influence shows up clearly in the posterior summaries.</p>
-<p>Second, if we compare the two parameterizations, we see that the R-hat—essentially a measure of whether the chains have converged to the same distribution—is slightly lower for the centered data. There isn’t much to make of the difference here (both are very close to 1), but it does suggest slightly more stable behavior.</p>
-<p>The biggest impact is on the bulk effective sample size (ESS), which reflects how much independent information the chains contain after accounting for autocorrelation. Even though we ran the same number of iterations, the centered model yields far larger ESS values, indicating much better mixing. In other words, the sampler is exploring the posterior much more efficiently under the centered parameterization, and in this case the improvement is quite dramatic. Importantly, these differences have nothing to do with the models themselves since the likelihood is unchanged. Rather, it reflects how easy it is for the sampler to navigate the posterior surface when the data are centered.</p>
-<p>A comparison of the trace plots reinforces the stability that centering the data provides. The traces for the 0/1-coded data are a bit more irregular, suggesting less efficient exploration of the posterior. In contrast, the centered parameterization produces tighter, more stable traces with less autocorrelation, indicating that the chains are mixing more effectively. This aligns with the much larger effective sample sizes observed for the centered model.</p>
-<p><img src="code_and_data/trace_plot.png" /></p>
+<p>There are a few things to notice here. First, the Bayesian estimates for both the 0/1-coded and centered data are closer to zero than the GLM estimates above. The shrinkage is particularly large for the interaction term, because we placed much more restrictive priors on <span class="math inline">\(\beta_{ab}\)</span> and <span class="math inline">\(\gamma_{ab}\)</span>. This is what we would expect as the prior is pulling the interaction toward zero.</p>
+<p>Second, if we compare the two parameterizations, we see that the R-hat—essentially a measure of whether the chains have converged to the same distribution—is slightly lower for the centered data. There isn’t much to make of the difference here (both are very close to 1), but it does suggest slightly more stable behavior for the centered parameterization.</p>
+<p>The biggest impact is on the bulk effective sample size (ESS), which reflects how much independent information the chains contain after accounting for autocorrelation. Even though we ran the same number of iterations, the centered model yields far larger ESS values, indicating much better mixing. The sampler is exploring the posterior much more efficiently under the centered parameterization, and in this case the improvement is quite dramatic. Importantly, these differences have nothing to do with the models themselves since the likelihood is unchanged. Rather, it reflects how easy it is for the sampler to navigate the posterior surface when the data are centered.</p>
+<p>A comparison of the trace plots reinforces the stability that centering the data provides. The traces. for the 0/1-coded data (on the left) are a bit more irregular, suggesting less efficient exploration of the posterior. In contrast, the centered parameterization produces tighter, more stable traces with less autocorrelation (on the right), indicating that the chains are mixing more effectively. This aligns with the much larger effective sample sizes observed for the centered model.</p>
+<p><img src="code_and_data/trace_plot.png" />
+Finally, we compare the estimation of the log-odds ratios for the two models, just as we did before with the GLM models, and it is clear that the two Bayesian models also provide the same estimates of the contratsts:</p>
 <pre class="r"><code>get_lor_summary &lt;- function(samp, model_name) {
   dt &lt;- as.data.table(as_draws_df(samp))
   
@@ -1313,9 +1325,10 @@ lor_c  &lt;- get_lor_summary(samp_c,  &quot;centered&quot;)</code></pre>
 </table>
 </div>
 </div>
+</div>
 <div id="a-larger-simulation-experiment" class="section level3">
 <h3>A larger simulation experiment</h3>
-<p>A single data set can be misleading. So next I’ll repeat this 500 times and compare the two parameterizations across simulations. Each iteration, I generate a data set with 2000 observations, I fit each model—the one with 0/1-coding and the other with centered coding—using <code>JAGS</code>, and collecting summary data of the posteriors from each model <code>JAGS</code>: mean, median, standard deviation, median absolute deviation, 5th percentile, 95th percentile, R-hat, bulk ESS, and tail ESS.</p>
+<p>A single data set can be misleading. So next I’ll repeat this 500 times and compare the two parameterizations across simulations. Each iteration, I generate a data set with 2000 observations, I fit each model—the one with 0/1-coding and the other with centered coding—using <code>JAGS</code>, and collect summary data of the posteriors from each model <code>JAGS</code>: mean, median, standard deviation, median absolute deviation, 5th percentile, 95th percentile, R-hat, bulk ESS, and tail ESS.</p>
 <pre class="r"><code>one_run &lt;- function(
   n = 2000,
   truth = c(alpha = -0.8, beta_a = 0.5, beta_b = 0.9, beta_ab = -0.3),
@@ -1363,21 +1376,21 @@ sim_res &lt;- rbindlist(mclapply(seq_len(nsim), function(i) {
   out[, sim := i]
   out[]
 }, mc.cores = 5))</code></pre>
-<p>Earlier we saw for a single data set, there was not much difference in R-hat (essentially a measure of whether the chains have converged to the same distribution) between the two models. However, over repeated data sets, a more interesting picture emerges. The figure below shows that while R-hat for the 0/1-coding model is quite low, R-hat for the centered-coding is lower still, and much more consistent, suggesting that mixing is stronger in the centered model.</p>
+<p>Earlier we saw for a single data set, there was not much difference in R-hat (essentially a measure of whether the chains have converged to the same distribution) between the two models. However, over repeated data sets, a more interesting picture emerges. The figure below shows that while <em>R-hat</em> for the 0/1-coding model is quite low, <em>R-hat</em> for the centered-coding is lower still, and much more consistent, suggesting that mixing is stronger in the centered model.</p>
 <p><img src="code_and_data/plot_rhat_V1.png" alt="" width="75%" /></p>
-<p>The next figure confirms what we saw earlier. This shows the distribution of ratios of bulk ESS in the centered model compared to the 0/1-coding model. If the two models had the same effective sample size, we would expect those ratios to cluster near one. However, they are all mostly greater than five, confirming what we saw for the individual data set.</p>
+<p>The next figure also confirms what we saw earlier. This shows the distribution of ratios of <em>bulk ESS</em> in the centered model compared to the 0/1-coding model. If the two models had the same effective sample size, we would expect those ratios to cluster near one. However, they are all mostly greater than five, confirming what we saw for the individual data set.</p>
 <p><img src="code_and_data/plot_ess_V1.png" alt="" width="75%" /></p>
-<p>The key issue is posterior dependence among parameters: when parameters are highly correlated, the sampler must explore long, narrow regions in the posterior, which slows mixing.</p>
+<p>The key issue is posterior dependence among parameters: when parameters are highly correlated, the sampler will explore narrower regions in the posterior, which slows mixing.</p>
 </div>
 <div id="understanding-what-is-driving-the-performance" class="section level3">
 <h3>Understanding what is driving the performance</h3>
-<p>To better understand this, we can look directly at the dependence structure of the posterior draws. Correlation plots help explain what is driving these differences in performance. Under the 0/1-coded parameterization, the posterior exhibits strong dependence among parameters. Several pairs of coefficients show substantial correlations, reflecting the fact that different combinations of parameters can produce similar fitted values. In geometric terms, the joint posterior has an elongated, highly correlated structure. This is evident in the pairwise scatter plots, where draws fall along narrow, tilted bands rather than forming roughly circular clouds.</p>
-<p><img src="code_and_data/plot_cor_01_V1.png" alt="" width="75%" /></p>
-<p>This geometry makes life difficult for the sampler. Exploring such a narrow region requires many small, correlated steps, which leads to high autocorrelation and, ultimately, low effective sample sizes.</p>
+<p>To better understand this, we can look directly at the dependence structure of the posterior draws. Correlation plots (where each point is a draw from the posterior) help explain what is driving these differences in performance. Under the 0/1-coded parameterization, the posterior exhibits strong dependence among parameters. Several pairs of coefficients show substantial correlations, reflecting the fact that different combinations of parameters can produce similar fitted values. In geometric terms, the joint posterior has an elongated, highly correlated structure. This is evident in the pairwise scatter plots, where draws fall along narrow, tilted bands rather than forming roughly circular clouds.</p>
+<p><img src="code_and_data/plot_cor_01_V2.png" alt="" width="75%" /></p>
+<p>This geometry makes life difficult for the sampler. Exploring a narrower region requires smaller, correlated steps, which leads to high autocorrelation and, ultimately, low effective sample sizes.</p>
 <p>In contrast, the centered parameterization produces a posterior that is nearly uncorrelated. The coefficients capture more distinct aspects of the model, and the resulting posterior is much more spherical. This greatly simplifies the exploration of the parameter space, allowing the sampler to move more freely.</p>
-<p><img src="code_and_data/plot_cor_c_V1.png" alt="" width="75%" /></p>
+<p><img src="code_and_data/plot_cor_c_V3.png" alt="" width="75%" /></p>
 <p>The key point is that centering does not change the model or the scientific conclusions. It changes the geometry of the posterior distribution, and that change can have a dramatic impact on computational performance. In effect, centering makes the parameters closer to orthogonal in the posterior, reducing interference among them and improving both statistical and computational behavior.</p>
-<p>In the ED-LEAD study, where we are fitting hierarchical factorial models with multiple intervention components, this shift in parameterization is critical. Centering the treatment indicators leads to more stable estimation and far more efficient sampling, which is particularly important given our reliance on <code>JAGS</code>. Unlike Hamiltonian Monte Carlo (as implemented in <code>Stan</code>), which can handle correlated posteriors more effectively, the Gibbs and Metropolis-based updates used by <code>JAGS</code> are much more sensitive to posterior dependence. Improving the geometry of the posterior is therefore essential for good performance in this setting.</p>
+<p>In the ED-LEAD study, where we are fitting hierarchical factorial models with multiple intervention components, this shift in parameterization is critical. Centering the treatment indicators leads to more stable estimation and far more efficient sampling, which is particularly important given our reliance on <code>JAGS</code>. Unlike Hamiltonian Monte Carlo (as implemented in <code>Stan</code>), which can handle correlated posteriors more effectively, the Gibbs and Metropolis-based updates used by <code>JAGS</code> are much more sensitive to posterior dependence. Improving the geometry of the posterior seems to be critical for good performance in this setting.</p>
 <p>
 <p><small><font color="darkkhaki">
 Support:</p>

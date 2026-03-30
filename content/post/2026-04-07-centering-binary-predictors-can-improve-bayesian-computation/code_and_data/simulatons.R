@@ -6,6 +6,7 @@ library(coda)
 library(posterior)
 library(parallel)
 library(broom)
+library(ksgMisc)
 
 setwd("~/git R projects/rdatagen/content/post/2026-04-07-centering-binary-predictors-can-improve-bayesian-computation/code_and_data")
 
@@ -347,8 +348,8 @@ p_ess <- ggplot(ratio_dt, aes(x = role, y = ratio)) +
   theme(axis.text.y = element_text(size = 12),
         panel.grid = element_blank())
 
-ggsave(get_versioned_filename(("plot_rhat")), plot = p_rhat, width = 4, height = 3, scale = 1.2)
-ggsave(get_versioned_filename(("plot_ess")), plot = p_ess, width = 5, height = 3, scale = 1.2)
+ggsave(version_fn(("plot_rhat")), plot = p_rhat, width = 4, height = 3, scale = 1.2)
+ggsave(version_fn(("plot_ess")), plot = p_ess, width = 5, height = 3, scale = 1.2)
 
 # save(fit_01, fit_c, post_01, post_c, tr_01, tr_c, tr_dt, file = "models.Rdata")
 
@@ -385,7 +386,7 @@ p_cor_01 <- GGally::ggpairs(
 post <- as_draws_df(samp_c)   # samp = your mcmc.list
 
 labs_gamma <- c(
-  alpha    = "alpha",
+  alpha    = "alpha*\"*\"",
   gamma_a  = "gamma[a]",
   gamma_b  = "gamma[b]",
   gamma_ab = "gamma[ab]"
@@ -406,8 +407,8 @@ p_cor_c <- GGally::ggpairs(
     strip.text = element_text(size = 14, face = "bold")
   )
 
-ggsave(get_versioned_filename(("plot_cor_01")), plot = p_cor_01, width = 6, height = 4, scale = 1.2)
-ggsave(get_versioned_filename(("plot_cor_c")), plot = p_cor_c, width = 6, height = 4, scale = 1.2)
+ggsave(version_fn("plot_cor_01"), plot = p_cor_01, width = 6, height = 4, scale = 1.2)
+ggsave(version_fn("plot_cor_c"), plot = p_cor_c, width = 6, height = 4, scale = 1.2)
 
 
 
